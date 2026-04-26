@@ -5,3 +5,22 @@ __pycache__
 .idea
 .jobs
 .vscode
+faceswap studio/data/**
+!faceswap studio/data/
+!faceswap studio/data/app_state/
+!faceswap studio/data/cache/
+!faceswap studio/data/cache/temp/
+!faceswap studio/data/favorites/
+!faceswap studio/data/input/
+!faceswap studio/data/jobs/
+!faceswap studio/data/jobs/completed/
+!faceswap studio/data/jobs/drafted/
+!faceswap studio/data/jobs/failed/
+!faceswap studio/data/jobs/queued/
+!faceswap studio/data/output/
+!faceswap studio/data/output/img/
+!faceswap studio/data/output/video/
+!faceswap studio/data/**/.gitkeep
+faceswap studio/runtime/**
+!faceswap studio/runtime/
+!faceswap studio/runtime/.gitkeep
