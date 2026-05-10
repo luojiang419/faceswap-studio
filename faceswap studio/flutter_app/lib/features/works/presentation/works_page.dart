@@ -2,12 +2,11 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:faceswap_studio/shared/services/bridge_client.dart';
+import 'package:faceswap_studio/shared/widgets/studio_media_viewer.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
 import 'package:super_clipboard/super_clipboard.dart';
 
 class WorksPage extends StatefulWidget {
@@ -48,16 +47,14 @@ class _WorksPageState extends State<WorksPage> {
       }
       setState(() {
         _outputRoot = '${works['output_root'] ?? ''}';
-        _works =
-            (works['items'] as List<dynamic>? ?? const <dynamic>[])
-                .cast<Map<String, dynamic>>()
-                .map(_WorkItem.fromJson)
-                .toList();
-        _favorites =
-            (favorites['items'] as List<dynamic>? ?? const <dynamic>[])
-                .cast<Map<String, dynamic>>()
-                .map(_WorkItem.fromJson)
-                .toList();
+        _works = (works['items'] as List<dynamic>? ?? const <dynamic>[])
+            .cast<Map<String, dynamic>>()
+            .map(_WorkItem.fromJson)
+            .toList();
+        _favorites = (favorites['items'] as List<dynamic>? ?? const <dynamic>[])
+            .cast<Map<String, dynamic>>()
+            .map(_WorkItem.fromJson)
+            .toList();
         _loading = false;
       });
     } catch (_) {
@@ -135,10 +132,19 @@ class _WorksPageState extends State<WorksPage> {
     await clipboard.write([writer]);
   }
 
-  Future<void> _showContextMenu(BuildContext context, Offset position, _WorkItem item) async {
+  Future<void> _showContextMenu(
+    BuildContext context,
+    Offset position,
+    _WorkItem item,
+  ) async {
     final action = await showMenu<String>(
       context: context,
-      position: RelativeRect.fromLTRB(position.dx, position.dy, position.dx, position.dy),
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        position.dx,
+        position.dy,
+      ),
       items: [
         const PopupMenuItem<String>(value: 'download', child: Text('下载')),
         if (item.mediaType == 'image')
@@ -166,17 +172,17 @@ class _WorksPageState extends State<WorksPage> {
 
   Future<void> _openViewer(_WorkItem item) async {
     if (item.mediaType == 'image') {
-      await showDialog<void>(
-        context: context,
-        barrierColor: Colors.black87,
-        builder: (context) => _ImageViewerDialog(item: item),
+      await showStudioImageViewer(
+        context,
+        filePath: item.path,
+        title: item.fileName,
       );
       return;
     }
-    await showDialog<void>(
-      context: context,
-      barrierColor: Colors.black87,
-      builder: (context) => _VideoViewerDialog(item: item),
+    await showStudioVideoViewer(
+      context,
+      filePath: item.path,
+      title: item.fileName,
     );
   }
 
@@ -189,7 +195,9 @@ class _WorksPageState extends State<WorksPage> {
       children: [
         Row(
           children: [
-            Expanded(child: Text('作品管理', style: theme.textTheme.headlineMedium)),
+            Expanded(
+              child: Text('作品管理', style: theme.textTheme.headlineMedium),
+            ),
             IconButton(
               onPressed: _refresh,
               icon: const Icon(Icons.refresh_rounded),
@@ -240,10 +248,7 @@ class _WorksPageState extends State<WorksPage> {
     if (items.isEmpty) {
       return Card(
         child: Center(
-          child: Text(
-            '当前没有可显示的作品。',
-            style: theme.textTheme.titleMedium,
-          ),
+          child: Text('当前没有可显示的作品。', style: theme.textTheme.titleMedium),
         ),
       );
     }
@@ -259,7 +264,8 @@ class _WorksPageState extends State<WorksPage> {
         final item = items[index];
         return GestureDetector(
           onTap: () => _openViewer(item),
-          onSecondaryTapDown: (details) => _showContextMenu(context, details.globalPosition, item),
+          onSecondaryTapDown: (details) =>
+              _showContextMenu(context, details.globalPosition, item),
           child: Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -275,10 +281,14 @@ class _WorksPageState extends State<WorksPage> {
                             ? const Color(0xFF0A1420)
                             : const Color(0xFFEAF2F8),
                         child: item.mediaType == 'image'
-                            ? Image.file(
-                                File(item.path),
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, _, _) => const Icon(Icons.broken_image_outlined),
+                            ? Padding(
+                                padding: const EdgeInsets.all(10),
+                                child: Image.file(
+                                  File(item.path),
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (_, _, _) =>
+                                      const Icon(Icons.broken_image_outlined),
+                                ),
                               )
                             : Stack(
                                 fit: StackFit.expand,
@@ -286,14 +296,24 @@ class _WorksPageState extends State<WorksPage> {
                                   Container(
                                     decoration: BoxDecoration(
                                       gradient: LinearGradient(
-                                        colors: theme.brightness == Brightness.dark
-                                            ? const [Color(0xFF12263A), Color(0xFF0A1522)]
-                                            : const [Color(0xFFD6EEF6), Color(0xFFF6FBFD)],
+                                        colors:
+                                            theme.brightness == Brightness.dark
+                                            ? const [
+                                                Color(0xFF12263A),
+                                                Color(0xFF0A1522),
+                                              ]
+                                            : const [
+                                                Color(0xFFD6EEF6),
+                                                Color(0xFFF6FBFD),
+                                              ],
                                       ),
                                     ),
                                   ),
                                   const Center(
-                                    child: Icon(Icons.play_circle_fill_rounded, size: 56),
+                                    child: Icon(
+                                      Icons.play_circle_fill_rounded,
+                                      size: 56,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -312,7 +332,10 @@ class _WorksPageState extends State<WorksPage> {
                         ),
                       ),
                       if (item.isFavorite)
-                        const Icon(Icons.favorite_rounded, color: Color(0xFFE11D48)),
+                        const Icon(
+                          Icons.favorite_rounded,
+                          color: Color(0xFFE11D48),
+                        ),
                     ],
                   ),
                   const SizedBox(height: 6),
@@ -328,113 +351,6 @@ class _WorksPageState extends State<WorksPage> {
           ),
         );
       },
-    );
-  }
-}
-
-class _ImageViewerDialog extends StatelessWidget {
-  const _ImageViewerDialog({required this.item});
-
-  final _WorkItem item;
-
-  @override
-  Widget build(BuildContext context) {
-    return Dialog.fullscreen(
-      backgroundColor: Colors.black,
-      child: Stack(
-        children: [
-          Center(
-            child: InteractiveViewer(
-              minScale: 0.25,
-              maxScale: 8.0,
-              child: Image.file(
-                File(item.path),
-                fit: BoxFit.contain,
-              ),
-            ),
-          ),
-          Positioned(
-            top: 24,
-            right: 24,
-            child: IconButton.filledTonal(
-              onPressed: () => Navigator.of(context).pop(),
-              icon: const Icon(Icons.close_rounded),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _VideoViewerDialog extends StatefulWidget {
-  const _VideoViewerDialog({required this.item});
-
-  final _WorkItem item;
-
-  @override
-  State<_VideoViewerDialog> createState() => _VideoViewerDialogState();
-}
-
-class _VideoViewerDialogState extends State<_VideoViewerDialog> {
-  late final Player _player;
-  late final VideoController _controller;
-  final FocusNode _focusNode = FocusNode();
-
-  @override
-  void initState() {
-    super.initState();
-    _player = Player();
-    _controller = VideoController(_player);
-    _player.open(Media(widget.item.path));
-  }
-
-  @override
-  void dispose() {
-    _focusNode.dispose();
-    _player.dispose();
-    super.dispose();
-  }
-
-  Future<void> _togglePlayback() async {
-    if (_player.state.playing) {
-      await _player.pause();
-    } else {
-      await _player.play();
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Dialog.fullscreen(
-      backgroundColor: Colors.black,
-      child: KeyboardListener(
-        autofocus: true,
-        focusNode: _focusNode,
-        onKeyEvent: (event) {
-          if (event.logicalKey == LogicalKeyboardKey.space && event is KeyDownEvent) {
-            _togglePlayback();
-          }
-        },
-        child: Stack(
-          children: [
-            Center(
-              child: AspectRatio(
-                aspectRatio: 16 / 9,
-                child: Video(controller: _controller),
-              ),
-            ),
-            Positioned(
-              top: 24,
-              right: 24,
-              child: IconButton.filledTonal(
-                onPressed: () => Navigator.of(context).pop(),
-                icon: const Icon(Icons.close_rounded),
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

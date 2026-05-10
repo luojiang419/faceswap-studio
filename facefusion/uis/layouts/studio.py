@@ -45,14 +45,14 @@ def render() -> gradio.Blocks:
 	with gradio.Blocks() as layout:
 		gradio.HTML(
 			'''
-			<div id="studio-action-strip">
-				<button class="studio-inline-button" onclick="document.getElementById('studio-top-region')?.classList.toggle('studio-top-region-unpinned')">
-					📌 切换顶部固定
-				</button>
-				<button class="studio-inline-button" onclick="alert('联系作者\\nQQ: 419773176\\n微信: 15085152352')">
-					联系作者
-				</button>
-			</div>
+			<script>
+				window.toggleStudioPinned = function() {
+					const region = document.getElementById('studio-top-region');
+					if (region) {
+						region.classList.toggle('studio-top-region-unpinned');
+					}
+				};
+			</script>
 			'''
 		)
 		with gradio.Column(elem_id = 'studio-shell'):

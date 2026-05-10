@@ -5,6 +5,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 // A class abstraction for a high DPI-aware Win32 Window. Intended to be
@@ -38,6 +39,9 @@ class Win32Window {
 
   // Show the current window. Returns true if the window was successfully shown.
   bool Show();
+
+  // Sets the logical minimum tracking size for the window.
+  void SetMinSize(const Size& size);
 
   // Release OS resources associated with window.
   void Destroy();
@@ -97,6 +101,9 @@ class Win32Window {
 
   // window handle for hosted content.
   HWND child_content_ = nullptr;
+
+  // optional logical minimum tracking size.
+  std::optional<Size> minimum_size_;
 };
 
 #endif  // RUNNER_WIN32_WINDOW_H_

@@ -1,4 +1,6 @@
 import itertools
+import os
+from pathlib import Path
 import shutil
 from typing import List, Optional
 
@@ -8,8 +10,28 @@ from facefusion.filesystem import get_file_format
 from facefusion.types import AudioEncoder, Command, CommandSet, Duration, Fps, StreamMode, VideoEncoder, VideoPreset
 
 
+def resolve_ffmpeg_executable() -> str:
+	env_path = os.environ.get('FACEFUSION_FFMPEG_PATH')
+	if env_path:
+		return env_path
+
+	path_resolved = shutil.which('ffmpeg')
+	if path_resolved:
+		return path_resolved
+
+	project_root = Path(__file__).resolve().parents[2]
+	bundled_candidates = [
+		project_root / '.runtime' / 'ffmpeg' / 'ffmpeg.exe',
+		project_root / '.runtime' / 'ffmpeg' / 'ffmpeg'
+	]
+	for candidate in bundled_candidates:
+		if candidate.exists():
+			return str(candidate)
+	return 'ffmpeg'
+
+
 def run(commands : List[Command]) -> List[Command]:
-	return [ shutil.which('ffmpeg'), '-loglevel', 'error' ] + commands
+	return [ resolve_ffmpeg_executable(), '-loglevel', 'error' ] + commands
 
 
 def chain(*commands : List[Command]) -> List[Command]:

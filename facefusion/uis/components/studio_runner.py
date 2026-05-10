@@ -28,22 +28,23 @@ def render() -> None:
 	global STUDIO_RUNNER_QUEUE_BUTTON
 
 	if job_manager.init_jobs(state_manager.get_item('jobs_path')):
-		with gradio.Row():
-			STUDIO_RUNNER_START_BUTTON = gradio.Button(
-				value = 'START',
-				variant = 'primary',
-				size = 'sm'
-			)
-			STUDIO_RUNNER_STOP_BUTTON = gradio.Button(
-				value = 'STOP',
-				variant = 'primary',
-				size = 'sm',
-				visible = False
-			)
-			STUDIO_RUNNER_CLEAR_BUTTON = gradio.Button(
-				value = 'CLEAR',
-				size = 'sm'
-			)
+		with gradio.Column():
+			with gradio.Row():
+				STUDIO_RUNNER_START_BUTTON = gradio.Button(
+					value = 'START',
+					variant = 'primary',
+					size = 'sm'
+				)
+				STUDIO_RUNNER_STOP_BUTTON = gradio.Button(
+					value = 'STOP',
+					variant = 'primary',
+					size = 'sm',
+					visible = False
+				)
+				STUDIO_RUNNER_CLEAR_BUTTON = gradio.Button(
+					value = 'CLEAR',
+					size = 'sm'
+				)
 			STUDIO_RUNNER_QUEUE_BUTTON = gradio.Button(
 				value = '添加到队列',
 				size = 'sm'

@@ -153,6 +153,10 @@ bool Win32Window::Show() {
   return ShowWindow(window_handle_, SW_SHOWNORMAL);
 }
 
+void Win32Window::SetMinSize(const Size& size) {
+  minimum_size_ = size;
+}
+
 // static
 LRESULT CALLBACK Win32Window::WndProc(HWND const window,
                                       UINT const message,
@@ -179,6 +183,20 @@ Win32Window::MessageHandler(HWND hwnd,
                             WPARAM const wparam,
                             LPARAM const lparam) noexcept {
   switch (message) {
+    case WM_GETMINMAXINFO: {
+      if (minimum_size_) {
+        auto minmax_info = reinterpret_cast<MINMAXINFO*>(lparam);
+        HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
+        double scale_factor = dpi / 96.0;
+        minmax_info->ptMinTrackSize.x =
+            Scale(minimum_size_->width, scale_factor);
+        minmax_info->ptMinTrackSize.y =
+            Scale(minimum_size_->height, scale_factor);
+        return 0;
+      }
+      break;
+    }
     case WM_DESTROY:
       window_handle_ = nullptr;
       Destroy();

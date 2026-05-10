@@ -1,6 +1,7 @@
 import inspect
 import itertools
 import os
+from pathlib import Path
 import shutil
 import signal
 import sys
@@ -8,8 +9,10 @@ from time import time
 
 from facefusion import benchmarker, cli_helper, content_analyser, face_classifier, face_detector, face_landmarker, face_masker, face_recognizer, hash_helper, logger, state_manager, translator, voice_extractor
 from facefusion.args import apply_args, collect_job_args, reduce_job_args, reduce_step_args
+from facefusion.curl_builder import resolve_curl_executable
 from facefusion.download import conditional_download_hashes, conditional_download_sources
 from facefusion.exit_helper import hard_exit, signal_exit
+from facefusion.ffmpeg_builder import resolve_ffmpeg_executable
 from facefusion.filesystem import create_directory, get_file_extension, get_file_name, is_file, is_image, is_video, resolve_file_paths, resolve_file_pattern, resolve_relative_path
 from facefusion.jobs import job_helper, job_manager, job_runner
 from facefusion.jobs.job_list import compose_job_list
@@ -145,15 +148,22 @@ def route(args : Args) -> None:
 
 
 def pre_check() -> bool:
+	def has_executable(path_or_name : str) -> bool:
+		if not path_or_name:
+			return False
+		if Path(path_or_name).exists():
+			return True
+		return bool(shutil.which(path_or_name))
+
 	if sys.version_info < (3, 10):
 		logger.error(translator.get('python_not_supported').format(version = '3.10'), __name__)
 		return False
 
-	if not shutil.which('curl'):
+	if not has_executable(resolve_curl_executable()):
 		logger.error(translator.get('curl_not_installed'), __name__)
 		return False
 
-	if not shutil.which('ffmpeg'):
+	if not has_executable(resolve_ffmpeg_executable()):
 		logger.error(translator.get('ffmpeg_not_installed'), __name__)
 		return False
 	return True

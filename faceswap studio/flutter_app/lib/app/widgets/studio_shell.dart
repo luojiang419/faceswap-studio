@@ -27,7 +27,6 @@ class _StudioShellState extends State<StudioShell> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
       body: SafeArea(
@@ -36,7 +35,7 @@ class _StudioShellState extends State<StudioShell> {
           child: Row(
             children: [
               ConstrainedBox(
-                constraints: const BoxConstraints.tightFor(width: 290),
+                constraints: const BoxConstraints.tightFor(width: 300),
                 child: Card(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(18, 22, 18, 18),
@@ -49,12 +48,12 @@ class _StudioShellState extends State<StudioShell> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Flutter 桌面壳层已初始化，后续从这里接入 FaceFusion Bridge。',
+                          '统一控制 FaceFusion、队列、作品与设置的桌面工作台。',
                           style: theme.textTheme.bodyMedium?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant,
                           ),
                         ),
-                        const SizedBox(height: 24),
+                        const SizedBox(height: 28),
                         Expanded(
                           child: NavigationRail(
                             extended: true,
@@ -105,19 +104,6 @@ class _StudioShellState extends State<StudioShell> {
                             widget.themeMode == ThemeMode.dark ? '切换浅色主题' : '切换暗色主题',
                           ),
                         ),
-                        const SizedBox(height: 12),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: isDark ? const Color(0x221AC6E4) : const Color(0x140F9FB8),
-                            borderRadius: BorderRadius.circular(18),
-                          ),
-                          child: Text(
-                            '当前阶段：Flutter 壳层骨架\n下阶段：Bridge + 首页运行控制',
-                            style: theme.textTheme.bodySmall,
-                          ),
-                        ),
                       ],
                     ),
                   ),
@@ -125,19 +111,22 @@ class _StudioShellState extends State<StudioShell> {
               ),
               const SizedBox(width: 18),
               Expanded(
-                child: IndexedStack(
-                  index: StudioSection.values.indexOf(_section),
-                  children: [
-                    const HomePage(key: ValueKey('home')),
-                    const WorkspacePage(key: ValueKey('workspace')),
-                    const WorksPage(key: ValueKey('works')),
-                    SettingsPage(
-                      key: const ValueKey('settings'),
-                      themeMode: widget.themeMode,
-                      onToggleTheme: widget.onToggleTheme,
-                    ),
-                    const AboutPage(key: ValueKey('about')),
-                  ],
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: IndexedStack(
+                    index: StudioSection.values.indexOf(_section),
+                    children: [
+                      const HomePage(key: ValueKey('home')),
+                      const WorkspacePage(key: ValueKey('workspace')),
+                      const WorksPage(key: ValueKey('works')),
+                      SettingsPage(
+                        key: const ValueKey('settings'),
+                        themeMode: widget.themeMode,
+                        onToggleTheme: widget.onToggleTheme,
+                      ),
+                      const AboutPage(key: ValueKey('about')),
+                    ],
+                  ),
                 ),
               ),
             ],

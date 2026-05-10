@@ -1,4 +1,6 @@
 import itertools
+import os
+from pathlib import Path
 import subprocess
 import shutil
 from functools import lru_cache
@@ -9,10 +11,29 @@ from facefusion import metadata
 from facefusion.types import Command
 
 
+def resolve_curl_executable() -> str:
+	env_path = os.environ.get('FACEFUSION_CURL_PATH')
+	if env_path:
+		return env_path
+
+	path_resolved = shutil.which('curl.exe') or shutil.which('curl')
+	if path_resolved:
+		return path_resolved
+
+	system_candidates = [
+		Path(r'C:\Windows\System32\curl.exe'),
+		Path(r'C:\Windows\System32\curl.EXE')
+	]
+	for candidate in system_candidates:
+		if candidate.exists():
+			return str(candidate)
+	return 'curl'
+
+
 def run(commands : List[Command]) -> List[Command]:
 	user_agent = metadata.get('name') + '/' + metadata.get('version')
 
-	return [ shutil.which('curl'), '--user-agent', user_agent, '--location', '--silent', '--ssl-no-revoke' ] + commands
+	return [ resolve_curl_executable(), '--user-agent', user_agent, '--location', '--silent', '--ssl-no-revoke' ] + commands
 
 
 def chain(*commands : List[Command]) -> List[Command]:
