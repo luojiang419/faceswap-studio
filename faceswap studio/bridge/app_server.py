@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import threading
@@ -30,13 +31,17 @@ import psutil
 
 BRIDGE_HOST = "127.0.0.1"
 BRIDGE_PORT = 50741
-FACEFUSION_UI_HOST = "127.0.0.1"
+FACEFUSION_UI_HOST = "0.0.0.0"
 FACEFUSION_UI_PORT = 7860
+FACEFUSION_LOCAL_HOST = "127.0.0.1"
+FACEFUSION_WILDCARD_HOSTS = {"0.0.0.0", "::", "[::]"}
 LOG_LIMIT = 2000
 JOB_STATUSES = ["drafted", "queued", "completed", "failed"]
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".aac", ".flac", ".ogg", ".m4a", ".opus"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".wmv", ".mpeg", ".m4v"}
+LOCAL_FFMPEG_EXE = Path(r"G:\data\ffmpeg\bin\ffmpeg.exe")
+FFMPEG_VERSION_FILE = "ffmpeg-source.json"
 
 
 class FaceFusionRuntime:
@@ -66,8 +71,23 @@ class FaceFusionRuntime:
         self._append_log("[bridge] FaceSwap Studio Bridge initialized.")
 
     @property
+    def webui_bind_host(self) -> str:
+        host = str(self._settings.get("facefusion_host") or FACEFUSION_UI_HOST).strip()
+        return host or FACEFUSION_UI_HOST
+
+    @property
+    def webui_client_host(self) -> str:
+        if self.webui_bind_host.lower() in FACEFUSION_WILDCARD_HOSTS:
+            return FACEFUSION_LOCAL_HOST
+        return self.webui_bind_host
+
+    @property
     def webui_url(self) -> str:
-        return f"http://{self._settings['facefusion_host']}:{self._settings['facefusion_port']}"
+        return f"http://{self.webui_client_host}:{self._settings['facefusion_port']}"
+
+    @property
+    def webui_bind_url(self) -> str:
+        return f"http://{self.webui_bind_host}:{self._settings['facefusion_port']}"
 
     @property
     def repo_root(self) -> Path:
@@ -82,12 +102,14 @@ class FaceFusionRuntime:
         self._settings_path = studio_root / "config" / "settings.json"
         self._favorites_path = studio_root / "data" / "favorites" / "favorites.json"
         self._runtime_dir = studio_root / "runtime"
+        self._thumbnail_dir = studio_root / "data" / "cache" / "thumbnails"
         self._workspace_state_path = self._runtime_dir / "workspace_state.json"
         self._workspace_options_path = self._runtime_dir / "workspace_options.json"
 
         for directory in [
             self._jobs_dir,
             self._temp_dir,
+            self._thumbnail_dir,
             self._runtime_dir,
             self._settings_path.parent,
             self._favorites_path.parent,
@@ -98,9 +120,78 @@ class FaceFusionRuntime:
             self._favorites_path.write_text("[]", encoding="utf-8")
 
         self._settings = self._load_settings()
+        self._ensure_bundled_ffmpeg()
         self._apply_output_root(self._settings["default_output_dir"])
         self._workspace_state = self._load_workspace_state()
         self._workspace_options = self._load_workspace_options()
+
+    def _bundled_ffmpeg_root(self) -> Path:
+        return self.repo_root / ".runtime" / "ffmpeg"
+
+    def _bundled_ffmpeg_executable(self) -> Path:
+        return self._bundled_ffmpeg_root() / "ffmpeg.exe"
+
+    def _bundled_ffmpeg_marker(self) -> Path:
+        return self._bundled_ffmpeg_root() / FFMPEG_VERSION_FILE
+
+    def _ffmpeg_source_metadata(self, ffmpeg_path: Path) -> dict[str, Any]:
+        stat = ffmpeg_path.stat()
+        return {
+            "source_path": str(ffmpeg_path),
+            "size_bytes": stat.st_size,
+            "modified_at": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+        }
+
+    def _read_ffmpeg_marker(self) -> dict[str, Any]:
+        marker_path = self._bundled_ffmpeg_marker()
+        if not marker_path.exists():
+            return {}
+        try:
+            payload = json.loads(marker_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _ensure_bundled_ffmpeg(self) -> None:
+        target_path = self._bundled_ffmpeg_executable()
+        marker_path = self._bundled_ffmpeg_marker()
+        if not LOCAL_FFMPEG_EXE.exists():
+            self._append_log(f"[bridge] Local ffmpeg source not found: {LOCAL_FFMPEG_EXE}")
+            return
+
+        try:
+            source_metadata = self._ffmpeg_source_metadata(LOCAL_FFMPEG_EXE)
+        except OSError as error:
+            self._append_log(f"[bridge] Unable to inspect local ffmpeg source: {error}")
+            return
+
+        marker_payload = self._read_ffmpeg_marker()
+        marker_metadata = {
+            "source_path": marker_payload.get("source_path"),
+            "size_bytes": marker_payload.get("size_bytes"),
+            "modified_at": marker_payload.get("modified_at"),
+        }
+        should_copy = not target_path.exists() or not marker_path.exists() or marker_metadata != source_metadata
+        if not should_copy:
+            return
+
+        try:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(LOCAL_FFMPEG_EXE, target_path)
+            marker_path.write_text(
+                json.dumps(
+                    {
+                        **source_metadata,
+                        "copied_at": datetime.now().isoformat(timespec="seconds"),
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            self._append_log(f"[bridge] Copied ffmpeg to {target_path}")
+        except OSError as error:
+            self._append_log(f"[bridge] Failed to copy ffmpeg from {LOCAL_FFMPEG_EXE}: {error}")
 
     def _load_settings(self) -> dict[str, Any]:
         defaults = {
@@ -903,13 +994,18 @@ class FaceFusionRuntime:
 
     def _workspace_target_media_type(self) -> str | None:
         target_path = self._workspace_state.get("target_path")
-        if not target_path:
+        return self._media_type_for_path(target_path)
+
+    def _media_type_for_path(self, file_path: str | None) -> str | None:
+        if not file_path:
             return None
-        suffix = Path(target_path).suffix.lower()
+        suffix = Path(file_path).suffix.lower()
         if suffix in IMAGE_EXTENSIONS:
             return "image"
         if suffix in VIDEO_EXTENSIONS:
             return "video"
+        if suffix in AUDIO_EXTENSIONS:
+            return "audio"
         return None
 
     def _run_facefusion_cli(self, args: list[str]) -> bool:
@@ -920,7 +1016,7 @@ class FaceFusionRuntime:
             "-ExecutionPolicy",
             "Bypass",
             "-File",
-            str(self.repo_root.parent / "scripts" / "facefusion.ps1"),
+            str(self.repo_root / "scripts" / "facefusion.ps1"),
             *args,
         ]
         self._append_log(f"[bridge] Running FaceFusion CLI: {' '.join(command)}")
@@ -949,8 +1045,8 @@ class FaceFusionRuntime:
 
     def _resolve_facefusion_python_executable(self) -> str:
         candidates = [
-            self.repo_root.parent / ".venv-win" / "Scripts" / "python.exe",
-            self.repo_root.parent / ".bootstrap" / "nuget" / "python" / "tools" / "python.exe",
+            self.repo_root / ".venv-win" / "Scripts" / "python.exe",
+            self.repo_root / ".bootstrap" / "nuget" / "python" / "tools" / "python.exe",
             Path(sys.executable),
         ]
         for candidate in candidates:
@@ -1122,10 +1218,10 @@ class FaceFusionRuntime:
     def _build_runtime_path_entries(self) -> list[str]:
         entries = [
             r"C:\Windows\System32",
-            str(self.repo_root.parent / ".runtime" / "ffmpeg"),
+            str(self.repo_root / ".runtime" / "ffmpeg"),
             str(Path(sys.executable).resolve().parent),
         ]
-        nvidia_root = self.repo_root.parent / ".venv-win" / "Lib" / "site-packages" / "nvidia"
+        nvidia_root = self.repo_root / ".venv-win" / "Lib" / "site-packages" / "nvidia"
         if nvidia_root.exists():
             for path in sorted(nvidia_root.rglob("bin")):
                 entries.append(str(path))
@@ -1136,12 +1232,26 @@ class FaceFusionRuntime:
         current_path = env.get("PATH", "")
         path_entries = self._build_runtime_path_entries()
         env["PATH"] = os.pathsep.join(path_entries + [current_path])
-        env["FACEFUSION_FFMPEG_PATH"] = str(
-            self.repo_root.parent / ".runtime" / "ffmpeg" / "ffmpeg.exe",
-        )
+        ffmpeg_path = self.repo_root / ".runtime" / "ffmpeg" / "ffmpeg.exe"
+        if ffmpeg_path.exists():
+            env["FACEFUSION_FFMPEG_PATH"] = str(ffmpeg_path)
         env["FACEFUSION_CURL_PATH"] = r"C:\Windows\System32\curl.exe"
-        env["FACEFUSION_UI_HOST"] = str(self._settings["facefusion_host"])
+        env["FACEFUSION_UI_HOST"] = self.webui_bind_host
         env["FACEFUSION_UI_PORT"] = str(self._settings["facefusion_port"])
+        env["FACEFUSION_DISABLE_PROXY"] = "1"
+        env["NO_PROXY"] = "*"
+        env["no_proxy"] = "*"
+        for proxy_key in [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+        ]:
+            env.pop(proxy_key, None)
+        env.setdefault("FACEFUSION_HUGGINGFACE_MIRRORS", "https://hf-mirror.com")
+        env.setdefault("FACEFUSION_GITHUB_MIRRORS", "https://github.com")
         return env
 
     def _is_webui_ready(self) -> bool:
@@ -1157,6 +1267,27 @@ class FaceFusionRuntime:
             line = raw_line.rstrip()
             if line:
                 self._append_log(line)
+
+    def _find_webui_process_pid(self) -> int | None:
+        try:
+            connections = psutil.net_connections(kind="tcp")
+        except psutil.Error:
+            return None
+
+        target_port = int(self._settings["facefusion_port"])
+        target_host = self.webui_bind_host
+
+        for connection in connections:
+            if not connection.pid or not connection.laddr:
+                continue
+            if connection.status != psutil.CONN_LISTEN:
+                continue
+            if connection.laddr.port != target_port:
+                continue
+            if connection.laddr.ip not in {target_host, "0.0.0.0", "::", "::1"}:
+                continue
+            return connection.pid
+        return None
 
     def _watch_process(self, process: subprocess.Popen[str]) -> None:
         exit_code = process.wait()
@@ -1210,6 +1341,17 @@ class FaceFusionRuntime:
                 self._refresh_state_locked()
                 return self.status()
 
+            adopted_pid = self._find_webui_process_pid()
+            if adopted_pid and self._is_webui_ready():
+                self._state = "ready"
+                self._status_message = "FaceFusion WebUI is already running."
+                if not self._started_at:
+                    self._started_at = datetime.now().isoformat(timespec="seconds")
+                self._append_log(
+                    f"[bridge] Reusing existing FaceFusion WebUI process on port {self._settings['facefusion_port']} (pid {adopted_pid}).",
+                )
+                return self.status()
+
             command = self._build_command()
             self._append_log(f"[bridge] Starting FaceFusion with command: {' '.join(command)}")
             self._manual_stop_requested = False
@@ -1240,6 +1382,14 @@ class FaceFusionRuntime:
         with self._lock:
             process = self._process
             if not process or process.poll() is not None:
+                adopted_pid = self._find_webui_process_pid()
+                if adopted_pid:
+                    self._append_log(f"[bridge] Stop requested for adopted FaceFusion process {adopted_pid}.")
+                    self._terminate_process_tree(adopted_pid)
+                    self._process = None
+                    self._state = "stopped"
+                    self._status_message = "FaceFusion stopped."
+                    return self.status()
                 self._process = None
                 self._state = "stopped"
                 self._status_message = "FaceFusion is not running."
@@ -1257,9 +1407,16 @@ class FaceFusionRuntime:
         self._refresh_state()
         if self._is_webui_ready():
             webbrowser.open(self.webui_url)
-            self._append_log(f"[bridge] Opened browser at {self.webui_url}")
-            return {"ok": True, "url": self.webui_url}
-        return {"ok": False, "url": self.webui_url, "message": "FaceFusion WebUI is not ready."}
+            self._append_log(
+                f"[bridge] Opened browser at {self.webui_url} (bind: {self.webui_bind_url})",
+            )
+            return {"ok": True, "url": self.webui_url, "bind_url": self.webui_bind_url}
+        return {
+            "ok": False,
+            "url": self.webui_url,
+            "bind_url": self.webui_bind_url,
+            "message": "FaceFusion WebUI is not ready.",
+        }
 
     def _refresh_state_locked(self) -> None:
         if self._process and self._process.poll() is None:
@@ -1269,6 +1426,9 @@ class FaceFusionRuntime:
             elif self._state != "stopping":
                 self._state = "starting"
                 self._status_message = "FaceFusion is starting."
+        elif self._is_webui_ready():
+            self._state = "ready"
+            self._status_message = "FaceFusion WebUI is ready."
         elif self._state != "stopped":
             self._state = "stopped"
             self._status_message = "FaceFusion is not running."
@@ -1280,7 +1440,7 @@ class FaceFusionRuntime:
     def status(self) -> dict[str, Any]:
         with self._lock:
             self._refresh_state_locked()
-            pid = self._process.pid if self._process and self._process.poll() is None else None
+            pid = self._process.pid if self._process and self._process.poll() is None else self._find_webui_process_pid()
             return {
                 "state": self._state,
                 "is_running": self._state in {"starting", "ready", "stopping"},
@@ -1288,6 +1448,8 @@ class FaceFusionRuntime:
                 "status_message": self._status_message,
                 "pid": pid,
                 "webui_url": self.webui_url,
+                "webui_bind_host": self.webui_bind_host,
+                "webui_bind_url": self.webui_bind_url,
                 "started_at": self._started_at,
             }
 
@@ -1381,9 +1543,12 @@ class FaceFusionRuntime:
 
     def get_logs(self, after: int, limit: int) -> dict[str, Any]:
         with self._lock:
-            items = [item for item in self._logs if item["id"] > after]
-            if limit > 0:
-                items = items[:limit]
+            if after > 0:
+                items = [item for item in self._logs if item["id"] > after]
+            else:
+                items = list(self._logs)
+                if limit > 0:
+                    items = items[-limit:]
             latest_id = self._logs[-1]["id"] if self._logs else 0
         return {"entries": items, "latest_id": latest_id}
 
@@ -1418,8 +1583,10 @@ class FaceFusionRuntime:
                         "started_steps": started_steps,
                         "source_paths": source_paths,
                         "source_thumbnail": self._resolve_thumbnail(source_paths[0] if source_paths else None),
+                        "source_media_type": self._media_type_for_path(source_paths[0] if source_paths else None),
                         "target_path": target_path,
                         "target_thumbnail": self._resolve_thumbnail(target_path),
+                        "target_media_type": self._media_type_for_path(target_path),
                         "output_path": output_path,
                         "is_active": self._queue_current_job_id == job_path.stem,
                     }
@@ -1494,7 +1661,7 @@ class FaceFusionRuntime:
             "-ExecutionPolicy",
             "Bypass",
             "-File",
-            str(self.repo_root.parent / "scripts" / "facefusion.ps1"),
+            str(self.repo_root / "scripts" / "facefusion.ps1"),
             "job-run",
             job_id,
             "--jobs-path",
@@ -1521,12 +1688,95 @@ class FaceFusionRuntime:
                 self._append_log(line)
         return process.wait()
 
+    def _resolve_ffmpeg_for_thumbnail(self) -> str | None:
+        self._ensure_bundled_ffmpeg()
+        bundled_ffmpeg = self._bundled_ffmpeg_executable()
+        if bundled_ffmpeg.exists():
+            return str(bundled_ffmpeg)
+        system_ffmpeg = shutil.which("ffmpeg")
+        if system_ffmpeg:
+            return system_ffmpeg
+        return None
+
+    def _thumbnail_cache_path(self, file_path: Path) -> Path | None:
+        try:
+            stat = file_path.stat()
+            resolved_path = file_path.resolve()
+        except OSError:
+            return None
+        cache_key = hashlib.sha1(
+            f"{resolved_path}|{stat.st_mtime_ns}|{stat.st_size}".encode("utf-8"),
+        ).hexdigest()
+        return self._thumbnail_dir / f"{cache_key}.png"
+
+    def _generate_video_thumbnail(self, file_path: Path, thumbnail_path: Path) -> bool:
+        ffmpeg_path = self._resolve_ffmpeg_for_thumbnail()
+        if not ffmpeg_path:
+            self._append_log("[bridge] Unable to generate video thumbnail: ffmpeg was not found.")
+            return False
+
+        thumbnail_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = thumbnail_path.with_suffix(".tmp.png")
+        if temp_path.exists():
+            temp_path.unlink(missing_ok=True)
+
+        command = [
+            ffmpeg_path,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(file_path),
+            "-frames:v",
+            "1",
+            "-vf",
+            "scale=640:-2",
+            str(temp_path),
+        ]
+        result = subprocess.run(
+            command,
+            cwd=self.repo_root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            timeout=45,
+        )
+        if result.returncode == 0 and temp_path.exists() and temp_path.stat().st_size > 0:
+            temp_path.replace(thumbnail_path)
+            return True
+
+        temp_path.unlink(missing_ok=True)
+        message = (result.stderr or result.stdout or "").strip()
+        if message:
+            self._append_log(f"[bridge] Video thumbnail generation failed: {message.splitlines()[-1]}")
+        else:
+            self._append_log(f"[bridge] Video thumbnail generation failed for {file_path}")
+        return False
+
+    def _resolve_video_thumbnail(self, file_path: Path) -> str | None:
+        thumbnail_path = self._thumbnail_cache_path(file_path)
+        if thumbnail_path is None:
+            return None
+        if thumbnail_path.exists() and thumbnail_path.stat().st_size > 0:
+            return str(thumbnail_path)
+        if self._generate_video_thumbnail(file_path, thumbnail_path):
+            return str(thumbnail_path)
+        return None
+
     def _resolve_thumbnail(self, file_path: str | None) -> str | None:
         if not file_path:
             return None
         candidate = Path(file_path)
-        if candidate.exists() and candidate.suffix.lower() in IMAGE_EXTENSIONS:
+        if not candidate.exists():
+            return None
+        extension = candidate.suffix.lower()
+        if extension in IMAGE_EXTENSIONS:
             return str(candidate)
+        if extension in VIDEO_EXTENSIONS:
+            return self._resolve_video_thumbnail(candidate)
         return None
 
     def get_settings(self) -> dict[str, Any]:
@@ -1556,6 +1806,7 @@ class FaceFusionRuntime:
                     "path": path_str,
                     "file_name": file_path.name,
                     "media_type": "image" if file_path.suffix.lower() in IMAGE_EXTENSIONS else "video",
+                    "thumbnail_path": self._resolve_thumbnail(path_str),
                     "modified_at": datetime.fromtimestamp(file_path.stat().st_mtime).isoformat(timespec="seconds"),
                     "size_bytes": file_path.stat().st_size,
                     "is_favorite": is_favorite,

@@ -2,6 +2,7 @@ import gradio
 
 from facefusion.uis.core import get_ui_launch_kwargs
 from facefusion.uis.components import (
+	about,
 	age_modifier_options,
 	background_remover_options,
 	common_options,
@@ -43,86 +44,74 @@ def pre_check() -> bool:
 
 def render() -> gradio.Blocks:
 	with gradio.Blocks() as layout:
-		gradio.HTML(
-			'''
-			<script>
-				window.toggleStudioPinned = function() {
-					const region = document.getElementById('studio-top-region');
-					if (region) {
-						region.classList.toggle('studio-top-region-unpinned');
-					}
-				};
-			</script>
-			'''
-		)
-		with gradio.Column(elem_id = 'studio-shell'):
-			with gradio.Row(elem_id = 'studio-top-region'):
-				with gradio.Column(scale = 3, elem_classes = [ 'studio-card', 'studio-source-pane' ]):
+		with gradio.Row():
+			with gradio.Column(scale = 4):
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					about.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					processors.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					age_modifier_options.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					background_remover_options.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					deep_swapper_options.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					expression_restorer_options.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					face_debugger_options.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					face_editor_options.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					face_enhancer_options.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					face_swapper_options.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					frame_colorizer_options.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					frame_enhancer_options.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					lip_syncer_options.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					voice_extractor.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					execution.render()
+					execution_thread_count.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					download.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					memory.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					temp_frame.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					output_options.render()
+			with gradio.Column(scale = 4):
+				with gradio.Blocks(elem_classes = [ 'studio-card', 'studio-source-pane' ]):
 					source.render()
-				with gradio.Column(scale = 3, elem_classes = [ 'studio-card', 'studio-target-pane' ]):
+				with gradio.Blocks(elem_classes = [ 'studio-card', 'studio-target-pane' ]):
 					target.render()
-				with gradio.Column(scale = 4, elem_classes = [ 'studio-card', 'studio-preview-pane' ]):
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					output.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					terminal.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card', 'studio-runner-pane' ]):
+					studio_runner.render()
+			with gradio.Column(scale = 7):
+				with gradio.Blocks(elem_classes = [ 'studio-card', 'studio-preview-pane' ]):
 					preview.render()
 					preview_options.render()
-			with gradio.Blocks(elem_classes = [ 'studio-card', 'studio-runner-pane' ]):
-				studio_runner.render()
-			with gradio.Row(elem_id = 'studio-body-region'):
-				with gradio.Column(scale = 4):
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						processors.render()
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						age_modifier_options.render()
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						background_remover_options.render()
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						deep_swapper_options.render()
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						expression_restorer_options.render()
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						face_debugger_options.render()
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						face_editor_options.render()
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						face_enhancer_options.render()
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						face_swapper_options.render()
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						frame_colorizer_options.render()
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						frame_enhancer_options.render()
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						lip_syncer_options.render()
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						voice_extractor.render()
-				with gradio.Column(scale = 3):
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						output.render()
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						terminal.render()
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						execution.render()
-						execution_thread_count.render()
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						download.render()
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						memory.render()
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						temp_frame.render()
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						output_options.render()
-				with gradio.Column(scale = 5):
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						trim_frame.render()
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						face_selector.render()
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						face_masker.render()
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						face_detector.render()
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						face_landmarker.render()
-					with gradio.Blocks(elem_classes = [ 'studio-card' ]):
-						common_options.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					trim_frame.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					face_selector.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					face_masker.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					face_detector.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					face_landmarker.render()
+				with gradio.Blocks(elem_classes = [ 'studio-card' ]):
+					common_options.render()
 	return layout
 
 

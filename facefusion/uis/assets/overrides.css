@@ -206,7 +206,7 @@
 	margin-top: 0.5rem;
 }
 
-:root:root:root:root .image-preview.is-landscape
+:root:root:root:root #studio-top-region .image-preview.is-landscape
 {
 	position: sticky;
 	top: 0;

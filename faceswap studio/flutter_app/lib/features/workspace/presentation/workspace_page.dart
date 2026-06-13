@@ -308,8 +308,16 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
         return;
       }
       if (result['ok'] == true) {
+        final previewResult = _WorkspacePreviewResult.fromJson(result);
+        if (previewResult.imageBytes.isEmpty) {
+          setState(() {
+            _workspacePreviewResult = null;
+            _previewMessage = '预览生成失败：Bridge 返回了空的预览图片。';
+          });
+          return;
+        }
         setState(() {
-          _workspacePreviewResult = _WorkspacePreviewResult.fromJson(result);
+          _workspacePreviewResult = previewResult;
           _previewMessage = '预览已更新，参数变更后可再次生成。';
         });
       } else {
@@ -925,8 +933,6 @@ class _NativeWorkbenchPane extends StatelessWidget {
           webUiReady: webUiReady,
           busy: busy,
           draft: currentDraft,
-          optionsState: currentOptionsState,
-          workspaceMessage: workspaceMessage,
           onQueueWorkspace: onQueueWorkspace,
           onRunWorkspace: onRunWorkspace,
           onOpenBrowser: onOpenBrowser,
@@ -1018,8 +1024,8 @@ class _NativeWorkbenchPane extends StatelessWidget {
                           SizedBox(height: compact ? 8 : 10),
                           Text(
                             useWideTopRow
-                                ? '宽屏下会优先把 SOURCE / TARGET / PREVIEW 放到首屏顶部，参数区滚动显示，提交与执行模块固定在底部，减少切换与回滚操作。'
-                                : '使用 Flutter 原生文件选择器准备 SOURCE / TARGET，并直接在桌面端调整常用参数、生成预览，再提交到本地 Bridge 队列。提交与执行模块会固定停留在底部。',
+                                ? '宽屏下优先展示 SOURCE / TARGET / PREVIEW，参数区滚动显示，底部按钮固定。'
+                                : '使用 Flutter 原生文件选择器准备 SOURCE / TARGET，调整参数、生成预览后提交本地队列。',
                             style: theme.textTheme.bodyMedium?.copyWith(
                               color: theme.colorScheme.onSurfaceVariant,
                               height: compact ? 1.25 : 1.4,
@@ -1112,40 +1118,48 @@ class _WorkspaceDraftCard extends StatelessWidget {
                   ? const Color(0xFF0A1420)
                   : const Color(0xFFEAF2F8),
               child: InkWell(
-                onTap: onOpenPreview,
+                onTap: mediaType == 'video' ? null : onOpenPreview,
                 child: SizedBox(
                   height: previewHeight,
                   width: double.infinity,
-                  child: Stack(
-                    children: [
-                      Positioned.fill(
-                        child: thumbnailPath != null
-                            ? Padding(
-                                padding: EdgeInsets.all(compact ? 8 : 10),
-                                child: Image.file(
-                                  File(thumbnailPath!),
-                                  fit: BoxFit.contain,
-                                  errorBuilder: (_, _, _) => _MediaPlaceholder(
-                                    compact: compact,
-                                    mediaType: mediaType,
-                                  ),
+                  child: mediaType == 'video' && filePath != null
+                      ? StudioInlineVideoPlayer(
+                          filePath: filePath!,
+                          thumbnailPath: thumbnailPath,
+                          fit: BoxFit.contain,
+                          onOpenFullscreen: onOpenPreview,
+                        )
+                      : Stack(
+                          children: [
+                            Positioned.fill(
+                              child: thumbnailPath != null
+                                  ? Padding(
+                                      padding: EdgeInsets.all(compact ? 8 : 10),
+                                      child: Image.file(
+                                        File(thumbnailPath!),
+                                        fit: BoxFit.contain,
+                                        errorBuilder: (_, _, _) =>
+                                            _MediaPlaceholder(
+                                              compact: compact,
+                                              mediaType: mediaType,
+                                            ),
+                                      ),
+                                    )
+                                  : _MediaPlaceholder(
+                                      compact: compact,
+                                      mediaType: mediaType,
+                                    ),
+                            ),
+                            if (onOpenPreview != null)
+                              Positioned(
+                                right: compact ? 8 : 10,
+                                bottom: compact ? 8 : 10,
+                                child: _PreviewActionBadge(
+                                  label: mediaType == 'video' ? '点击播放' : '点击查看',
                                 ),
-                              )
-                            : _MediaPlaceholder(
-                                compact: compact,
-                                mediaType: mediaType,
                               ),
-                      ),
-                      if (onOpenPreview != null)
-                        Positioned(
-                          right: compact ? 8 : 10,
-                          bottom: compact ? 8 : 10,
-                          child: _PreviewActionBadge(
-                            label: mediaType == 'video' ? '点击播放' : '点击查看',
-                          ),
+                          ],
                         ),
-                    ],
-                  ),
                 ),
               ),
             ),
@@ -1405,6 +1419,10 @@ class _WorkspacePreviewPanel extends StatelessWidget {
                                 previewResult!.imageBytes,
                                 fit: BoxFit.contain,
                                 gaplessPlayback: true,
+                                errorBuilder: (_, _, _) => _MediaPlaceholder(
+                                  compact: compact,
+                                  mediaType: targetMediaType,
+                                ),
                               )
                             : _MediaPlaceholder(
                                 compact: compact,
@@ -1521,8 +1539,6 @@ class _WorkspaceSubmitPanel extends StatelessWidget {
     required this.webUiReady,
     required this.busy,
     required this.draft,
-    required this.optionsState,
-    required this.workspaceMessage,
     required this.onQueueWorkspace,
     required this.onRunWorkspace,
     required this.onOpenBrowser,
@@ -1535,188 +1551,60 @@ class _WorkspaceSubmitPanel extends StatelessWidget {
   final bool webUiReady;
   final bool busy;
   final _WorkspaceDraft draft;
-  final _WorkspaceOptionsState optionsState;
-  final String workspaceMessage;
   final VoidCallback onQueueWorkspace;
   final VoidCallback onRunWorkspace;
   final VoidCallback onOpenBrowser;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final buttonHeight = compact ? 36.0 : 40.0;
+    final primaryWidth = useSingleColumn ? 148.0 : 168.0;
+    final secondaryWidth = useSingleColumn ? 140.0 : 156.0;
+    final browserWidth = useSingleColumn ? 176.0 : 196.0;
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: theme.brightness == Brightness.dark
-            ? const Color(0xFF0B2A37)
-            : const Color(0xFFE7F5F9),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: theme.colorScheme.primary.withValues(alpha: 0.18),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.12),
-            blurRadius: 22,
-            offset: const Offset(0, 8),
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Wrap(
+        spacing: buttonGap,
+        runSpacing: compact ? 8 : buttonGap,
+        children: [
+          SizedBox(
+            width: primaryWidth,
+            child: FilledButton.icon(
+              onPressed: bridgeOnline && draft.canSubmit && !busy
+                  ? onQueueWorkspace
+                  : null,
+              icon: Icon(Icons.playlist_add_rounded, size: compact ? 18 : 20),
+              label: const Text('添加到队列'),
+              style: FilledButton.styleFrom(minimumSize: Size(0, buttonHeight)),
+            ),
+          ),
+          SizedBox(
+            width: secondaryWidth,
+            child: FilledButton.tonalIcon(
+              onPressed: bridgeOnline && draft.canSubmit && !busy
+                  ? onRunWorkspace
+                  : null,
+              icon: Icon(Icons.rocket_launch_rounded, size: compact ? 18 : 20),
+              label: const Text('立即生成'),
+              style: FilledButton.styleFrom(minimumSize: Size(0, buttonHeight)),
+            ),
+          ),
+          SizedBox(
+            width: browserWidth,
+            child: FilledButton.tonalIcon(
+              onPressed: bridgeOnline && webUiReady && !busy
+                  ? onOpenBrowser
+                  : null,
+              icon: Icon(
+                Icons.open_in_browser_rounded,
+                size: compact ? 18 : 20,
+              ),
+              label: const Text('浏览器高级参数'),
+              style: FilledButton.styleFrom(minimumSize: Size(0, buttonHeight)),
+            ),
           ),
         ],
-      ),
-      child: Padding(
-        padding: EdgeInsets.all(compact ? 14 : 18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Wrap(
-              spacing: compact ? 8 : 10,
-              runSpacing: compact ? 8 : 10,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                Text(
-                  '提交与执行',
-                  style:
-                      (compact
-                              ? theme.textTheme.titleSmall
-                              : theme.textTheme.titleMedium)
-                          ?.copyWith(fontWeight: FontWeight.w700),
-                ),
-                _WorkspacePill(
-                  compact: compact,
-                  active: bridgeOnline,
-                  label: bridgeOnline ? 'Bridge 在线' : 'Bridge 离线',
-                ),
-                _WorkspacePill(
-                  compact: compact,
-                  active: webUiReady,
-                  label: webUiReady ? 'FaceFusion 在线' : 'FaceFusion 未就绪',
-                ),
-              ],
-            ),
-            SizedBox(height: compact ? 8 : 10),
-            Text(
-              '输出目录：${draft.outputDirectory ?? draft.outputRoot}',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontSize: compact ? 13 : null,
-              ),
-              maxLines: compact ? 1 : 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            const SizedBox(height: 6),
-            Text(
-              optionsState.options.isEmpty
-                  ? workspaceMessage
-                  : '$workspaceMessage 当前处理器：${(optionsState.stringListValue('processors').isEmpty ? const <String>['face_swapper'] : optionsState.stringListValue('processors')).join(' / ')}',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-                height: compact ? 1.25 : 1.35,
-                fontSize: compact ? 11.5 : null,
-              ),
-            ),
-            SizedBox(height: compact ? 12 : 16),
-            if (useSingleColumn)
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  FilledButton.icon(
-                    onPressed: bridgeOnline && draft.canSubmit && !busy
-                        ? onQueueWorkspace
-                        : null,
-                    icon: Icon(
-                      Icons.playlist_add_rounded,
-                      size: compact ? 18 : 20,
-                    ),
-                    label: const Text('添加到队列'),
-                    style: FilledButton.styleFrom(
-                      minimumSize: Size(0, compact ? 38 : 42),
-                    ),
-                  ),
-                  SizedBox(height: buttonGap),
-                  FilledButton.tonalIcon(
-                    onPressed: bridgeOnline && draft.canSubmit && !busy
-                        ? onRunWorkspace
-                        : null,
-                    icon: Icon(
-                      Icons.rocket_launch_rounded,
-                      size: compact ? 18 : 20,
-                    ),
-                    label: const Text('立即生成'),
-                    style: FilledButton.styleFrom(
-                      minimumSize: Size(0, compact ? 38 : 42),
-                    ),
-                  ),
-                  SizedBox(height: buttonGap),
-                  FilledButton.tonalIcon(
-                    onPressed: bridgeOnline && webUiReady && !busy
-                        ? onOpenBrowser
-                        : null,
-                    icon: Icon(
-                      Icons.open_in_browser_rounded,
-                      size: compact ? 18 : 20,
-                    ),
-                    label: const Text('浏览器高级参数'),
-                    style: FilledButton.styleFrom(
-                      minimumSize: Size(0, compact ? 38 : 42),
-                    ),
-                  ),
-                ],
-              )
-            else
-              Wrap(
-                spacing: buttonGap,
-                runSpacing: buttonGap,
-                children: [
-                  SizedBox(
-                    width: 244,
-                    child: FilledButton.icon(
-                      onPressed: bridgeOnline && draft.canSubmit && !busy
-                          ? onQueueWorkspace
-                          : null,
-                      icon: Icon(
-                        Icons.playlist_add_rounded,
-                        size: compact ? 18 : 20,
-                      ),
-                      label: const Text('添加到队列'),
-                      style: FilledButton.styleFrom(
-                        minimumSize: Size(0, compact ? 38 : 42),
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: 244,
-                    child: FilledButton.tonalIcon(
-                      onPressed: bridgeOnline && draft.canSubmit && !busy
-                          ? onRunWorkspace
-                          : null,
-                      icon: Icon(
-                        Icons.rocket_launch_rounded,
-                        size: compact ? 18 : 20,
-                      ),
-                      label: const Text('立即生成'),
-                      style: FilledButton.styleFrom(
-                        minimumSize: Size(0, compact ? 38 : 42),
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: 244,
-                    child: FilledButton.tonalIcon(
-                      onPressed: bridgeOnline && webUiReady && !busy
-                          ? onOpenBrowser
-                          : null,
-                      icon: Icon(
-                        Icons.open_in_browser_rounded,
-                        size: compact ? 18 : 20,
-                      ),
-                      label: const Text('浏览器高级参数'),
-                      style: FilledButton.styleFrom(
-                        minimumSize: Size(0, compact ? 38 : 42),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-          ],
-        ),
       ),
     );
   }
@@ -2753,12 +2641,17 @@ class _QueueTaskCard extends StatelessWidget {
           children: [
             _QueueMediaPreview(
               label: 'SOURCE',
+              filePath: task.primarySourcePath,
+              mediaType: task.sourceMediaType,
               thumbnailPath: task.sourceThumbnail,
             ),
             const SizedBox(width: 12),
             _QueueMediaPreview(
               label: 'TARGET',
+              filePath: task.targetPath,
+              mediaType: task.targetMediaType,
               thumbnailPath: task.targetThumbnail,
+              showVideoOverlays: false,
             ),
             const SizedBox(width: 16),
             Expanded(
@@ -2842,14 +2735,25 @@ class _QueueTaskCard extends StatelessWidget {
 }
 
 class _QueueMediaPreview extends StatelessWidget {
-  const _QueueMediaPreview({required this.label, required this.thumbnailPath});
+  const _QueueMediaPreview({
+    required this.label,
+    required this.filePath,
+    required this.mediaType,
+    required this.thumbnailPath,
+    this.showVideoOverlays = true,
+  });
 
   final String label;
+  final String? filePath;
+  final String? mediaType;
   final String? thumbnailPath;
+  final bool showVideoOverlays;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isVideo = mediaType == 'video' && filePath != null;
+
     return SizedBox(
       width: 120,
       child: Column(
@@ -2865,7 +2769,15 @@ class _QueueMediaPreview extends StatelessWidget {
               color: theme.brightness == Brightness.dark
                   ? const Color(0xFF0A1420)
                   : const Color(0xFFEAF2F8),
-              child: thumbnailPath == null
+              child: isVideo
+                  ? StudioInlineVideoPlayer(
+                      filePath: filePath!,
+                      thumbnailPath: thumbnailPath,
+                      fit: BoxFit.cover,
+                      showVideoBadge: showVideoOverlays,
+                      showFullscreenButton: showVideoOverlays,
+                    )
+                  : thumbnailPath == null
                   ? Icon(
                       Icons.perm_media_outlined,
                       color: theme.colorScheme.primary,
@@ -2895,8 +2807,10 @@ class _QueueTask {
     required this.status,
     required this.sourcePaths,
     required this.sourceThumbnail,
+    required this.sourceMediaType,
     required this.targetPath,
     required this.targetThumbnail,
+    required this.targetMediaType,
     required this.outputPath,
     required this.stepTotal,
     required this.completedSteps,
@@ -2904,15 +2818,25 @@ class _QueueTask {
   });
 
   factory _QueueTask.fromJson(Map<String, dynamic> json) {
+    final sourcePaths =
+        (json['source_paths'] as List<dynamic>? ?? const <dynamic>[])
+            .map((item) => '$item')
+            .toList();
+    final primarySourcePath = sourcePaths.isEmpty ? null : sourcePaths.first;
+
     return _QueueTask(
       jobId: '${json['job_id'] ?? ''}',
       status: '${json['status'] ?? 'queued'}',
-      sourcePaths: (json['source_paths'] as List<dynamic>? ?? const <dynamic>[])
-          .map((item) => '$item')
-          .toList(),
+      sourcePaths: sourcePaths,
       sourceThumbnail: json['source_thumbnail'] as String?,
+      sourceMediaType:
+          json['source_media_type'] as String? ??
+          _mediaTypeFromPath(primarySourcePath),
       targetPath: json['target_path'] as String?,
       targetThumbnail: json['target_thumbnail'] as String?,
+      targetMediaType:
+          json['target_media_type'] as String? ??
+          _mediaTypeFromPath(json['target_path'] as String?),
       outputPath: json['output_path'] as String?,
       stepTotal: (json['step_total'] as num?)?.toInt() ?? 0,
       completedSteps: (json['completed_steps'] as num?)?.toInt() ?? 0,
@@ -2924,12 +2848,52 @@ class _QueueTask {
   final String status;
   final List<String> sourcePaths;
   final String? sourceThumbnail;
+  final String? sourceMediaType;
   final String? targetPath;
   final String? targetThumbnail;
+  final String? targetMediaType;
   final String? outputPath;
   final int stepTotal;
   final int completedSteps;
   final bool isActive;
+
+  String? get primarySourcePath =>
+      sourcePaths.isEmpty ? null : sourcePaths.first;
+
+  static String? _mediaTypeFromPath(String? path) {
+    if (path == null) {
+      return null;
+    }
+    final lowerPath = path.toLowerCase();
+    if (lowerPath.endsWith('.mp4') ||
+        lowerPath.endsWith('.mov') ||
+        lowerPath.endsWith('.mkv') ||
+        lowerPath.endsWith('.avi') ||
+        lowerPath.endsWith('.webm') ||
+        lowerPath.endsWith('.wmv') ||
+        lowerPath.endsWith('.mpeg') ||
+        lowerPath.endsWith('.m4v')) {
+      return 'video';
+    }
+    if (lowerPath.endsWith('.mp3') ||
+        lowerPath.endsWith('.wav') ||
+        lowerPath.endsWith('.aac') ||
+        lowerPath.endsWith('.flac') ||
+        lowerPath.endsWith('.ogg') ||
+        lowerPath.endsWith('.m4a') ||
+        lowerPath.endsWith('.opus')) {
+      return 'audio';
+    }
+    if (lowerPath.endsWith('.jpg') ||
+        lowerPath.endsWith('.jpeg') ||
+        lowerPath.endsWith('.png') ||
+        lowerPath.endsWith('.webp') ||
+        lowerPath.endsWith('.bmp') ||
+        lowerPath.endsWith('.tiff')) {
+      return 'image';
+    }
+    return null;
+  }
 }
 
 class _QueueRunnerState {

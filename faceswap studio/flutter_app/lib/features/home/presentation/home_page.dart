@@ -58,11 +58,15 @@ class _HomePageState extends State<HomePage> {
 
       final entries = (logs['entries'] as List<dynamic>? ?? const <dynamic>[])
           .cast<Map<String, dynamic>>();
+      final incomingLogs = entries
+          .map(_LogEntry.fromJson)
+          .toList()
+          .reversed
+          .toList();
 
-      final latestLogs = List<_LogEntry>.from(_logs)
-        ..addAll(entries.map(_LogEntry.fromJson));
+      final latestLogs = List<_LogEntry>.from(incomingLogs)..addAll(_logs);
       if (latestLogs.length > 300) {
-        latestLogs.removeRange(0, latestLogs.length - 300);
+        latestLogs.removeRange(300, latestLogs.length);
       }
 
       if (!mounted) {
@@ -695,7 +699,7 @@ class _HomeLogCard extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              'Bridge 与 FaceFusion 的日志会持续汇总到这里。',
+              'Bridge 与 FaceFusion 的日志会持续汇总到这里，最新日志显示在最前面。',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
                 height: 1.35,

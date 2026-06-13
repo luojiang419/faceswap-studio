@@ -5,6 +5,7 @@ from contextlib import redirect_stdout
 import json
 import os
 from pathlib import Path
+import shutil
 import sys
 import traceback
 from typing import Any
@@ -14,7 +15,7 @@ import numpy
 
 
 BRIDGE_REPO_ROOT = Path(__file__).resolve().parents[3]
-PROJECT_ROOT = BRIDGE_REPO_ROOT.parent
+PROJECT_ROOT = BRIDGE_REPO_ROOT
 
 if str(BRIDGE_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(BRIDGE_REPO_ROOT))
@@ -53,10 +54,13 @@ def _prepare_runtime_environment() -> None:
     path_entries = _build_runtime_path_entries()
     current_path = os.environ.get("PATH", "")
     os.environ["PATH"] = os.pathsep.join(path_entries + [current_path])
-    os.environ.setdefault(
-        "FACEFUSION_FFMPEG_PATH",
-        str(PROJECT_ROOT / ".runtime" / "ffmpeg" / "ffmpeg.exe"),
-    )
+    bundled_ffmpeg = PROJECT_ROOT / ".runtime" / "ffmpeg" / "ffmpeg.exe"
+    if bundled_ffmpeg.exists():
+        os.environ.setdefault("FACEFUSION_FFMPEG_PATH", str(bundled_ffmpeg))
+    else:
+        system_ffmpeg = shutil.which("ffmpeg")
+        if system_ffmpeg:
+            os.environ.setdefault("FACEFUSION_FFMPEG_PATH", system_ffmpeg)
     os.environ.setdefault("FACEFUSION_CURL_PATH", r"C:\Windows\System32\curl.exe")
 
     try:
@@ -229,11 +233,16 @@ def _generate_preview(payload: dict[str, Any]) -> dict[str, Any]:
     raise RuntimeError("当前目标文件不是可预览的图片或视频。")
 
 
+def _write_json(payload: dict[str, Any]) -> None:
+    sys.stdout.buffer.write(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+    sys.stdout.buffer.flush()
+
+
 def main() -> int:
     try:
-        payload = json.load(sys.stdin)
-    except json.JSONDecodeError as error:
-        sys.stdout.write(json.dumps({"ok": False, "message": f"预览请求 JSON 无效: {error}"}))
+        payload = json.loads(sys.stdin.buffer.read().decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        _write_json({"ok": False, "message": f"预览请求 JSON 无效: {error}"})
         return 1
 
     _prepare_runtime_environment()
@@ -242,18 +251,15 @@ def main() -> int:
             result = _generate_preview(payload)
     except Exception as error:
         traceback.print_exc(file=sys.stderr)
-        sys.stdout.write(
-            json.dumps(
-                {
-                    "ok": False,
-                    "message": str(error) or "预览生成失败。",
-                },
-                ensure_ascii=False,
-            ),
+        _write_json(
+            {
+                "ok": False,
+                "message": str(error) or "预览生成失败。",
+            },
         )
         return 1
 
-    sys.stdout.write(json.dumps(result, ensure_ascii=False))
+    _write_json(result)
     return 0
 
 

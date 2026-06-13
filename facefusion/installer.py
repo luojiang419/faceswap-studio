@@ -19,17 +19,17 @@ LOCALES =\
 }
 ONNXRUNTIME_SET =\
 {
-	'default': ('onnxruntime', '1.24.4')
+	'default': ('onnxruntime', 'onnxruntime==1.24.4')
 }
 if is_windows() or is_linux():
-	ONNXRUNTIME_SET['cuda'] = ('onnxruntime-gpu', '1.24.4')
-	ONNXRUNTIME_SET['openvino'] = ('onnxruntime-openvino', '1.24.1')
+	ONNXRUNTIME_SET['cuda'] = ('onnxruntime-gpu', 'onnxruntime-gpu[cuda,cudnn]==1.24.4')
+	ONNXRUNTIME_SET['openvino'] = ('onnxruntime-openvino', 'onnxruntime-openvino==1.24.1')
 if is_windows():
-	ONNXRUNTIME_SET['directml'] = ('onnxruntime-directml', '1.24.4')
-	ONNXRUNTIME_SET['qnn'] = ('onnxruntime-qnn', '1.24.4')
+	ONNXRUNTIME_SET['directml'] = ('onnxruntime-directml', 'onnxruntime-directml==1.24.4')
+	ONNXRUNTIME_SET['qnn'] = ('onnxruntime-qnn', 'onnxruntime-qnn==1.24.4')
 if is_linux():
-	ONNXRUNTIME_SET['migraphx'] = ('onnxruntime-migraphx', '1.24.2')
-	ONNXRUNTIME_SET['rocm'] = ('onnxruntime-rocm', '1.22.2.post1')
+	ONNXRUNTIME_SET['migraphx'] = ('onnxruntime-migraphx', 'onnxruntime-migraphx==1.24.2')
+	ONNXRUNTIME_SET['rocm'] = ('onnxruntime-rocm', 'onnxruntime-rocm==1.22.2.post1')
 
 
 def cli() -> None:
@@ -66,9 +66,8 @@ def run(program : ArgumentParser) -> None:
 			if not __line__.startswith('onnxruntime'):
 				commands.append(__line__)
 
-	onnxruntime_name, onnxruntime_version = ONNXRUNTIME_SET.get(args.onnxruntime)
-	commands.append(onnxruntime_name + '==' + onnxruntime_version)
+	onnxruntime_name, onnxruntime_requirement = ONNXRUNTIME_SET.get(args.onnxruntime)
+	commands.append(onnxruntime_requirement)
 
 	subprocess.call([ shutil.which('pip'), 'uninstall', 'onnxruntime', onnxruntime_name, '-y', '-q' ])
-
-	subprocess.call(commands)
+	sys.exit(subprocess.call(commands))

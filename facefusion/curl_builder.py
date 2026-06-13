@@ -32,8 +32,17 @@ def resolve_curl_executable() -> str:
 
 def run(commands : List[Command]) -> List[Command]:
 	user_agent = metadata.get('name') + '/' + metadata.get('version')
+	proxy_commands = resolve_proxy_commands()
 
-	return [ resolve_curl_executable(), '--user-agent', user_agent, '--location', '--silent', '--ssl-no-revoke' ] + commands
+	return [ resolve_curl_executable(), '--user-agent', user_agent, '--location', '--silent', '--ssl-no-revoke' ] + proxy_commands + commands
+
+
+def resolve_proxy_commands() -> List[Command]:
+	disable_proxy = os.environ.get('FACEFUSION_DISABLE_PROXY', '1').lower()
+
+	if disable_proxy in [ '0', 'false', 'no', 'off' ]:
+		return []
+	return [ '--proxy', '', '--noproxy', '*' ]
 
 
 def chain(*commands : List[Command]) -> List[Command]:

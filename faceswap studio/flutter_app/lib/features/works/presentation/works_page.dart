@@ -263,7 +263,7 @@ class _WorksPageState extends State<WorksPage> {
       itemBuilder: (context, index) {
         final item = items[index];
         return GestureDetector(
-          onTap: () => _openViewer(item),
+          onTap: item.mediaType == 'image' ? () => _openViewer(item) : null,
           onSecondaryTapDown: (details) =>
               _showContextMenu(context, details.globalPosition, item),
           child: Card(
@@ -290,32 +290,11 @@ class _WorksPageState extends State<WorksPage> {
                                       const Icon(Icons.broken_image_outlined),
                                 ),
                               )
-                            : Stack(
-                                fit: StackFit.expand,
-                                children: [
-                                  Container(
-                                    decoration: BoxDecoration(
-                                      gradient: LinearGradient(
-                                        colors:
-                                            theme.brightness == Brightness.dark
-                                            ? const [
-                                                Color(0xFF12263A),
-                                                Color(0xFF0A1522),
-                                              ]
-                                            : const [
-                                                Color(0xFFD6EEF6),
-                                                Color(0xFFF6FBFD),
-                                              ],
-                                      ),
-                                    ),
-                                  ),
-                                  const Center(
-                                    child: Icon(
-                                      Icons.play_circle_fill_rounded,
-                                      size: 56,
-                                    ),
-                                  ),
-                                ],
+                            : StudioInlineVideoPlayer(
+                                filePath: item.path,
+                                thumbnailPath: item.thumbnailPath,
+                                fit: BoxFit.cover,
+                                onOpenFullscreen: () => _openViewer(item),
                               ),
                       ),
                     ),
@@ -361,6 +340,7 @@ class _WorkItem {
     required this.path,
     required this.fileName,
     required this.mediaType,
+    required this.thumbnailPath,
     required this.modifiedAt,
     required this.sizeBytes,
     required this.isFavorite,
@@ -372,6 +352,7 @@ class _WorkItem {
       path: '${json['path'] ?? ''}',
       fileName: '${json['file_name'] ?? ''}',
       mediaType: '${json['media_type'] ?? 'image'}',
+      thumbnailPath: json['thumbnail_path'] as String?,
       modifiedAt: '${json['modified_at'] ?? ''}',
       sizeBytes: (json['size_bytes'] as num?)?.toInt() ?? 0,
       isFavorite: json['is_favorite'] == true,
@@ -382,6 +363,7 @@ class _WorkItem {
   final String path;
   final String fileName;
   final String mediaType;
+  final String? thumbnailPath;
   final String modifiedAt;
   final int sizeBytes;
   final bool isFavorite;

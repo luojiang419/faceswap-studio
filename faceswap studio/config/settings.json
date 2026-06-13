@@ -1,6 +1,6 @@
 {
   "theme": "dark",
-  "facefusion_host": "127.0.0.1",
+  "facefusion_host": "0.0.0.0",
   "facefusion_port": 7860,
   "default_output_dir": "d:\\Myproject\\facefusion\\facefusion\\faceswap studio\\data\\output"
 }

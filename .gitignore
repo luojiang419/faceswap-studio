@@ -4,7 +4,13 @@ __pycache__
 .caches
 .idea
 .jobs
+.runtime
+.tools
+.venv-win
 .vscode
+build
+dist
+*.spec
 faceswap studio/data/**
 !faceswap studio/data/
 !faceswap studio/data/app_state/
