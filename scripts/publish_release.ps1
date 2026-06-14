@@ -41,9 +41,16 @@ if ($Prerelease) {
 }
 
 $releaseExists = $false
-& gh release view $tag --repo $Repository *> $null
-if ($LASTEXITCODE -eq 0) {
-    $releaseExists = $true
+try {
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    & gh release view $tag --repo $Repository *> $null
+    if ($LASTEXITCODE -eq 0) {
+        $releaseExists = $true
+    }
+}
+finally {
+    $ErrorActionPreference = $previousErrorActionPreference
 }
 
 if (-not $releaseExists) {
