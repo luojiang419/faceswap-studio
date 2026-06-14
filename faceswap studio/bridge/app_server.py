@@ -12,8 +12,9 @@ import sys
 import threading
 import time
 from typing import Any
+from urllib.parse import urlparse
 from urllib.error import URLError
-from urllib.request import urlopen
+from urllib.request import ProxyHandler, Request, build_opener, urlopen
 import webbrowser
 
 BRIDGE_REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -42,6 +43,55 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".wmv", ".mpeg", ".m4v"}
 LOCAL_FFMPEG_EXE = Path(r"G:\data\ffmpeg\bin\ffmpeg.exe")
 FFMPEG_VERSION_FILE = "ffmpeg-source.json"
+MODEL_DOWNLOAD_MODE_DOMESTIC = "domestic_mirror"
+MODEL_DOWNLOAD_MODE_SYSTEM_PROXY = "system_proxy"
+MODEL_DOWNLOAD_MODE_CUSTOM_PROXY = "custom_proxy"
+MODEL_DOWNLOAD_MODES = {
+    MODEL_DOWNLOAD_MODE_DOMESTIC,
+    MODEL_DOWNLOAD_MODE_SYSTEM_PROXY,
+    MODEL_DOWNLOAD_MODE_CUSTOM_PROXY,
+}
+DEFAULT_CUSTOM_PROXY_URL = "http://127.0.0.1:7890"
+DOMESTIC_HUGGINGFACE_MIRROR = "https://hf-mirror.com"
+OFFICIAL_HUGGINGFACE_URL = "https://huggingface.co"
+OFFICIAL_GITHUB_URL = "https://github.com"
+LOCAL_NO_PROXY = "localhost,127.0.0.1,::1"
+CORE_MODEL_SCOPE = "core"
+CORE_MODEL_USER_AGENT = "FaceSwap Studio Model Bootstrap/1.0"
+UPDATE_USER_AGENT = "FaceSwap Studio Updater/1.0"
+UPDATE_REPOSITORY = "luojiang419/faceswap-studio"
+UPDATE_MANIFEST_ASSET = "update-manifest.json"
+UPDATE_CACHE_DIRNAME = "FaceSwap Studio"
+CORE_MODEL_PACKAGE: list[dict[str, Any]] = [
+    {"label": "NSFW 内容检测 1", "base": "models-3.3.0", "file": "nsfw_1.hash", "size": 8},
+    {"label": "NSFW 内容检测 1", "base": "models-3.3.0", "file": "nsfw_1.onnx", "size": 80414194},
+    {"label": "NSFW 内容检测 2", "base": "models-3.3.0", "file": "nsfw_2.hash", "size": 8},
+    {"label": "NSFW 内容检测 2", "base": "models-3.3.0", "file": "nsfw_2.onnx", "size": 22489928},
+    {"label": "NSFW 内容检测 3", "base": "models-3.3.0", "file": "nsfw_3.hash", "size": 8},
+    {"label": "NSFW 内容检测 3", "base": "models-3.3.0", "file": "nsfw_3.onnx", "size": 358188033},
+    {"label": "人脸属性识别", "base": "models-3.0.0", "file": "fairface.hash", "size": 8},
+    {"label": "人脸属性识别", "base": "models-3.0.0", "file": "fairface.onnx", "size": 85170772},
+    {"label": "YOLO 人脸检测", "base": "models-3.0.0", "file": "yoloface_8n.hash", "size": 8},
+    {"label": "YOLO 人脸检测", "base": "models-3.0.0", "file": "yoloface_8n.onnx", "size": 12659761},
+    {"label": "2D 人脸关键点", "base": "models-3.0.0", "file": "2dfan4.hash", "size": 8},
+    {"label": "2D 人脸关键点", "base": "models-3.0.0", "file": "2dfan4.onnx", "size": 97904803},
+    {"label": "68 点关键点", "base": "models-3.0.0", "file": "fan_68_5.hash", "size": 8},
+    {"label": "68 点关键点", "base": "models-3.0.0", "file": "fan_68_5.onnx", "size": 944321},
+    {"label": "脸部遮罩", "base": "models-3.1.0", "file": "xseg_1.hash", "size": 8},
+    {"label": "脸部遮罩", "base": "models-3.1.0", "file": "xseg_1.onnx", "size": 70324286},
+    {"label": "脸部分区", "base": "models-3.0.0", "file": "bisenet_resnet_34.hash", "size": 8},
+    {"label": "脸部分区", "base": "models-3.0.0", "file": "bisenet_resnet_34.onnx", "size": 93632546},
+    {"label": "ArcFace 识别", "base": "models-3.0.0", "file": "arcface_w600k_r50.hash", "size": 8},
+    {"label": "ArcFace 识别", "base": "models-3.0.0", "file": "arcface_w600k_r50.onnx", "size": 174388474},
+    {"label": "人声分离", "base": "models-3.0.0", "file": "kim_vocal_2.hash", "size": 8},
+    {"label": "人声分离", "base": "models-3.0.0", "file": "kim_vocal_2.onnx", "size": 66766794},
+    {"label": "默认换脸模型", "base": "models-3.3.0", "file": "hyperswap_1a_256.hash", "size": 8},
+    {"label": "默认换脸模型", "base": "models-3.3.0", "file": "hyperswap_1a_256.onnx", "size": 402742682},
+    {"label": "常用人脸增强", "base": "models-3.0.0", "file": "gfpgan_1.4.hash", "size": 8},
+    {"label": "常用人脸增强", "base": "models-3.0.0", "file": "gfpgan_1.4.onnx", "size": 340299087},
+    {"label": "常用画面增强", "base": "models-3.0.0", "file": "span_kendata_x4.hash", "size": 8},
+    {"label": "常用画面增强", "base": "models-3.0.0", "file": "span_kendata_x4.onnx", "size": 0},
+]
 
 
 class FaceFusionRuntime:
@@ -65,9 +115,15 @@ class FaceFusionRuntime:
         self._preview_lock = threading.Lock()
         self._workspace_state: dict[str, Any] = {}
         self._workspace_options: dict[str, Any] = {}
+        self._model_bootstrap_lock = threading.RLock()
+        self._model_bootstrap_thread: threading.Thread | None = None
+        self._update_lock = threading.RLock()
+        self._update_download_thread: threading.Thread | None = None
 
         psutil.cpu_percent(interval=None)
         self._prepare_paths()
+        self._model_bootstrap_state: dict[str, Any] = self._default_model_bootstrap_state()
+        self._update_state: dict[str, Any] = self._default_update_state()
         self._append_log("[bridge] FaceSwap Studio Bridge initialized.")
 
     @property
@@ -102,6 +158,7 @@ class FaceFusionRuntime:
         self._settings_path = studio_root / "config" / "settings.json"
         self._favorites_path = studio_root / "data" / "favorites" / "favorites.json"
         self._runtime_dir = studio_root / "runtime"
+        self._models_dir = self._repo_root / ".assets" / "models"
         self._thumbnail_dir = studio_root / "data" / "cache" / "thumbnails"
         self._workspace_state_path = self._runtime_dir / "workspace_state.json"
         self._workspace_options_path = self._runtime_dir / "workspace_options.json"
@@ -109,6 +166,7 @@ class FaceFusionRuntime:
         for directory in [
             self._jobs_dir,
             self._temp_dir,
+            self._models_dir,
             self._thumbnail_dir,
             self._runtime_dir,
             self._settings_path.parent,
@@ -199,6 +257,8 @@ class FaceFusionRuntime:
             "facefusion_host": FACEFUSION_UI_HOST,
             "facefusion_port": FACEFUSION_UI_PORT,
             "default_output_dir": str(self._studio_root / "data" / "output"),
+            "model_download_mode": MODEL_DOWNLOAD_MODE_DOMESTIC,
+            "custom_proxy_url": DEFAULT_CUSTOM_PROXY_URL,
         }
         if not self._settings_path.exists():
             self._settings_path.write_text(json.dumps(defaults, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -214,6 +274,8 @@ class FaceFusionRuntime:
             "facefusion_host": str(payload.get("facefusion_host") or defaults["facefusion_host"]),
             "facefusion_port": int(payload.get("facefusion_port") or defaults["facefusion_port"]),
             "default_output_dir": str(payload.get("default_output_dir") or defaults["default_output_dir"]),
+            "model_download_mode": self._normalize_model_download_mode(payload.get("model_download_mode")),
+            "custom_proxy_url": self._normalize_proxy_url(payload.get("custom_proxy_url")),
         }
         self._settings_path.write_text(json.dumps(merged, indent=2, ensure_ascii=False), encoding="utf-8")
         return merged
@@ -223,6 +285,16 @@ class FaceFusionRuntime:
             json.dumps(self._settings, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
+
+    def _normalize_model_download_mode(self, value: Any) -> str:
+        mode = str(value or MODEL_DOWNLOAD_MODE_DOMESTIC).strip()
+        if mode in MODEL_DOWNLOAD_MODES:
+            return mode
+        return MODEL_DOWNLOAD_MODE_DOMESTIC
+
+    def _normalize_proxy_url(self, value: Any) -> str:
+        proxy_url = str(value or DEFAULT_CUSTOM_PROXY_URL).strip()
+        return proxy_url or DEFAULT_CUSTOM_PROXY_URL
 
     def _apply_output_root(self, output_root: str) -> None:
         self._output_dir = Path(output_root)
@@ -243,6 +315,647 @@ class FaceFusionRuntime:
                     "message": message,
                 }
             )
+
+    def _default_model_bootstrap_state(self) -> dict[str, Any]:
+        return {
+            "state": "idle",
+            "scope": CORE_MODEL_SCOPE,
+            "message": "核心模型尚未检查。",
+            "current_file": None,
+            "current_label": None,
+            "file_index": 0,
+            "file_total": len(CORE_MODEL_PACKAGE),
+            "downloaded_bytes": 0,
+            "total_bytes": self._core_model_expected_total(),
+            "percent": 0.0,
+            "speed_bps": 0.0,
+            "missing_count": 0,
+            "ready": False,
+            "error": None,
+            "started_at": None,
+            "completed_at": None,
+        }
+
+    def _core_model_expected_total(self) -> int:
+        return sum(int(model.get("size") or 0) for model in CORE_MODEL_PACKAGE)
+
+    def _core_model_path(self, model: dict[str, Any]) -> Path:
+        return self._models_dir / str(model["file"])
+
+    def _core_model_url(self, model: dict[str, Any]) -> str:
+        mode = self._normalize_model_download_mode(self._settings.get("model_download_mode"))
+        if mode == MODEL_DOWNLOAD_MODE_DOMESTIC:
+            base_url = DOMESTIC_HUGGINGFACE_MIRROR
+        else:
+            base_url = OFFICIAL_HUGGINGFACE_URL
+        return f"{base_url.rstrip('/')}/facefusion/{model['base']}/resolve/main/{model['file']}"
+
+    def _core_model_opener(self):
+        mode = self._normalize_model_download_mode(self._settings.get("model_download_mode"))
+        proxy_url = self._normalize_proxy_url(self._settings.get("custom_proxy_url"))
+        if mode == MODEL_DOWNLOAD_MODE_CUSTOM_PROXY:
+            return build_opener(ProxyHandler({"http": proxy_url, "https": proxy_url}))
+        if mode == MODEL_DOWNLOAD_MODE_DOMESTIC:
+            return build_opener(ProxyHandler({}))
+        return build_opener()
+
+    def _is_core_model_present(self, model: dict[str, Any]) -> bool:
+        path = self._core_model_path(model)
+        expected_size = int(model.get("size") or 0)
+        if not path.exists() or not path.is_file():
+            return False
+        if expected_size <= 0:
+            return path.stat().st_size > 0
+        return path.stat().st_size >= expected_size
+
+    def _scan_core_models(self) -> dict[str, Any]:
+        missing: list[dict[str, Any]] = []
+        present_bytes = 0
+        total_bytes = self._core_model_expected_total()
+
+        for model in CORE_MODEL_PACKAGE:
+            path = self._core_model_path(model)
+            expected_size = int(model.get("size") or 0)
+            if self._is_core_model_present(model):
+                present_bytes += expected_size or path.stat().st_size
+            else:
+                missing.append(model)
+
+        return {
+            "missing": missing,
+            "missing_count": len(missing),
+            "present_count": len(CORE_MODEL_PACKAGE) - len(missing),
+            "file_total": len(CORE_MODEL_PACKAGE),
+            "downloaded_bytes": present_bytes,
+            "total_bytes": total_bytes,
+            "ready": not missing,
+        }
+
+    def _copy_model_bootstrap_state(self) -> dict[str, Any]:
+        with self._model_bootstrap_lock:
+            return dict(self._model_bootstrap_state)
+
+    def _set_model_bootstrap_state(self, **updates: Any) -> None:
+        with self._model_bootstrap_lock:
+            self._model_bootstrap_state.update(updates)
+
+    def get_model_bootstrap_status(self) -> dict[str, Any]:
+        state = self._copy_model_bootstrap_state()
+        if state["state"] in {"starting", "downloading"}:
+            return state
+
+        scan = self._scan_core_models()
+        if scan["ready"]:
+            state.update(
+                {
+                    "state": "ready",
+                    "message": "核心模型已准备就绪。",
+                    "current_file": None,
+                    "current_label": None,
+                    "file_index": scan["file_total"],
+                    "file_total": scan["file_total"],
+                    "downloaded_bytes": scan["total_bytes"],
+                    "total_bytes": scan["total_bytes"],
+                    "percent": 100.0,
+                    "speed_bps": 0.0,
+                    "missing_count": 0,
+                    "ready": True,
+                    "error": None,
+                }
+            )
+        elif state["state"] != "failed":
+            percent = 0.0
+            if scan["total_bytes"] > 0:
+                percent = round(min(scan["downloaded_bytes"] / scan["total_bytes"] * 100.0, 99.0), 2)
+            state.update(
+                {
+                    "state": "missing",
+                    "message": f"缺少 {scan['missing_count']} 个核心模型文件。",
+                    "current_file": None,
+                    "current_label": None,
+                    "file_index": scan["present_count"],
+                    "file_total": scan["file_total"],
+                    "downloaded_bytes": scan["downloaded_bytes"],
+                    "total_bytes": scan["total_bytes"],
+                    "percent": percent,
+                    "speed_bps": 0.0,
+                    "missing_count": scan["missing_count"],
+                    "ready": False,
+                    "error": None,
+                }
+            )
+        return state
+
+    def start_model_bootstrap(self) -> dict[str, Any]:
+        scan = self._scan_core_models()
+        if scan["ready"]:
+            return self.get_model_bootstrap_status()
+
+        with self._model_bootstrap_lock:
+            if self._model_bootstrap_thread and self._model_bootstrap_thread.is_alive():
+                return dict(self._model_bootstrap_state)
+
+            self._model_bootstrap_state = self._default_model_bootstrap_state()
+            self._model_bootstrap_state.update(
+                {
+                    "state": "starting",
+                    "message": "正在准备核心模型下载...",
+                    "missing_count": scan["missing_count"],
+                    "ready": False,
+                    "started_at": datetime.now().isoformat(timespec="seconds"),
+                }
+            )
+            self._model_bootstrap_thread = threading.Thread(target=self._download_core_models, daemon=True)
+            self._model_bootstrap_thread.start()
+            return dict(self._model_bootstrap_state)
+
+    def _resolve_model_download_size(self, opener: Any, model: dict[str, Any]) -> int:
+        expected_size = int(model.get("size") or 0)
+        if expected_size > 0:
+            return expected_size
+
+        request = Request(
+            self._core_model_url(model),
+            method="HEAD",
+            headers={"User-Agent": CORE_MODEL_USER_AGENT},
+        )
+        try:
+            with opener.open(request, timeout=15) as response:
+                content_length = response.headers.get("Content-Length")
+                if content_length:
+                    return int(content_length)
+        except (OSError, URLError, TimeoutError, ValueError):
+            pass
+        return 0
+
+    def _download_core_models(self) -> None:
+        opener = self._core_model_opener()
+        scan = self._scan_core_models()
+        missing = list(scan["missing"])
+        sizes = {model["file"]: self._resolve_model_download_size(opener, model) for model in missing}
+        total_missing_bytes = sum(sizes.values())
+        completed_bytes = 0
+        started_at = time.monotonic()
+
+        if total_missing_bytes <= 0:
+            total_missing_bytes = max(scan["total_bytes"] - scan["downloaded_bytes"], 1)
+
+        self._append_log(f"[bridge] Core model bootstrap started with {len(missing)} missing file(s).")
+        self._set_model_bootstrap_state(
+            state="downloading",
+            message="正在下载核心模型...",
+            file_index=0,
+            file_total=len(missing),
+            downloaded_bytes=0,
+            total_bytes=total_missing_bytes,
+            percent=0.0,
+            speed_bps=0.0,
+            error=None,
+        )
+
+        try:
+            for index, model in enumerate(missing, start=1):
+                target_path = self._core_model_path(model)
+                temp_path = target_path.with_suffix(target_path.suffix + ".download")
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                if temp_path.exists():
+                    temp_path.unlink()
+
+                url = self._core_model_url(model)
+                expected_size = sizes.get(model["file"], 0)
+                request = Request(url, headers={"User-Agent": CORE_MODEL_USER_AGENT})
+                self._set_model_bootstrap_state(
+                    current_file=model["file"],
+                    current_label=model["label"],
+                    file_index=index,
+                    message=f"正在下载 {model['label']} ({model['file']})",
+                )
+
+                file_bytes = 0
+                last_tick = time.monotonic()
+                last_tick_bytes = completed_bytes
+                with opener.open(request, timeout=30) as response, open(temp_path, "wb") as output:
+                    content_length = response.headers.get("Content-Length")
+                    if content_length:
+                        try:
+                            expected_size = int(content_length)
+                            sizes[model["file"]] = expected_size
+                            total_missing_bytes = max(
+                                sum(sizes.values()),
+                                completed_bytes + expected_size,
+                                1,
+                            )
+                        except ValueError:
+                            pass
+
+                    while True:
+                        chunk = response.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        output.write(chunk)
+                        file_bytes += len(chunk)
+                        downloaded_bytes = completed_bytes + file_bytes
+                        now = time.monotonic()
+                        elapsed = max(now - started_at, 0.001)
+                        tick_elapsed = max(now - last_tick, 0.001)
+                        speed_bps = (downloaded_bytes - last_tick_bytes) / tick_elapsed
+                        if tick_elapsed >= 0.5:
+                            last_tick = now
+                            last_tick_bytes = downloaded_bytes
+                        percent = round(min(downloaded_bytes / total_missing_bytes * 100.0, 99.9), 2)
+                        self._set_model_bootstrap_state(
+                            downloaded_bytes=downloaded_bytes,
+                            total_bytes=total_missing_bytes,
+                            percent=percent,
+                            speed_bps=speed_bps if speed_bps > 0 else downloaded_bytes / elapsed,
+                        )
+
+                if expected_size > 0 and file_bytes < expected_size:
+                    raise RuntimeError(f"Downloaded file is incomplete: {model['file']}")
+                temp_path.replace(target_path)
+                completed_bytes += file_bytes
+                self._append_log(f"[bridge] Downloaded core model file: {model['file']}")
+
+            final_scan = self._scan_core_models()
+            if not final_scan["ready"]:
+                raise RuntimeError(f"{final_scan['missing_count']} core model file(s) are still missing.")
+
+            self._set_model_bootstrap_state(
+                state="ready",
+                message="核心模型下载完成。",
+                current_file=None,
+                current_label=None,
+                downloaded_bytes=max(completed_bytes, total_missing_bytes),
+                total_bytes=max(completed_bytes, total_missing_bytes),
+                percent=100.0,
+                speed_bps=0.0,
+                missing_count=0,
+                ready=True,
+                error=None,
+                completed_at=datetime.now().isoformat(timespec="seconds"),
+            )
+            self._append_log("[bridge] Core model bootstrap completed.")
+        except Exception as error:
+            self._set_model_bootstrap_state(
+                state="failed",
+                message="核心模型下载失败。",
+                speed_bps=0.0,
+                ready=False,
+                error=str(error),
+                completed_at=datetime.now().isoformat(timespec="seconds"),
+            )
+            self._append_log(f"[bridge] Core model bootstrap failed: {error}")
+
+    def _read_app_version(self) -> str:
+        version_path = self.repo_root / "VERSION"
+        try:
+            version = version_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            version = "0.0.0"
+        return version or "0.0.0"
+
+    def _default_update_state(self) -> dict[str, Any]:
+        return {
+            "state": "idle",
+            "message": "尚未检查更新。",
+            "current_version": self._read_app_version(),
+            "latest_version": None,
+            "update_available": False,
+            "delta_available": False,
+            "full_installer_url": None,
+            "release_url": None,
+            "asset_name": None,
+            "package_path": None,
+            "downloaded_bytes": 0,
+            "total_bytes": 0,
+            "percent": 0.0,
+            "speed_bps": 0.0,
+            "error": None,
+            "checked_at": None,
+            "completed_at": None,
+        }
+
+    def _copy_update_state(self) -> dict[str, Any]:
+        with self._update_lock:
+            return dict(self._update_state)
+
+    def _set_update_state(self, **updates: Any) -> None:
+        with self._update_lock:
+            self._update_state.update(updates)
+
+    def _updates_root(self) -> Path:
+        base = os.environ.get("LOCALAPPDATA")
+        if base:
+            return Path(base) / UPDATE_CACHE_DIRNAME / "updates"
+        return Path.home() / ".faceswap-studio" / "updates"
+
+    def _update_opener(self):
+        return build_opener()
+
+    def _version_parts(self, version: str) -> tuple[int, ...]:
+        parts: list[int] = []
+        for segment in version.strip().lstrip("v").replace("-", ".").split("."):
+            digits = "".join(ch for ch in segment if ch.isdigit())
+            if digits:
+                parts.append(int(digits))
+            else:
+                parts.append(0)
+        return tuple(parts or [0])
+
+    def _is_newer_version(self, latest: str, current: str) -> bool:
+        latest_parts = list(self._version_parts(latest))
+        current_parts = list(self._version_parts(current))
+        width = max(len(latest_parts), len(current_parts))
+        latest_parts += [0] * (width - len(latest_parts))
+        current_parts += [0] * (width - len(current_parts))
+        return latest_parts > current_parts
+
+    def _download_json(self, url: str, timeout: int = 20) -> dict[str, Any]:
+        request = Request(url, headers={"Accept": "application/json", "User-Agent": UPDATE_USER_AGENT})
+        with self._update_opener().open(request, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8-sig"))
+
+    def _latest_release_metadata(self) -> tuple[dict[str, Any], dict[str, str]]:
+        manifest_override = os.environ.get("FACESWAP_STUDIO_UPDATE_MANIFEST_URL")
+        if manifest_override:
+            manifest = self._download_json(manifest_override)
+            return manifest, {}
+
+        repository = os.environ.get("FACESWAP_STUDIO_UPDATE_REPOSITORY", UPDATE_REPOSITORY)
+        release_api_url = f"https://api.github.com/repos/{repository}/releases/latest"
+        release = self._download_json(release_api_url)
+        assets = release.get("assets") or []
+        asset_urls: dict[str, str] = {}
+        for asset in assets:
+            name = str(asset.get("name") or "")
+            url = str(asset.get("browser_download_url") or "")
+            if name and url:
+                asset_urls[name] = url
+
+        manifest_url = asset_urls.get(UPDATE_MANIFEST_ASSET)
+        if not manifest_url:
+            raise RuntimeError(f"{UPDATE_MANIFEST_ASSET} was not found in the latest release.")
+
+        manifest = self._download_json(manifest_url)
+        manifest["release_url"] = release.get("html_url")
+        return manifest, asset_urls
+
+    def _resolve_update_url(self, package: dict[str, Any], asset_urls: dict[str, str]) -> str | None:
+        direct_url = package.get("url") or package.get("download_url")
+        if direct_url:
+            return str(direct_url)
+        asset_name = str(package.get("asset_name") or "")
+        if asset_name:
+            return asset_urls.get(asset_name)
+        return None
+
+    def _select_delta_package(
+        self,
+        manifest: dict[str, Any],
+        asset_urls: dict[str, str],
+        current_version: str,
+    ) -> dict[str, Any] | None:
+        for package in manifest.get("delta_packages") or []:
+            if str(package.get("from_version") or "") != current_version:
+                continue
+            url = self._resolve_update_url(package, asset_urls)
+            if not url:
+                continue
+            selected = dict(package)
+            selected["download_url"] = url
+            return selected
+        return None
+
+    def update_status(self) -> dict[str, Any]:
+        state = self._copy_update_state()
+        state["current_version"] = self._read_app_version()
+        return state
+
+    def check_updates(self) -> dict[str, Any]:
+        with self._update_lock:
+            self._update_state = self._default_update_state()
+            self._update_state.update(
+                {
+                    "state": "checking",
+                    "message": "正在检查更新...",
+                    "checked_at": datetime.now().isoformat(timespec="seconds"),
+                }
+            )
+
+        try:
+            current_version = self._read_app_version()
+            manifest, asset_urls = self._latest_release_metadata()
+            latest_version = str(manifest.get("version") or "")
+            if not latest_version:
+                raise RuntimeError("Update manifest does not contain a version.")
+
+            full_package = dict(manifest.get("full_package") or {})
+            full_installer_url = self._resolve_update_url(full_package, asset_urls)
+            release_url = manifest.get("release_url")
+            update_available = self._is_newer_version(latest_version, current_version)
+            selected_delta = self._select_delta_package(manifest, asset_urls, current_version)
+
+            state_updates: dict[str, Any] = {
+                "latest_version": latest_version,
+                "update_available": update_available,
+                "delta_available": bool(update_available and selected_delta),
+                "full_installer_url": full_installer_url,
+                "release_url": release_url,
+                "manifest": manifest,
+                "selected_delta": selected_delta,
+                "error": None,
+            }
+
+            if not update_available:
+                state_updates.update({"state": "current", "message": "当前已是最新版本。"})
+            elif selected_delta:
+                state_updates.update(
+                    {
+                        "state": "update_available",
+                        "message": f"发现新版本 {latest_version}。",
+                        "asset_name": selected_delta.get("asset_name"),
+                        "total_bytes": int(selected_delta.get("size") or 0),
+                    }
+                )
+            else:
+                state_updates.update(
+                    {
+                        "state": "full_required",
+                        "message": "当前版本没有可用增量包，请下载全量安装器。",
+                        "asset_name": full_package.get("asset_name"),
+                        "total_bytes": int(full_package.get("size") or 0),
+                    }
+                )
+
+            self._set_update_state(**state_updates)
+        except Exception as error:
+            self._set_update_state(
+                state="failed",
+                message="检查更新失败。",
+                update_available=False,
+                delta_available=False,
+                error=str(error),
+            )
+            self._append_log(f"[bridge] Update check failed: {error}")
+
+        return self.update_status()
+
+    def download_update(self) -> dict[str, Any]:
+        state = self._copy_update_state()
+        if state.get("state") in {"idle", "failed", "current"}:
+            state = self.check_updates()
+        if not state.get("update_available"):
+            return self.update_status()
+        if not state.get("delta_available"):
+            return self.update_status()
+
+        with self._update_lock:
+            if self._update_download_thread and self._update_download_thread.is_alive():
+                return dict(self._update_state)
+            self._update_state.update(
+                {
+                    "state": "downloading",
+                    "message": "正在下载更新包...",
+                    "downloaded_bytes": 0,
+                    "percent": 0.0,
+                    "speed_bps": 0.0,
+                    "error": None,
+                }
+            )
+            self._update_download_thread = threading.Thread(target=self._download_update_worker, daemon=True)
+            self._update_download_thread.start()
+            return dict(self._update_state)
+
+    def _download_update_worker(self) -> None:
+        state = self._copy_update_state()
+        package = dict(state.get("selected_delta") or {})
+        download_url = str(package.get("download_url") or "")
+        if not download_url:
+            self._set_update_state(state="failed", message="更新包下载地址缺失。", error="Missing delta download URL")
+            return
+
+        version = str(state.get("latest_version") or "unknown")
+        asset_name = str(package.get("asset_name") or Path(urlparse(download_url).path).name or "update.delta.zip")
+        expected_hash = str(package.get("sha256") or "")
+        expected_size = int(package.get("size") or 0)
+        target_dir = self._updates_root() / version
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target_path = target_dir / asset_name
+        temp_path = target_path.with_suffix(target_path.suffix + ".download")
+
+        try:
+            if temp_path.exists():
+                temp_path.unlink()
+            request = Request(download_url, headers={"User-Agent": UPDATE_USER_AGENT})
+            started_at = time.monotonic()
+            downloaded = 0
+            with self._update_opener().open(request, timeout=30) as response, open(temp_path, "wb") as output:
+                content_length = response.headers.get("Content-Length")
+                if content_length:
+                    try:
+                        expected_size = int(content_length)
+                    except ValueError:
+                        pass
+                last_tick = time.monotonic()
+                last_tick_bytes = 0
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    now = time.monotonic()
+                    tick_elapsed = max(now - last_tick, 0.001)
+                    speed = (downloaded - last_tick_bytes) / tick_elapsed
+                    if tick_elapsed >= 0.5:
+                        last_tick = now
+                        last_tick_bytes = downloaded
+                    percent = 0.0
+                    if expected_size > 0:
+                        percent = round(min(downloaded / expected_size * 100.0, 99.9), 2)
+                    elapsed = max(now - started_at, 0.001)
+                    self._set_update_state(
+                        downloaded_bytes=downloaded,
+                        total_bytes=expected_size,
+                        percent=percent,
+                        speed_bps=speed if speed > 0 else downloaded / elapsed,
+                    )
+
+            if expected_size > 0 and downloaded < expected_size:
+                raise RuntimeError("Downloaded update package is incomplete.")
+
+            actual_hash = hashlib.sha256(temp_path.read_bytes()).hexdigest().upper()
+            if expected_hash and actual_hash.upper() != expected_hash.upper():
+                raise RuntimeError("Update package SHA256 mismatch.")
+
+            temp_path.replace(target_path)
+            self._set_update_state(
+                state="downloaded",
+                message="更新包下载完成。",
+                package_path=str(target_path),
+                downloaded_bytes=downloaded,
+                total_bytes=expected_size or downloaded,
+                percent=100.0,
+                speed_bps=0.0,
+                completed_at=datetime.now().isoformat(timespec="seconds"),
+                error=None,
+            )
+            self._append_log(f"[bridge] Update package downloaded: {target_path}")
+        except Exception as error:
+            self._set_update_state(
+                state="failed",
+                message="更新包下载失败。",
+                speed_bps=0.0,
+                error=str(error),
+                completed_at=datetime.now().isoformat(timespec="seconds"),
+            )
+            self._append_log(f"[bridge] Update download failed: {error}")
+
+    def apply_update(self) -> dict[str, Any]:
+        state = self._copy_update_state()
+        package_path = Path(str(state.get("package_path") or ""))
+        if not package_path.exists():
+            return {
+                **state,
+                "state": "failed",
+                "message": "更新包尚未下载。",
+                "error": "Update package was not downloaded.",
+            }
+
+        updater_source = self.repo_root / "FaceSwapStudioUpdater.exe"
+        if not updater_source.exists():
+            return {
+                **state,
+                "state": "failed",
+                "message": "更新程序缺失。",
+                "error": f"Updater not found: {updater_source}",
+            }
+
+        updater_dir = self._updates_root() / "runner"
+        updater_dir.mkdir(parents=True, exist_ok=True)
+        updater_copy = updater_dir / "FaceSwapStudioUpdater.exe"
+        shutil.copy2(updater_source, updater_copy)
+
+        restart_path = self.repo_root / "启动FaceSwap Studio.exe"
+        args = [
+            "--root",
+            str(self.repo_root),
+            "--package",
+            str(package_path),
+            "--restart",
+            str(restart_path),
+        ]
+        escaped_file = str(updater_copy).replace("'", "''")
+        escaped_args = ", ".join("'" + arg.replace("'", "''") + "'" for arg in args)
+        command = f"Start-Process -FilePath '{escaped_file}' -ArgumentList @({escaped_args}) -Verb RunAs"
+        powershell = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+        subprocess.Popen(
+            [powershell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        self._set_update_state(state="applying", message="更新程序已启动，请确认系统权限提示。", error=None)
+        self._append_log("[bridge] Updater launched.")
+        return self.update_status()
 
     def _default_workspace_state(self) -> dict[str, Any]:
         return {
@@ -1238,21 +1951,42 @@ class FaceFusionRuntime:
         env["FACEFUSION_CURL_PATH"] = r"C:\Windows\System32\curl.exe"
         env["FACEFUSION_UI_HOST"] = self.webui_bind_host
         env["FACEFUSION_UI_PORT"] = str(self._settings["facefusion_port"])
-        env["FACEFUSION_DISABLE_PROXY"] = "1"
-        env["NO_PROXY"] = "*"
-        env["no_proxy"] = "*"
-        for proxy_key in [
+        self._apply_model_download_env(env)
+        return env
+
+    def _apply_model_download_env(self, env: dict[str, str]) -> None:
+        mode = self._normalize_model_download_mode(self._settings.get("model_download_mode"))
+        proxy_url = self._normalize_proxy_url(self._settings.get("custom_proxy_url"))
+        proxy_keys = [
             "HTTP_PROXY",
             "HTTPS_PROXY",
             "ALL_PROXY",
             "http_proxy",
             "https_proxy",
             "all_proxy",
-        ]:
-            env.pop(proxy_key, None)
-        env.setdefault("FACEFUSION_HUGGINGFACE_MIRRORS", "https://hf-mirror.com")
-        env.setdefault("FACEFUSION_GITHUB_MIRRORS", "https://github.com")
-        return env
+        ]
+
+        env.pop("FACEFUSION_PROXY_URL", None)
+        if mode == MODEL_DOWNLOAD_MODE_DOMESTIC:
+            env["FACEFUSION_HUGGINGFACE_MIRRORS"] = DOMESTIC_HUGGINGFACE_MIRROR
+            env["FACEFUSION_GITHUB_MIRRORS"] = OFFICIAL_GITHUB_URL
+            env["FACEFUSION_DISABLE_PROXY"] = "1"
+            env["NO_PROXY"] = "*"
+            env["no_proxy"] = "*"
+            for proxy_key in proxy_keys:
+                env.pop(proxy_key, None)
+            return
+
+        env["FACEFUSION_HUGGINGFACE_MIRRORS"] = OFFICIAL_HUGGINGFACE_URL
+        env["FACEFUSION_GITHUB_MIRRORS"] = OFFICIAL_GITHUB_URL
+        env["FACEFUSION_DISABLE_PROXY"] = "0"
+        env["NO_PROXY"] = LOCAL_NO_PROXY
+        env["no_proxy"] = LOCAL_NO_PROXY
+
+        if mode == MODEL_DOWNLOAD_MODE_CUSTOM_PROXY:
+            env["FACEFUSION_PROXY_URL"] = proxy_url
+            for proxy_key in proxy_keys:
+                env[proxy_key] = proxy_url
 
     def _is_webui_ready(self) -> bool:
         try:
@@ -1788,6 +2522,12 @@ class FaceFusionRuntime:
         if "default_output_dir" in payload and payload["default_output_dir"]:
             self._settings["default_output_dir"] = str(payload["default_output_dir"])
             self._apply_output_root(self._settings["default_output_dir"])
+        if "model_download_mode" in payload:
+            self._settings["model_download_mode"] = self._normalize_model_download_mode(
+                payload["model_download_mode"]
+            )
+        if "custom_proxy_url" in payload:
+            self._settings["custom_proxy_url"] = self._normalize_proxy_url(payload["custom_proxy_url"])
         self._save_settings()
         self._append_log("[bridge] Settings updated.")
         return self.get_settings()
@@ -1920,6 +2660,36 @@ def facefusion_stop() -> dict[str, Any]:
 @app.post("/facefusion/open-browser")
 def facefusion_open_browser() -> dict[str, Any]:
     return runtime.open_browser()
+
+
+@app.get("/models/bootstrap")
+def models_bootstrap_status() -> dict[str, Any]:
+    return runtime.get_model_bootstrap_status()
+
+
+@app.post("/models/bootstrap/start")
+def models_bootstrap_start() -> dict[str, Any]:
+    return runtime.start_model_bootstrap()
+
+
+@app.get("/updates/status")
+def updates_status() -> dict[str, Any]:
+    return runtime.update_status()
+
+
+@app.post("/updates/check")
+def updates_check() -> dict[str, Any]:
+    return runtime.check_updates()
+
+
+@app.post("/updates/download")
+def updates_download() -> dict[str, Any]:
+    return runtime.download_update()
+
+
+@app.post("/updates/apply")
+def updates_apply() -> dict[str, Any]:
+    return runtime.apply_update()
 
 
 @app.get("/metrics/system")

@@ -65,6 +65,7 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
   bool _opening = false;
   bool _failed = false;
   bool _playWhenReady = false;
+  bool _hoveringControls = false;
   int _openGeneration = 0;
 
   @override
@@ -180,6 +181,19 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
     } else {
       await player.play();
     }
+    _setHoveringControls(false);
+  }
+
+  void _setHoveringControls(bool hovering) {
+    if (!mounted) {
+      return;
+    }
+    if (_hoveringControls == hovering) {
+      return;
+    }
+    setState(() {
+      _hoveringControls = hovering;
+    });
   }
 
   @override
@@ -188,103 +202,108 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
     final player = _player;
     final controller = _controller;
 
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        if (player != null && controller != null)
-          Video(
-            controller: controller,
-            fit: widget.fit,
-            controls: NoVideoControls,
-          )
-        else if (widget.thumbnailPath != null)
-          Image.file(
-            File(widget.thumbnailPath!),
-            fit: widget.fit,
-            errorBuilder: (_, _, _) => _InlineVideoPlaceholder(
+    return MouseRegion(
+      onEnter: (_) => _setHoveringControls(true),
+      onHover: (_) => _setHoveringControls(true),
+      onExit: (_) => _setHoveringControls(false),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (player != null && controller != null)
+            Video(
+              controller: controller,
+              fit: widget.fit,
+              controls: NoVideoControls,
+            )
+          else if (widget.thumbnailPath != null)
+            Image.file(
+              File(widget.thumbnailPath!),
+              fit: widget.fit,
+              errorBuilder: (_, _, _) => _InlineVideoPlaceholder(
+                icon: Icons.movie_creation_outlined,
+                color: theme.colorScheme.primary,
+              ),
+            )
+          else
+            _InlineVideoPlaceholder(
               icon: Icons.movie_creation_outlined,
               color: theme.colorScheme.primary,
             ),
-          )
-        else
-          _InlineVideoPlaceholder(
-            icon: Icons.movie_creation_outlined,
-            color: theme.colorScheme.primary,
-          ),
-        Positioned.fill(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.black.withValues(alpha: 0.08),
-                  Colors.black.withValues(alpha: 0.36),
-                ],
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.08),
+                    Colors.black.withValues(alpha: 0.36),
+                  ],
+                ),
               ),
             ),
           ),
-        ),
-        if (_failed)
-          Center(
-            child: _InlineVideoBadge(
-              icon: Icons.error_outline_rounded,
-              label: '播放失败',
-              color: theme.colorScheme.error,
-            ),
-          )
-        else if (_opening)
-          const Center(
-            child: SizedBox(
-              width: 28,
-              height: 28,
-              child: CircularProgressIndicator(strokeWidth: 2.4),
-            ),
-          )
-        else
-          Center(
-            child: StreamBuilder<bool>(
-              stream: player?.stream.playing,
-              initialData: player?.state.playing ?? false,
-              builder: (context, snapshot) {
-                final playing = snapshot.data == true;
-                return IconButton.filled(
-                  onPressed: _togglePlayback,
-                  iconSize: 34,
-                  tooltip: playing ? '暂停' : '播放',
-                  icon: Icon(
-                    playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                  ),
-                );
-              },
-            ),
-          ),
-        if (widget.showVideoBadge)
-          Positioned(
-            left: 8,
-            bottom: 8,
-            child: _InlineVideoBadge(
-              icon: Icons.movie_creation_outlined,
-              label: '视频',
-              color: Colors.white,
-            ),
-          ),
-        if (widget.showFullscreenButton && widget.onOpenFullscreen != null)
-          Positioned(
-            right: 8,
-            bottom: 8,
-            child: IconButton.filledTonal(
-              onPressed: widget.onOpenFullscreen,
-              iconSize: 20,
-              tooltip: '全屏播放',
-              icon: const Icon(Icons.fullscreen_rounded),
-              style: IconButton.styleFrom(
-                backgroundColor: Colors.black.withValues(alpha: 0.68),
-                foregroundColor: Colors.white,
+          if (_failed)
+            Center(
+              child: _InlineVideoBadge(
+                icon: Icons.error_outline_rounded,
+                label: '播放失败',
+                color: theme.colorScheme.error,
+              ),
+            )
+          else if (_opening)
+            const Center(
+              child: SizedBox(
+                width: 28,
+                height: 28,
+                child: CircularProgressIndicator(strokeWidth: 2.4),
+              ),
+            )
+          else if (_hoveringControls)
+            Center(
+              child: StreamBuilder<bool>(
+                stream: player?.stream.playing,
+                initialData: player?.state.playing ?? false,
+                builder: (context, snapshot) {
+                  final playing = snapshot.data == true;
+                  return IconButton.filled(
+                    onPressed: _togglePlayback,
+                    iconSize: 34,
+                    tooltip: playing ? '暂停' : '播放',
+                    icon: Icon(
+                      playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                    ),
+                  );
+                },
               ),
             ),
-          ),
-      ],
+          if (widget.showVideoBadge)
+            Positioned(
+              left: 8,
+              bottom: 8,
+              child: _InlineVideoBadge(
+                icon: Icons.movie_creation_outlined,
+                label: '视频',
+                color: Colors.white,
+              ),
+            ),
+          if (widget.showFullscreenButton && widget.onOpenFullscreen != null)
+            Positioned(
+              right: 8,
+              bottom: 8,
+              child: IconButton.filledTonal(
+                onPressed: widget.onOpenFullscreen,
+                iconSize: 20,
+                tooltip: '全屏播放',
+                icon: const Icon(Icons.fullscreen_rounded),
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.black.withValues(alpha: 0.68),
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

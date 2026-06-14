@@ -21,8 +21,13 @@ class StudioTheme {
       navigationRailTheme: const NavigationRailThemeData(
         backgroundColor: Colors.transparent,
         indicatorColor: Color(0x220F9FB8),
-        selectedLabelTextStyle: TextStyle(fontWeight: FontWeight.w700),
+        selectedLabelTextStyle: TextStyle(
+          color: Color(0xFF0F172A),
+          fontWeight: FontWeight.w700,
+        ),
+        unselectedLabelTextStyle: TextStyle(color: Color(0xFF0F172A)),
         selectedIconTheme: IconThemeData(color: Color(0xFF0F172A)),
+        unselectedIconTheme: IconThemeData(color: Color(0xFF0F172A)),
       ),
       appBarTheme: const AppBarTheme(
         backgroundColor: Colors.transparent,
@@ -52,7 +57,13 @@ class StudioTheme {
       navigationRailTheme: const NavigationRailThemeData(
         backgroundColor: Colors.transparent,
         indicatorColor: Color(0x261AC6E4),
-        selectedLabelTextStyle: TextStyle(fontWeight: FontWeight.w700),
+        selectedLabelTextStyle: TextStyle(
+          color: Color(0xFFF8FAFC),
+          fontWeight: FontWeight.w700,
+        ),
+        unselectedLabelTextStyle: TextStyle(color: Color(0xFFE2E8F0)),
+        selectedIconTheme: IconThemeData(color: Color(0xFFF8FAFC)),
+        unselectedIconTheme: IconThemeData(color: Color(0xFFE2E8F0)),
       ),
       appBarTheme: const AppBarTheme(
         backgroundColor: Colors.transparent,

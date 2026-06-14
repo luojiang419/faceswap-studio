@@ -5,6 +5,23 @@ function Get-RepoRoot {
     return (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 }
 
+function Get-AppVersion {
+    param(
+        [string]$RepoRoot = (Get-RepoRoot)
+    )
+
+    $versionPath = Join-Path $RepoRoot "VERSION"
+    if (-not (Test-Path -LiteralPath $versionPath)) {
+        throw "VERSION file was not found: $versionPath"
+    }
+
+    $version = (Get-Content -LiteralPath $versionPath -Raw).Trim()
+    if (-not $version) {
+        throw "VERSION file is empty: $versionPath"
+    }
+    return $version
+}
+
 function Ensure-Directory {
     param(
         [Parameter(Mandatory = $true)]
@@ -89,21 +106,30 @@ function Initialize-FaceFusionEnvironment {
     if (-not $env:FACEFUSION_GITHUB_MIRRORS) {
         $env:FACEFUSION_GITHUB_MIRRORS = "https://github.com"
     }
-    $env:FACEFUSION_DISABLE_PROXY = "1"
-    $env:NO_PROXY = "*"
-    $env:no_proxy = "*"
+    if (-not $env:FACEFUSION_DISABLE_PROXY) {
+        $env:FACEFUSION_DISABLE_PROXY = "1"
+    }
 
-    foreach ($proxyVar in @(
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "ALL_PROXY",
-        "http_proxy",
-        "https_proxy",
-        "all_proxy"
-    )) {
-        if (Test-Path "Env:$proxyVar") {
-            Remove-Item "Env:$proxyVar" -ErrorAction SilentlyContinue
+    $proxyDisabled = $env:FACEFUSION_DISABLE_PROXY.ToLowerInvariant() -notin @("0", "false", "no", "off")
+    if ($proxyDisabled -and -not $env:FACEFUSION_PROXY_URL) {
+        $env:NO_PROXY = "*"
+        $env:no_proxy = "*"
+
+        foreach ($proxyVar in @(
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy"
+        )) {
+            if (Test-Path "Env:$proxyVar") {
+                Remove-Item "Env:$proxyVar" -ErrorAction SilentlyContinue
+            }
         }
+    } elseif (-not $env:NO_PROXY) {
+        $env:NO_PROXY = "localhost,127.0.0.1,::1"
+        $env:no_proxy = $env:NO_PROXY
     }
 
     $pathEntries = New-Object System.Collections.Generic.List[string]

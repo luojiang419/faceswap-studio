@@ -38,6 +38,11 @@ def run(commands : List[Command]) -> List[Command]:
 
 
 def resolve_proxy_commands() -> List[Command]:
+	proxy_url = os.environ.get('FACEFUSION_PROXY_URL', '').strip()
+
+	if proxy_url:
+		return [ '--proxy', proxy_url ]
+
 	disable_proxy = os.environ.get('FACEFUSION_DISABLE_PROXY', '1').lower()
 
 	if disable_proxy in [ '0', 'false', 'no', 'off' ]:

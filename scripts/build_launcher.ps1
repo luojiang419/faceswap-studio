@@ -9,8 +9,9 @@ $distDir = Join-Path $repoRoot "dist"
 $buildDir = Join-Path $repoRoot "build\launcher"
 $sourcePath = Join-Path $repoRoot "launcher\FaceSwapStudioLauncher.cs"
 $iconPath = Join-Path $repoRoot "facefusion.ico"
-$builtLauncher = Join-Path $distDir "启动FaceSwap Studio.exe"
-$rootLauncher = Join-Path $repoRoot "启动FaceSwap Studio.exe"
+$launcherFileName = ([string][char]0x542F) + ([string][char]0x52A8) + "FaceSwap Studio.exe"
+$builtLauncher = Join-Path $distDir $launcherFileName
+$rootLauncher = Join-Path $repoRoot $launcherFileName
 
 $cscCandidates = @(
     (Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"),

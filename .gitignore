@@ -10,6 +10,8 @@ __pycache__
 .vscode
 build
 dist
+backup
+进度快照
 *.spec
 faceswap studio/data/**
 !faceswap studio/data/

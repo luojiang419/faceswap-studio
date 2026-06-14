@@ -26,6 +26,24 @@ class BridgeClient {
   Future<Map<String, dynamic>> openBrowser() async =>
       _postJson('/facefusion/open-browser');
 
+  Future<Map<String, dynamic>> getModelBootstrapStatus() async =>
+      _getJson('/models/bootstrap');
+
+  Future<Map<String, dynamic>> startModelBootstrap() async =>
+      _postJson('/models/bootstrap/start');
+
+  Future<Map<String, dynamic>> getUpdateStatus() async =>
+      _getJson('/updates/status');
+
+  Future<Map<String, dynamic>> checkUpdates() async =>
+      _postJson('/updates/check');
+
+  Future<Map<String, dynamic>> downloadUpdate() async =>
+      _postJson('/updates/download');
+
+  Future<Map<String, dynamic>> applyUpdate() async =>
+      _postJson('/updates/apply');
+
   Future<Map<String, dynamic>> getWorkspaceDraft() async =>
       _getJson('/workspace/draft');
 

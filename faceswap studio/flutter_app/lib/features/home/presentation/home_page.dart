@@ -25,6 +25,10 @@ class _HomePageState extends State<HomePage> {
   String _webuiUrl = 'http://127.0.0.1:7860';
   int? _facefusionPid;
   _MetricsSnapshot? _metrics;
+  bool _modelBootstrapPromptShown = false;
+  bool _modelBootstrapReady = false;
+  bool _updateCheckStarted = false;
+  bool _updatePromptShown = false;
 
   @override
   void initState() {
@@ -50,11 +54,13 @@ class _HomePageState extends State<HomePage> {
         _client.getStatus(),
         _client.getMetrics(),
         _client.getLogs(after: _lastLogId),
+        _client.getModelBootstrapStatus(),
       ]);
 
       final status = results[0] as Map<String, dynamic>;
       final metrics = results[1] as Map<String, dynamic>;
       final logs = results[2] as Map<String, dynamic>;
+      final modelBootstrap = results[3] as Map<String, dynamic>;
 
       final entries = (logs['entries'] as List<dynamic>? ?? const <dynamic>[])
           .cast<Map<String, dynamic>>();
@@ -80,11 +86,14 @@ class _HomePageState extends State<HomePage> {
         _webuiUrl = '${status['webui_url'] ?? _webuiUrl}';
         _facefusionPid = status['pid'] as int?;
         _metrics = _MetricsSnapshot.fromJson(metrics);
+        _modelBootstrapReady = modelBootstrap['ready'] == true;
         _lastLogId = (logs['latest_id'] as num?)?.toInt() ?? _lastLogId;
         _logs
           ..clear()
           ..addAll(latestLogs);
       });
+      _maybeShowModelBootstrapDialog(modelBootstrap);
+      _maybeCheckForUpdates();
     } catch (_) {
       if (!mounted) {
         return;
@@ -97,6 +106,69 @@ class _HomePageState extends State<HomePage> {
     } finally {
       _requestInFlight = false;
     }
+  }
+
+  void _maybeShowModelBootstrapDialog(Map<String, dynamic> status) {
+    final state = '${status['state'] ?? ''}';
+    final shouldPrompt =
+        !_modelBootstrapReady &&
+        !_modelBootstrapPromptShown &&
+        {'missing', 'starting', 'downloading', 'failed'}.contains(state);
+    if (!shouldPrompt) {
+      return;
+    }
+
+    _modelBootstrapPromptShown = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) {
+        return;
+      }
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const _ModelBootstrapDialog(),
+      );
+      await _refresh();
+    });
+  }
+
+  void _maybeCheckForUpdates() {
+    if (!_bridgeOnline || _updateCheckStarted) {
+      return;
+    }
+    _updateCheckStarted = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) {
+        return;
+      }
+      try {
+        final status = await _client.checkUpdates();
+        if (!mounted) {
+          return;
+        }
+        final state = '${status['state'] ?? ''}';
+        final shouldPrompt =
+            status['update_available'] == true &&
+            !_updatePromptShown &&
+            {
+              'update_available',
+              'downloading',
+              'downloaded',
+              'failed',
+              'full_required',
+            }.contains(state);
+        if (!shouldPrompt) {
+          return;
+        }
+        _updatePromptShown = true;
+        await showDialog<void>(
+          context: context,
+          barrierDismissible: state != 'downloading' && state != 'applying',
+          builder: (context) => _UpdateDialog(initialStatus: status),
+        );
+        await _refresh();
+      } catch (_) {}
+    });
   }
 
   Future<void> _startFaceFusion() async =>
@@ -160,6 +232,615 @@ class _HomePageState extends State<HomePage> {
           onOpenBrowser: _openBrowser,
         );
       },
+    );
+  }
+}
+
+class _ModelBootstrapDialog extends StatefulWidget {
+  const _ModelBootstrapDialog();
+
+  @override
+  State<_ModelBootstrapDialog> createState() => _ModelBootstrapDialogState();
+}
+
+class _ModelBootstrapDialogState extends State<_ModelBootstrapDialog> {
+  final BridgeClient _client = BridgeClient();
+  Timer? _timer;
+
+  Map<String, dynamic> _status = const <String, dynamic>{
+    'state': 'missing',
+    'message': '正在检查核心模型...',
+    'percent': 0.0,
+    'downloaded_bytes': 0,
+    'total_bytes': 0,
+    'speed_bps': 0.0,
+  };
+  bool _requestInFlight = false;
+  bool _startingFaceFusion = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+    _timer = Timer.periodic(
+      const Duration(milliseconds: 700),
+      (_) => _refresh(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refresh() async {
+    if (_requestInFlight) {
+      return;
+    }
+    _requestInFlight = true;
+    try {
+      final status = await _client.getModelBootstrapStatus();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _status = status;
+      });
+      if (status['ready'] == true) {
+        await _startFaceFusionAndClose();
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _status = {
+            ..._status,
+            'state': 'failed',
+            'message': '模型状态读取失败。',
+            'error': '$error',
+          };
+        });
+      }
+    } finally {
+      _requestInFlight = false;
+    }
+  }
+
+  Future<void> _startDownload() async {
+    if (_isBusy) {
+      return;
+    }
+    setState(() {
+      _status = {
+        ..._status,
+        'state': 'starting',
+        'message': '正在准备下载...',
+        'error': null,
+      };
+    });
+    try {
+      final status = await _client.startModelBootstrap();
+      if (mounted) {
+        setState(() {
+          _status = status;
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _status = {
+            ..._status,
+            'state': 'failed',
+            'message': '模型下载启动失败。',
+            'error': '$error',
+          };
+        });
+      }
+    }
+  }
+
+  Future<void> _startFaceFusionAndClose() async {
+    if (_startingFaceFusion) {
+      return;
+    }
+    _startingFaceFusion = true;
+    setState(() {
+      _status = {..._status, 'message': '核心模型已完成，正在启动 FaceFusion...'};
+    });
+    try {
+      await _client.startFaceFusion();
+    } catch (_) {}
+    if (mounted) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  bool get _isBusy {
+    final state = '${_status['state'] ?? ''}';
+    return state == 'starting' || state == 'downloading' || _startingFaceFusion;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final state = '${_status['state'] ?? 'missing'}';
+    final percent = ((_status['percent'] as num?)?.toDouble() ?? 0.0).clamp(
+      0.0,
+      100.0,
+    );
+    final downloadedBytes = (_status['downloaded_bytes'] as num?)?.toInt() ?? 0;
+    final totalBytes = (_status['total_bytes'] as num?)?.toInt() ?? 0;
+    final speedBps = (_status['speed_bps'] as num?)?.toDouble() ?? 0.0;
+    final currentFile = '${_status['current_file'] ?? ''}';
+    final currentLabel = '${_status['current_label'] ?? ''}';
+    final error = '${_status['error'] ?? ''}';
+
+    return AlertDialog(
+      icon: Icon(
+        state == 'failed'
+            ? Icons.error_outline_rounded
+            : Icons.cloud_download_outlined,
+      ),
+      title: const Text('下载核心模型'),
+      content: SizedBox(
+        width: 520,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${_status['message'] ?? '等待下载'}'),
+            const SizedBox(height: 18),
+            LinearProgressIndicator(value: percent <= 0 ? null : percent / 100),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Text('${percent.toStringAsFixed(1)}%'),
+                const Spacer(),
+                Text(
+                  '${_formatBytes(downloadedBytes)} / ${_formatBytes(totalBytes)}',
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              speedBps > 0 ? '${_formatBytes(speedBps.round())}/s' : '等待网络响应',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            if (currentFile.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                currentLabel.isEmpty
+                    ? currentFile
+                    : '$currentLabel · $currentFile',
+                style: theme.textTheme.bodyMedium,
+              ),
+            ],
+            if (error.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                error,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.error,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        FilledButton.icon(
+          onPressed: _isBusy ? null : _startDownload,
+          icon: Icon(
+            state == 'failed' ? Icons.refresh_rounded : Icons.download_rounded,
+          ),
+          label: Text(state == 'failed' ? '重试下载' : '开始下载'),
+        ),
+      ],
+    );
+  }
+
+  String _formatBytes(int value) {
+    if (value <= 0) {
+      return '0 B';
+    }
+    const units = ['B', 'KB', 'MB', 'GB'];
+    var size = value.toDouble();
+    var unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex += 1;
+    }
+    final fractionDigits = unitIndex == 0 ? 0 : 1;
+    return '${size.toStringAsFixed(fractionDigits)} ${units[unitIndex]}';
+  }
+}
+
+class _UpdateDialog extends StatefulWidget {
+  const _UpdateDialog({required this.initialStatus});
+
+  final Map<String, dynamic> initialStatus;
+
+  @override
+  State<_UpdateDialog> createState() => _UpdateDialogState();
+}
+
+class _UpdateDialogState extends State<_UpdateDialog> {
+  final BridgeClient _client = BridgeClient();
+  Timer? _timer;
+
+  late Map<String, dynamic> _status;
+  bool _requestInFlight = false;
+  bool _actionInFlight = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _status = Map<String, dynamic>.from(widget.initialStatus);
+    _refresh();
+    _timer = Timer.periodic(
+      const Duration(milliseconds: 700),
+      (_) => _refresh(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refresh() async {
+    if (_requestInFlight) {
+      return;
+    }
+    _requestInFlight = true;
+    try {
+      final status = await _client.getUpdateStatus();
+      if (mounted) {
+        setState(() {
+          _status = status;
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _status = {
+            ..._status,
+            'state': 'failed',
+            'message': '更新状态读取失败。',
+            'error': '$error',
+          };
+        });
+      }
+    } finally {
+      _requestInFlight = false;
+    }
+  }
+
+  Future<void> _download() async {
+    if (_isBusy) {
+      return;
+    }
+    setState(() {
+      _actionInFlight = true;
+      _status = {
+        ..._status,
+        'state': 'downloading',
+        'message': '正在下载更新包...',
+        'error': null,
+      };
+    });
+    try {
+      final status = await _client.downloadUpdate();
+      if (mounted) {
+        setState(() {
+          _status = status;
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _status = {
+            ..._status,
+            'state': 'failed',
+            'message': '更新下载启动失败。',
+            'error': '$error',
+          };
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _actionInFlight = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _retryCheck() async {
+    if (_isBusy) {
+      return;
+    }
+    setState(() {
+      _actionInFlight = true;
+      _status = {
+        ..._status,
+        'state': 'checking',
+        'message': '正在重新检查更新...',
+        'error': null,
+      };
+    });
+    try {
+      final status = await _client.checkUpdates();
+      if (mounted) {
+        setState(() {
+          _status = status;
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _status = {
+            ..._status,
+            'state': 'failed',
+            'message': '检查更新失败。',
+            'error': '$error',
+          };
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _actionInFlight = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _apply() async {
+    if (_isBusy) {
+      return;
+    }
+    setState(() {
+      _actionInFlight = true;
+      _status = {
+        ..._status,
+        'state': 'applying',
+        'message': '正在启动更新程序...',
+        'error': null,
+      };
+    });
+    try {
+      final status = await _client.applyUpdate();
+      if (mounted) {
+        setState(() {
+          _status = status;
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _status = {
+            ..._status,
+            'state': 'failed',
+            'message': '更新程序启动失败。',
+            'error': '$error',
+          };
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _actionInFlight = false;
+        });
+      }
+    }
+  }
+
+  bool get _isBusy {
+    final state = '${_status['state'] ?? ''}';
+    return _actionInFlight ||
+        state == 'checking' ||
+        state == 'downloading' ||
+        state == 'applying';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final state = '${_status['state'] ?? 'idle'}';
+    final currentVersion = '${_status['current_version'] ?? '--'}';
+    final latestVersion = '${_status['latest_version'] ?? '--'}';
+    final percent = ((_status['percent'] as num?)?.toDouble() ?? 0.0).clamp(
+      0.0,
+      100.0,
+    );
+    final downloadedBytes = (_status['downloaded_bytes'] as num?)?.toInt() ?? 0;
+    final totalBytes = (_status['total_bytes'] as num?)?.toInt() ?? 0;
+    final speedBps = (_status['speed_bps'] as num?)?.toDouble() ?? 0.0;
+    final assetName = '${_status['asset_name'] ?? ''}';
+    final error = '${_status['error'] ?? ''}';
+    final fullInstallerUrl = '${_status['full_installer_url'] ?? ''}';
+    final releaseUrl = '${_status['release_url'] ?? ''}';
+    final hasDelta = _status['delta_available'] == true;
+    final canInstall = state == 'downloaded';
+    final canDownload =
+        hasDelta && {'update_available', 'failed'}.contains(state);
+    final progressVisible =
+        state == 'downloading' || state == 'downloaded' || totalBytes > 0;
+
+    return AlertDialog(
+      icon: Icon(
+        state == 'failed'
+            ? Icons.error_outline_rounded
+            : state == 'downloaded'
+            ? Icons.system_update_alt_rounded
+            : Icons.new_releases_outlined,
+      ),
+      title: const Text('发现新版本'),
+      content: SizedBox(
+        width: 540,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${_status['message'] ?? '发现可用更新。'}'),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              children: [
+                _UpdateInfoChip(label: '当前版本', value: currentVersion),
+                _UpdateInfoChip(label: '最新版本', value: latestVersion),
+                if (totalBytes > 0)
+                  _UpdateInfoChip(
+                    label: '更新包',
+                    value: _formatBytes(totalBytes),
+                  ),
+              ],
+            ),
+            if (assetName.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                assetName,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+            if (progressVisible) ...[
+              const SizedBox(height: 18),
+              LinearProgressIndicator(
+                value: state == 'downloading' && percent <= 0
+                    ? null
+                    : percent / 100,
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Text('${percent.toStringAsFixed(1)}%'),
+                  const Spacer(),
+                  Text(
+                    '${_formatBytes(downloadedBytes)} / ${_formatBytes(totalBytes)}',
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                speedBps > 0
+                    ? '${_formatBytes(speedBps.round())}/s'
+                    : state == 'downloaded'
+                    ? '下载完成'
+                    : '等待网络响应',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+            if (state == 'full_required' && fullInstallerUrl.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              SelectableText(
+                fullInstallerUrl,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+            ] else if (state == 'full_required' && releaseUrl.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              SelectableText(
+                releaseUrl,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+            ],
+            if (error.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                error,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.error,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isBusy ? null : () => Navigator.of(context).pop(),
+          child: const Text('稍后'),
+        ),
+        if (state == 'failed')
+          OutlinedButton.icon(
+            onPressed: _isBusy ? null : _retryCheck,
+            icon: const Icon(Icons.refresh_rounded),
+            label: const Text('重新检查'),
+          ),
+        if (canDownload)
+          FilledButton.icon(
+            onPressed: _isBusy ? null : _download,
+            icon: const Icon(Icons.download_rounded),
+            label: const Text('立即更新'),
+          ),
+        if (state == 'downloading')
+          FilledButton.icon(
+            onPressed: null,
+            icon: const Icon(Icons.downloading_rounded),
+            label: const Text('下载中'),
+          ),
+        if (canInstall)
+          FilledButton.icon(
+            onPressed: _isBusy ? null : _apply,
+            icon: const Icon(Icons.system_update_alt_rounded),
+            label: const Text('安装并重启'),
+          ),
+      ],
+    );
+  }
+
+  String _formatBytes(int value) {
+    if (value <= 0) {
+      return '0 B';
+    }
+    const units = ['B', 'KB', 'MB', 'GB'];
+    var size = value.toDouble();
+    var unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex += 1;
+    }
+    final fractionDigits = unitIndex == 0 ? 0 : 1;
+    return '${size.toStringAsFixed(fractionDigits)} ${units[unitIndex]}';
+  }
+}
+
+class _UpdateInfoChip extends StatelessWidget {
+  const _UpdateInfoChip({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        child: Text(
+          '$label  $value',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
     );
   }
 }

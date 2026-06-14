@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -9,9 +10,17 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 
-BRIDGE_URL = "http://127.0.0.1:50741/health"
-FACEFUSION_STATUS_URL = "http://127.0.0.1:50741/facefusion/status"
-FACEFUSION_START_URL = "http://127.0.0.1:50741/facefusion/start"
+BRIDGE_HOST = "127.0.0.1"
+BRIDGE_PORT = 50741
+BRIDGE_URL = f"http://{BRIDGE_HOST}:{BRIDGE_PORT}/health"
+MODEL_BOOTSTRAP_URL = f"http://{BRIDGE_HOST}:{BRIDGE_PORT}/models/bootstrap"
+FACEFUSION_STATUS_URL = f"http://{BRIDGE_HOST}:{BRIDGE_PORT}/facefusion/status"
+FACEFUSION_START_URL = f"http://{BRIDGE_HOST}:{BRIDGE_PORT}/facefusion/start"
+FACEFUSION_STOP_URL = f"http://{BRIDGE_HOST}:{BRIDGE_PORT}/facefusion/stop"
+BRIDGE_HEALTH_TIMEOUT_SECONDS = 3.0
+BRIDGE_COMPATIBILITY_TIMEOUT_SECONDS = 5.0
+BRIDGE_OCCUPIED_PORT_WAIT_SECONDS = 20.0
+FRONTEND_MIN_MANAGED_SESSION_SECONDS = 30.0
 
 
 def resolve_repo_root() -> Path:
@@ -83,10 +92,104 @@ def build_launcher_env(repo_root: Path, python_path: Path) -> dict[str, str]:
 
 def is_bridge_ready() -> bool:
     try:
-        with urlopen(BRIDGE_URL, timeout=0.75):
+        with urlopen(BRIDGE_URL, timeout=BRIDGE_HEALTH_TIMEOUT_SECONDS):
             return True
     except (URLError, OSError, TimeoutError):
         return False
+
+
+def is_bridge_compatible() -> bool:
+    if not is_bridge_ready():
+        return False
+    try:
+        with urlopen(MODEL_BOOTSTRAP_URL, timeout=BRIDGE_COMPATIBILITY_TIMEOUT_SECONDS):
+            return True
+    except (URLError, OSError, TimeoutError):
+        return False
+
+
+def is_bridge_port_open() -> bool:
+    try:
+        with socket.create_connection((BRIDGE_HOST, BRIDGE_PORT), timeout=0.75):
+            return True
+    except OSError:
+        return False
+
+
+def wait_for_bridge_ready(timeout_seconds: float) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if is_bridge_compatible():
+            return True
+        time.sleep(0.25)
+    return is_bridge_compatible()
+
+
+def terminate_bridge_listener(studio_root: Path) -> None:
+    try:
+        import psutil
+    except Exception as error:
+        write_launcher_log(studio_root, f"psutil unavailable for stale Bridge cleanup: {error}")
+        return
+
+    def is_bridge_process(process: object) -> bool:
+        try:
+            command_line = " ".join(process.cmdline()).lower()
+        except psutil.Error:
+            return False
+        return "uvicorn" in command_line and "app_server:app" in command_line
+
+    def terminate_bridge_process(process: object) -> None:
+        try:
+            parent = process.parent()
+            if parent and is_bridge_process(parent):
+                process = parent
+        except psutil.Error:
+            pass
+
+        try:
+            children = process.children(recursive=True)
+            for child in children:
+                child.terminate()
+            _, alive_children = psutil.wait_procs(children, timeout=3)
+            for child in alive_children:
+                child.kill()
+
+            process.terminate()
+            process.wait(timeout=5)
+        except psutil.TimeoutExpired:
+            process.kill()
+        except psutil.Error as error:
+            write_launcher_log(studio_root, f"Stale Bridge cleanup failed: {error}")
+
+    for connection in psutil.net_connections(kind="inet"):
+        local_address = connection.laddr
+        if not local_address or local_address.port != BRIDGE_PORT or not connection.pid:
+            continue
+        try:
+            process = psutil.Process(connection.pid)
+        except psutil.Error as error:
+            write_launcher_log(studio_root, f"Could not inspect Bridge listener: {error}")
+            continue
+
+        if not is_bridge_process(process):
+            write_launcher_log(
+                studio_root,
+                f"Port {BRIDGE_PORT} is occupied by a non-Bridge process; leaving it untouched.",
+            )
+            continue
+
+        write_launcher_log(
+            studio_root,
+            f"Stopping stale Bridge process {process.pid} on port {BRIDGE_PORT}.",
+        )
+        terminate_bridge_process(process)
+
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        if not is_bridge_port_open():
+            return
+        time.sleep(0.25)
 
 
 def get_facefusion_status() -> dict[str, object] | None:
@@ -95,6 +198,35 @@ def get_facefusion_status() -> dict[str, object] | None:
             return json.loads(response.read().decode("utf-8"))
     except (URLError, OSError, TimeoutError, json.JSONDecodeError):
         return None
+
+
+def get_model_bootstrap_status() -> dict[str, object] | None:
+    try:
+        with urlopen(MODEL_BOOTSTRAP_URL, timeout=BRIDGE_COMPATIBILITY_TIMEOUT_SECONDS) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except (URLError, OSError, TimeoutError, json.JSONDecodeError):
+        return None
+
+
+def should_start_facefusion_on_launch(studio_root: Path) -> bool:
+    status = get_model_bootstrap_status()
+    if not status:
+        write_launcher_log(
+            studio_root,
+            "Model bootstrap status unavailable; starting FaceFusion for compatibility.",
+        )
+        return True
+
+    if status.get("ready") is True:
+        return True
+
+    missing_count = status.get("missing_count")
+    state = status.get("state", "unknown")
+    write_launcher_log(
+        studio_root,
+        f"Core models are not ready ({state}, missing: {missing_count}); frontend will prompt download.",
+    )
+    return False
 
 
 def start_facefusion_service(studio_root: Path) -> None:
@@ -127,12 +259,43 @@ def start_facefusion_service(studio_root: Path) -> None:
     raise RuntimeError("FaceFusion service failed to enter starting/ready state.")
 
 
+def stop_facefusion_service(studio_root: Path) -> None:
+    status = get_facefusion_status()
+    if not status or status.get("state") in {"stopped", "bridge_offline"}:
+        return
+
+    try:
+        request = Request(FACEFUSION_STOP_URL, method="POST")
+        with urlopen(request, timeout=5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        write_launcher_log(
+            studio_root,
+            f"FaceFusion stop requested: {payload.get('state', 'unknown')}",
+        )
+    except (URLError, OSError, TimeoutError, json.JSONDecodeError) as error:
+        write_launcher_log(studio_root, f"FaceFusion stop request failed: {error}")
+
+
 def start_bridge_if_needed(
     repo_root: Path,
     studio_root: Path,
 ) -> tuple[subprocess.Popen[str] | None, object | None]:
-    if is_bridge_ready():
+    if is_bridge_compatible():
         return None, None
+    if is_bridge_ready():
+        write_launcher_log(
+            studio_root,
+            "Bridge health is ready but required APIs are missing; restarting stale Bridge.",
+        )
+        terminate_bridge_listener(studio_root)
+    if is_bridge_port_open():
+        write_launcher_log(
+            studio_root,
+            f"Bridge port {BRIDGE_PORT} is occupied; waiting for existing Bridge.",
+        )
+        if wait_for_bridge_ready(BRIDGE_OCCUPIED_PORT_WAIT_SECONDS):
+            write_launcher_log(studio_root, "Existing Bridge became ready.")
+            return None, None
 
     bridge_dir = studio_root / "bridge"
     runtime_dir = studio_root / "runtime"
@@ -148,9 +311,9 @@ def start_bridge_if_needed(
         "uvicorn",
         "app_server:app",
         "--host",
-        "127.0.0.1",
+        BRIDGE_HOST,
         "--port",
-        "50741",
+        str(BRIDGE_PORT),
     ]
     process = subprocess.Popen(
         command,
@@ -163,9 +326,13 @@ def start_bridge_if_needed(
     )
 
     for _ in range(60):
-        if is_bridge_ready():
+        if is_bridge_compatible():
             return process, log_handle
         if process.poll() is not None:
+            if wait_for_bridge_ready(3.0):
+                log_handle.close()
+                write_launcher_log(studio_root, "Existing Bridge became ready after bind race.")
+                return None, None
             break
         time.sleep(0.25)
 
@@ -187,17 +354,50 @@ def write_launcher_log(studio_root: Path, message: str) -> None:
         log_handle.write(f"[{timestamp}] {message}\n")
 
 
-def launch_frontend(command: list[str], command_cwd: Path) -> int:
+def launch_frontend(command: list[str], command_cwd: Path) -> tuple[int, float]:
+    started_at = time.monotonic()
     process = subprocess.Popen(command, cwd=command_cwd, shell=False)
 
-    # Treat the launcher as a bootstrapper: if the frontend stays alive for a
-    # short grace period, consider startup successful and let it keep running
-    # independently from this script.
-    for _ in range(30):
-        if process.poll() is not None:
-            return process.returncode or 0
-        time.sleep(0.1)
-    return 0
+    exit_code = process.wait()
+    return exit_code, time.monotonic() - started_at
+
+
+def terminate_process_tree(process: subprocess.Popen[str], studio_root: Path) -> None:
+    if process.poll() is not None:
+        return
+
+    try:
+        import psutil
+
+        root = psutil.Process(process.pid)
+        children = root.children(recursive=True)
+        for child in children:
+            try:
+                child.terminate()
+            except psutil.Error:
+                pass
+
+        _, alive_children = psutil.wait_procs(children, timeout=3)
+        for child in alive_children:
+            try:
+                child.kill()
+            except psutil.Error:
+                pass
+
+        try:
+            root.terminate()
+            root.wait(timeout=5)
+        except psutil.TimeoutExpired:
+            root.kill()
+        except psutil.Error:
+            pass
+    except Exception as error:
+        write_launcher_log(studio_root, f"psutil process cleanup failed: {error}")
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
 
 
 def main() -> int:
@@ -213,6 +413,8 @@ def main() -> int:
     ]
     bridge_process = None
     bridge_log_handle = None
+    frontend_exit_code = 1
+    frontend_run_seconds = 0.0
 
     executable = next((candidate for candidate in built_candidates if candidate.exists()), None)
     if executable:
@@ -231,12 +433,28 @@ def main() -> int:
 
     try:
         bridge_process, bridge_log_handle = start_bridge_if_needed(repo_root, studio_root)
-        start_facefusion_service(studio_root)
+        if should_start_facefusion_on_launch(studio_root):
+            start_facefusion_service(studio_root)
         write_launcher_log(studio_root, f"Launching command: {' '.join(command)}")
-        return launch_frontend(command, command_cwd)
+        frontend_exit_code, frontend_run_seconds = launch_frontend(command, command_cwd)
+        return frontend_exit_code
     finally:
-        if bridge_log_handle:
-            bridge_log_handle.close()
+        write_launcher_log(
+            studio_root,
+            f"Frontend exited after {frontend_run_seconds:.1f}s; exit code {frontend_exit_code}.",
+        )
+        if frontend_run_seconds >= FRONTEND_MIN_MANAGED_SESSION_SECONDS:
+            write_launcher_log(studio_root, "Cleaning up managed services.")
+            stop_facefusion_service(studio_root)
+            if bridge_process:
+                terminate_process_tree(bridge_process, studio_root)
+            if bridge_log_handle:
+                bridge_log_handle.close()
+        else:
+            write_launcher_log(
+                studio_root,
+                "Frontend exited during startup; keeping Bridge and FaceFusion running.",
+            )
 
 
 if __name__ == "__main__":
