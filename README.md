@@ -50,6 +50,7 @@ FaceSwap Studio 是基于 FaceFusion 推理引擎、Flutter 桌面前端和 Pyth
 
 - `build_update_package.ps1` 会生成 `update-manifest.json`、当前文件 manifest 和文件级 delta zip。
 - `publish_release.ps1` 通过 GitHub CLI 上传全量安装器、delta zip、文件 manifest 和更新 manifest。
+- 首版没有上一版 manifest，或者 delta 超过 GitHub 单文件限制时，可以使用 `-SkipDelta`，客户端会提示下载全量安装器。
 - 客户端默认读取公开 Release，不内置 GitHub token；delta 不可用时会提示下载全量安装器。
 
 ### 方式二：直接运行仓库内桌面启动器

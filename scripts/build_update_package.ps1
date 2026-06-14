@@ -2,6 +2,7 @@ param(
     [string]$FromManifest,
     [string]$FromVersion,
     [string]$ToVersion,
+    [switch]$SkipDelta,
     [switch]$SkipInstallerBuild
 )
 
@@ -112,32 +113,52 @@ $fileManifest = [pscustomobject]@{
 }
 $fileManifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 
-$deltaManifest = [pscustomobject]@{
-    schema_version = 1
-    app_name = "FaceSwap Studio"
-    from_version = $FromVersion
-    to_version = $ToVersion
-    generated_at = (Get-Date).ToUniversalTime().ToString("o")
-    files = $changedFiles
-    deleted_files = @($deletedFiles)
+$deltaPackage = $null
+if ($SkipDelta) {
+    Remove-Item -LiteralPath $deltaManifestPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $deltaZipPath -Force -ErrorAction SilentlyContinue
+    Write-Host "Skipping delta package generation."
 }
-$deltaManifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $deltaManifestPath -Encoding UTF8
+else {
+    $deltaManifest = [pscustomobject]@{
+        schema_version = 1
+        app_name = "FaceSwap Studio"
+        from_version = $FromVersion
+        to_version = $ToVersion
+        generated_at = (Get-Date).ToUniversalTime().ToString("o")
+        files = $changedFiles
+        deleted_files = @($deletedFiles)
+    }
+    $deltaManifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $deltaManifestPath -Encoding UTF8
 
-Remove-Item -LiteralPath $deltaZipPath -Force -ErrorAction SilentlyContinue
-$tempDeltaRoot = Join-Path $releaseDir "delta-temp"
-Remove-Item -LiteralPath $tempDeltaRoot -Recurse -Force -ErrorAction SilentlyContinue
-Ensure-Directory -Path (Join-Path $tempDeltaRoot "files") | Out-Null
-Copy-Item -LiteralPath $deltaManifestPath -Destination (Join-Path $tempDeltaRoot "delta-manifest.json") -Force
+    Remove-Item -LiteralPath $deltaZipPath -Force -ErrorAction SilentlyContinue
+    $tempDeltaRoot = Join-Path $releaseDir "delta-temp"
+    Remove-Item -LiteralPath $tempDeltaRoot -Recurse -Force -ErrorAction SilentlyContinue
+    Ensure-Directory -Path (Join-Path $tempDeltaRoot "files") | Out-Null
+    Copy-Item -LiteralPath $deltaManifestPath -Destination (Join-Path $tempDeltaRoot "delta-manifest.json") -Force
 
-foreach ($file in $changedFiles) {
-    $source = Join-Path $stageRoot ($file.path.Replace('/', '\'))
-    $target = Join-Path (Join-Path $tempDeltaRoot "files") ($file.path.Replace('/', '\'))
-    Ensure-Directory -Path (Split-Path -Parent $target) | Out-Null
-    Copy-Item -LiteralPath $source -Destination $target -Force
+    foreach ($file in $changedFiles) {
+        $source = Join-Path $stageRoot ($file.path.Replace('/', '\'))
+        $target = Join-Path (Join-Path $tempDeltaRoot "files") ($file.path.Replace('/', '\'))
+        Ensure-Directory -Path (Split-Path -Parent $target) | Out-Null
+        Copy-Item -LiteralPath $source -Destination $target -Force
+    }
+
+    [System.IO.Compression.ZipFile]::CreateFromDirectory($tempDeltaRoot, $deltaZipPath, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+    Remove-Item -LiteralPath $tempDeltaRoot -Recurse -Force
+
+    $deltaHash = (Get-FileHash -LiteralPath $deltaZipPath -Algorithm SHA256).Hash
+    $deltaSize = (Get-Item -LiteralPath $deltaZipPath).Length
+    $deltaPackage = [pscustomobject]@{
+        from_version = $FromVersion
+        to_version = $ToVersion
+        asset_name = [System.IO.Path]::GetFileName($deltaZipPath)
+        sha256 = $deltaHash
+        size = $deltaSize
+        changed_count = $changedFiles.Count
+        deleted_count = $deletedFiles.Count
+    }
 }
-
-[System.IO.Compression.ZipFile]::CreateFromDirectory($tempDeltaRoot, $deltaZipPath, [System.IO.Compression.CompressionLevel]::Optimal, $false)
-Remove-Item -LiteralPath $tempDeltaRoot -Recurse -Force
 
 $installerAsset = "FaceSwapStudioSetup-$ToVersion.exe"
 $installerSource = Join-Path $repoRoot "dist\installer\FaceSwapStudioSetup.exe"
@@ -148,10 +169,12 @@ if (Test-Path -LiteralPath $installerSource) {
     $installerSize = (Get-Item -LiteralPath $installerSource).Length
 }
 
-$deltaHash = (Get-FileHash -LiteralPath $deltaZipPath -Algorithm SHA256).Hash
-$deltaSize = (Get-Item -LiteralPath $deltaZipPath).Length
 $fileManifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash
 $fileManifestSize = (Get-Item -LiteralPath $manifestPath).Length
+$deltaPackages = @()
+if ($deltaPackage) {
+    $deltaPackages += $deltaPackage
+}
 
 $updateManifest = [pscustomobject]@{
     schema_version = 1
@@ -169,21 +192,13 @@ $updateManifest = [pscustomobject]@{
         sha256 = $fileManifestHash
         size = $fileManifestSize
     }
-    delta_packages = @(
-        [pscustomobject]@{
-            from_version = $FromVersion
-            to_version = $ToVersion
-            asset_name = [System.IO.Path]::GetFileName($deltaZipPath)
-            sha256 = $deltaHash
-            size = $deltaSize
-            changed_count = $changedFiles.Count
-            deleted_count = $deletedFiles.Count
-        }
-    )
+    delta_packages = $deltaPackages
     notes = "FaceSwap Studio $ToVersion"
 }
 $updateManifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $updateManifestPath -Encoding UTF8
 
 Write-Host "Update package complete: $releaseDir"
-Write-Host "Delta: $deltaZipPath"
+if (-not $SkipDelta) {
+    Write-Host "Delta: $deltaZipPath"
+}
 Write-Host "Manifest: $updateManifestPath"

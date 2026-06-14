@@ -14,6 +14,7 @@ if (-not $Version) {
 $releaseDir = Join-Path $repoRoot "dist\updates\$Version"
 $installer = Join-Path $repoRoot "dist\installer\FaceSwapStudioSetup.exe"
 $installerAsset = Join-Path $releaseDir "FaceSwapStudioSetup-$Version.exe"
+$updateManifestPath = Join-Path $releaseDir "update-manifest.json"
 
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
     throw "GitHub CLI (gh) was not found."
@@ -24,15 +25,32 @@ if (-not (Test-Path -LiteralPath $releaseDir)) {
 if (-not (Test-Path -LiteralPath $installer)) {
     throw "Installer not found: $installer"
 }
+if (-not (Test-Path -LiteralPath $updateManifestPath)) {
+    throw "Update manifest not found: $updateManifestPath"
+}
 
 Copy-Item -LiteralPath $installer -Destination $installerAsset -Force
 
 $assets = @(
     $installerAsset,
-    (Join-Path $releaseDir "update-manifest.json"),
-    (Join-Path $releaseDir "files-$Version.json")
+    $updateManifestPath
 )
-$assets += Get-ChildItem -LiteralPath $releaseDir -Filter "*.delta.zip" -File | ForEach-Object { $_.FullName }
+$updateManifest = Get-Content -LiteralPath $updateManifestPath -Raw | ConvertFrom-Json
+$fileManifestAsset = [string]$updateManifest.file_manifest.asset_name
+if ($fileManifestAsset) {
+    $assets += Join-Path $releaseDir $fileManifestAsset
+}
+foreach ($package in @($updateManifest.delta_packages)) {
+    if ($package -and $package.asset_name) {
+        $assets += Join-Path $releaseDir ([string]$package.asset_name)
+    }
+}
+
+foreach ($asset in $assets) {
+    if (-not (Test-Path -LiteralPath $asset)) {
+        throw "Release asset not found: $asset"
+    }
+}
 
 $tag = "v$Version"
 $releaseArgs = @("release", "create", $tag, "--repo", $Repository, "--title", "FaceSwap Studio $Version", "--notes", "FaceSwap Studio $Version")

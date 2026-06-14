@@ -60,6 +60,12 @@
 ./scripts/build_update_package.ps1 -FromManifest .\dist\updates\<old-version>\files-<old-version>.json -FromVersion <old-version>
 ```
 
+如果是首个公开版本，没有上一版文件 manifest，或者生成的 delta 超过 GitHub 单文件限制，可以跳过 delta：
+
+```powershell
+./scripts/build_update_package.ps1 -FromVersion 0.0.0 -SkipDelta -SkipInstallerBuild
+```
+
 发布到公开 GitHub Release：
 
 ```powershell
@@ -70,6 +76,7 @@
 
 - 根目录 `VERSION` 是唯一版本源。
 - `build_update_package.ps1` 会生成 `update-manifest.json`、`files-<version>.json` 和 `FaceSwapStudio-<old>-to-<new>.delta.zip`。
+- 使用 `-SkipDelta` 时，manifest 不会声明增量包，客户端会提示下载全量安装器。
 - 客户端启动后通过 Bridge 检查公开 GitHub Release，不内置 GitHub token。
 - 用户确认后，Bridge 下载 delta 到 `%LOCALAPPDATA%\FaceSwap Studio\updates` 并校验 SHA256。
 - 安装时会复制 `FaceSwapStudioUpdater.exe` 到本地更新缓存，然后以管理员权限运行。
