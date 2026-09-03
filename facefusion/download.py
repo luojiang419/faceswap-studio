@@ -24,29 +24,23 @@ def conditional_download(download_directory_path : str, urls : List[str]) -> Non
 		download_file_path = os.path.join(download_directory_path, download_file_name)
 		initial_size = get_file_size(download_file_path)
 		download_size = get_static_download_size(url)
-		progress_total = download_size or None
-		should_download = initial_size < download_size or download_size == 0 and not is_file(download_file_path)
 
-		if should_download:
-			with tqdm(total = progress_total, initial = initial_size if progress_total else 0, desc = translator.get('downloading'), unit = 'B', unit_scale = True, unit_divisor = 1024, ascii = ' =', disable = state_manager.get_item('log_level') in [ 'warn', 'error' ]) as progress:
+		if initial_size < download_size:
+			with tqdm(total = download_size, initial = initial_size, desc = translator.get('downloading'), unit = 'B', unit_scale = True, unit_divisor = 1024, ascii = ' =', disable = state_manager.get_item('log_level') in [ 'warn', 'error' ]) as progress:
 				commands = curl_builder.chain(
 					curl_builder.download(url, download_file_path),
 					curl_builder.set_timeout(5),
 					curl_builder.set_retry(5)
 				)
-				process = open_curl(commands)
+
+				open_curl(commands)
 				current_size = initial_size
 				progress.set_postfix(download_providers = state_manager.get_item('download_providers'), file_name = download_file_name)
 
-				while download_size > 0 and current_size < download_size and process.poll() is None:
+				while current_size < download_size:
 					if is_file(download_file_path):
 						current_size = get_file_size(download_file_path)
 						progress.update(current_size - progress.n)
-
-				process.wait()
-				if is_file(download_file_path):
-					current_size = get_file_size(download_file_path)
-					progress.update(max(current_size - progress.n, 0))
 
 
 @lru_cache(maxsize = 64)
@@ -55,6 +49,7 @@ def get_static_download_size(url : str) -> int:
 		curl_builder.ping(url),
 		curl_builder.set_timeout(5)
 	)
+
 	process = open_curl(commands)
 	lines = reversed(process.stdout.readlines())
 
@@ -73,6 +68,7 @@ def ping_static_url(url : str) -> bool:
 		curl_builder.ping(url),
 		curl_builder.set_timeout(5)
 	)
+
 	process = open_curl(commands)
 	process.communicate()
 	return process.returncode == 0

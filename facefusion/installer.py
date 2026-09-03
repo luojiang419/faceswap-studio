@@ -19,23 +19,24 @@ LOCALES =\
 }
 ONNXRUNTIME_SET =\
 {
-	'default': ('onnxruntime', 'onnxruntime==1.24.4')
+	'default': ('onnxruntime', '1.29.0')
 }
 if is_windows() or is_linux():
-	ONNXRUNTIME_SET['cuda'] = ('onnxruntime-gpu', 'onnxruntime-gpu[cuda,cudnn]==1.24.4')
-	ONNXRUNTIME_SET['openvino'] = ('onnxruntime-openvino', 'onnxruntime-openvino==1.24.1')
+	ONNXRUNTIME_SET['cuda@12'] = ('onnxruntime-gpu', '1.24.4')
+	ONNXRUNTIME_SET['cuda@13'] = ('onnxruntime-gpu', '1.29.0')
+	ONNXRUNTIME_SET['openvino'] = ('onnxruntime-openvino', '1.24.1')
 if is_windows():
-	ONNXRUNTIME_SET['directml'] = ('onnxruntime-directml', 'onnxruntime-directml==1.24.4')
-	ONNXRUNTIME_SET['qnn'] = ('onnxruntime-qnn', 'onnxruntime-qnn==1.24.4')
+	ONNXRUNTIME_SET['directml'] = ('onnxruntime-directml', '1.24.4')
+	ONNXRUNTIME_SET['qnn'] = ('onnxruntime-qnn', '2.5.0')
 if is_linux():
-	ONNXRUNTIME_SET['migraphx'] = ('onnxruntime-migraphx', 'onnxruntime-migraphx==1.24.2')
-	ONNXRUNTIME_SET['rocm'] = ('onnxruntime-rocm', 'onnxruntime-rocm==1.22.2.post1')
+	ONNXRUNTIME_SET['migraphx'] = ('onnxruntime-migraphx', '1.27.1')
+	ONNXRUNTIME_SET['rocm'] = ('onnxruntime-rocm', '1.22.2.post3')
 
 
 def cli() -> None:
 	signal.signal(signal.SIGINT, signal_exit)
 	program = ArgumentParser(formatter_class = partial(HelpFormatter, max_help_position = 50))
-	program.add_argument('--onnxruntime', help = LOCALES.get('install_dependency').format(dependency = 'onnxruntime'), choices = ONNXRUNTIME_SET.keys(), required = True)
+	program.add_argument('onnxruntime', help = LOCALES.get('install_dependency').format(dependency = 'onnxruntime'), choices = ONNXRUNTIME_SET.keys())
 	program.add_argument('--force-reinstall', help = LOCALES.get('force_reinstall'), action = 'store_true')
 	program.add_argument('--skip-conda', help = LOCALES.get('skip_conda'), action = 'store_true')
 	program.add_argument('-v', '--version', version = metadata.get('name') + ' ' + metadata.get('version'), action = 'version')
@@ -54,6 +55,9 @@ def run(program : ArgumentParser) -> None:
 		sys.stdout.write(LOCALES.get('conda_not_activated') + os.linesep)
 		sys.exit(1)
 
+	for onnxruntime_package, _ in ONNXRUNTIME_SET.values():
+		subprocess.call([ shutil.which('pip'), 'uninstall', onnxruntime_package, '-y', '-q' ], stderr = subprocess.DEVNULL)
+
 	commands = [ shutil.which('pip'), 'install' ]
 
 	if args.force_reinstall:
@@ -63,11 +67,10 @@ def run(program : ArgumentParser) -> None:
 
 		for line in file.readlines():
 			__line__ = line.strip()
+
 			if not __line__.startswith('onnxruntime'):
 				commands.append(__line__)
 
-	onnxruntime_name, onnxruntime_requirement = ONNXRUNTIME_SET.get(args.onnxruntime)
-	commands.append(onnxruntime_requirement)
-
-	subprocess.call([ shutil.which('pip'), 'uninstall', 'onnxruntime', onnxruntime_name, '-y', '-q' ])
-	sys.exit(subprocess.call(commands))
+	onnxruntime_name, onnxruntime_version = ONNXRUNTIME_SET.get(args.onnxruntime)
+	commands.append(onnxruntime_name + '==' + onnxruntime_version)
+	subprocess.call(commands)

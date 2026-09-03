@@ -99,24 +99,6 @@ def launch() -> None:
 		ui_layout_module.run(ui)
 
 
-def get_ui_launch_kwargs() -> Dict[str, Any]:
-	launch_kwargs : Dict[str, Any] =\
-	{
-		'favicon_path': 'facefusion.ico',
-		'inbrowser': state_manager.get_item('open_browser')
-	}
-	ui_host = os.getenv('FACEFUSION_UI_HOST')
-	ui_port = os.getenv('FACEFUSION_UI_PORT')
-
-	if not ui_host and os.getenv('WSL_DISTRO_NAME'):
-		ui_host = '0.0.0.0'
-	if ui_host:
-		launch_kwargs['server_name'] = ui_host
-	if ui_port and ui_port.isdigit():
-		launch_kwargs['server_port'] = int(ui_port)
-	return launch_kwargs
-
-
 def get_theme() -> gradio.Theme:
 	return gradio.themes.Base(
 		primary_hue = gradio.themes.colors.red,

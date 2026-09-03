@@ -1,91 +1,27 @@
 import itertools
-import os
-from pathlib import Path
-import subprocess
 import shutil
-from functools import lru_cache
 from typing import List
-from urllib.parse import urlparse
 
 from facefusion import metadata
 from facefusion.types import Command
 
 
-def resolve_curl_executable() -> str:
-	env_path = os.environ.get('FACEFUSION_CURL_PATH')
-	if env_path:
-		return env_path
-
-	path_resolved = shutil.which('curl.exe') or shutil.which('curl')
-	if path_resolved:
-		return path_resolved
-
-	system_candidates = [
-		Path(r'C:\Windows\System32\curl.exe'),
-		Path(r'C:\Windows\System32\curl.EXE')
-	]
-	for candidate in system_candidates:
-		if candidate.exists():
-			return str(candidate)
-	return 'curl'
-
-
 def run(commands : List[Command]) -> List[Command]:
 	user_agent = metadata.get('name') + '/' + metadata.get('version')
-	proxy_commands = resolve_proxy_commands()
 
-	return [ resolve_curl_executable(), '--user-agent', user_agent, '--location', '--silent', '--ssl-no-revoke' ] + proxy_commands + commands
-
-
-def resolve_proxy_commands() -> List[Command]:
-	proxy_url = os.environ.get('FACEFUSION_PROXY_URL', '').strip()
-
-	if proxy_url:
-		return [ '--proxy', proxy_url ]
-
-	disable_proxy = os.environ.get('FACEFUSION_DISABLE_PROXY', '1').lower()
-
-	if disable_proxy in [ '0', 'false', 'no', 'off' ]:
-		return []
-	return [ '--proxy', '', '--noproxy', '*' ]
+	return [ shutil.which('curl'), '--user-agent', user_agent, '--location', '--silent', '--ssl-no-revoke' ] + commands
 
 
 def chain(*commands : List[Command]) -> List[Command]:
 	return list(itertools.chain(*commands))
 
 
-@lru_cache(maxsize = 32)
-def resolve_host_ipv4(host : str) -> str:
-	if not host or not shutil.which('getent'):
-		return ''
-
-	process = subprocess.run([ shutil.which('getent'), 'ahostsv4', host ], stdout = subprocess.PIPE, stderr = subprocess.DEVNULL, text = True)
-
-	if process.returncode == 0:
-		for line in process.stdout.splitlines():
-			parts = line.split()
-			if len(parts) >= 2 and parts[1] == 'STREAM':
-				return parts[0]
-			if parts:
-				return parts[0]
-	return ''
-
-
-def resolve_url(url : str) -> List[Command]:
-	host = urlparse(url).hostname
-	host_ipv4 = resolve_host_ipv4(host)
-
-	if host and host_ipv4:
-		return [ '--resolve', host + ':443:' + host_ipv4 ]
-	return []
-
-
 def ping(url : str) -> List[Command]:
-	return resolve_url(url) + [ '-I', url ]
+	return [ '-I', url ]
 
 
 def download(url : str, download_file_path : str) -> List[Command]:
-	return resolve_url(url) + [ '--create-dirs', '--continue-at', '-', '--output', download_file_path, url ]
+	return [ '--create-dirs', '--continue-at', '-', '--output', download_file_path, url ]
 
 
 def set_timeout(timeout : int) -> List[Command]:

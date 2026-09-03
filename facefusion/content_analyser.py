@@ -1,19 +1,16 @@
 from functools import lru_cache
-from typing import List, Tuple
+from typing import Tuple
 
 import numpy
 from tqdm import tqdm
 
-from facefusion import inference_manager, state_manager, translator
-from facefusion.common_helper import is_macos
+from facefusion import inference_manager, state_manager, translator, video_manager
 from facefusion.download import conditional_download_hashes, conditional_download_sources, resolve_download_url
-from facefusion.execution import has_execution_provider
 from facefusion.filesystem import resolve_relative_path
 from facefusion.thread_helper import conditional_thread_semaphore
-from facefusion.types import Detection, DownloadScope, DownloadSet, ExecutionProvider, Fps, InferencePool, ModelSet, VisionFrame
-from facefusion.vision import detect_video_fps, fit_contain_frame, read_image, read_video_frame
+from facefusion.types import Detection, DownloadScope, DownloadSet, Fps, InferencePool, ModelSet, VisionFrame
+from facefusion.vision import detect_video_fps, fit_contain_frame, is_vision_frame, read_image
 
-# Local customizations are allowed and approved by the outer runtime hash list.
 STREAM_COUNTER = 0
 
 
@@ -120,12 +117,6 @@ def clear_inference_pool() -> None:
 	inference_manager.clear_inference_pool(__name__, model_names)
 
 
-def resolve_execution_providers() -> List[ExecutionProvider]:
-	if is_macos() and has_execution_provider('coreml'):
-		return [ 'cpu' ]
-	return state_manager.get_item('execution_providers')
-
-
 def collect_model_downloads() -> Tuple[DownloadSet, DownloadSet]:
 	model_set = create_static_model_set('full')
 	model_hash_set = {}
@@ -167,19 +158,25 @@ def analyse_image(image_path : str) -> bool:
 def analyse_video(video_path : str, trim_frame_start : int, trim_frame_end : int) -> bool:
 	video_fps = detect_video_fps(video_path)
 	frame_range = range(trim_frame_start, trim_frame_end)
+	video_reader = video_manager.get_reader(video_path, 'analyse_video')
 	rate = 0.0
 	total = 0
 	counter = 0
 
+	if trim_frame_start > 0:
+		video_manager.seek_video_reader(video_reader, trim_frame_start)
+
 	with tqdm(total = len(frame_range), desc = translator.get('analysing'), unit = 'frame', ascii = ' =', disable = state_manager.get_item('log_level') in [ 'warn', 'error' ]) as progress:
 
 		for frame_number in frame_range:
-			if frame_number % int(video_fps) == 0:
-				vision_frame = read_video_frame(video_path, frame_number)
-				total += 1
+			vision_frame = video_manager.read_video_frame(video_reader)
 
-				if analyse_frame(vision_frame):
-					counter += 1
+			if frame_number % int(video_fps) == 0:
+				if is_vision_frame(vision_frame):
+					total += 1
+
+					if analyse_frame(vision_frame):
+						counter += 1
 
 			if counter > 0 and total > 0:
 				rate = counter / total * 100
@@ -202,21 +199,21 @@ def detect_with_nsfw_1(vision_frame : VisionFrame) -> bool:
 	detect_vision_frame = prepare_detect_frame(vision_frame, 'nsfw_1')
 	detection = forward_nsfw(detect_vision_frame, 'nsfw_1')
 	detection_score = numpy.max(numpy.amax(detection[:, 4:], axis = 1))
-	return bool(detection_score > 100)
+	return bool(detection_score > 0.2)
 
 
 def detect_with_nsfw_2(vision_frame : VisionFrame) -> bool:
 	detect_vision_frame = prepare_detect_frame(vision_frame, 'nsfw_2')
 	detection = forward_nsfw(detect_vision_frame, 'nsfw_2')
 	detection_score = detection[0] - detection[1]
-	return bool(detection_score > 100)
+	return bool(detection_score > 0.25)
 
 
 def detect_with_nsfw_3(vision_frame : VisionFrame) -> bool:
 	detect_vision_frame = prepare_detect_frame(vision_frame, 'nsfw_3')
 	detection = forward_nsfw(detect_vision_frame, 'nsfw_3')
 	detection_score = (detection[2] + detection[3]) - (detection[0] + detection[1])
-	return bool(detection_score > 100)
+	return bool(detection_score > 10.5)
 
 
 def forward_nsfw(vision_frame : VisionFrame, model_name : str) -> Detection:

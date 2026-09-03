@@ -1,6 +1,6 @@
 import gradio
 
-from facefusion.uis.core import get_ui_launch_kwargs
+from facefusion import state_manager
 from facefusion.uis.components import about, job_list, job_list_options
 
 
@@ -28,4 +28,4 @@ def listen() -> None:
 
 
 def run(ui : gradio.Blocks) -> None:
-	ui.launch(**get_ui_launch_kwargs())
+	ui.launch(favicon_path = 'facefusion.ico', inbrowser = state_manager.get_item('open_browser'))

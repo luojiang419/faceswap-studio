@@ -24,6 +24,9 @@ from facefusion import core, state_manager  # noqa: E402
 from facefusion.args import apply_args  # noqa: E402
 from facefusion.audio import create_empty_audio_frame, get_voice_frame  # noqa: E402
 from facefusion.common_helper import get_first  # noqa: E402
+from facefusion.content_analyser import analyse_frame  # noqa: E402
+from facefusion.face_creator import get_many_faces  # noqa: E402
+from facefusion.face_selector import sort_and_filter_faces  # noqa: E402
 from facefusion.filesystem import filter_audio_paths, is_image, is_video  # noqa: E402
 from facefusion.program import create_program  # noqa: E402
 from facefusion.uis.components.preview import process_preview_frame  # noqa: E402
@@ -31,10 +34,14 @@ from facefusion.vision import (  # noqa: E402
     count_video_frame_total,
     detect_frame_orientation,
     extract_vision_mask,
+    fit_cover_frame,
     merge_vision_mask,
+    obscure_frame,
     read_static_image,
     read_static_images,
     read_video_frame,
+    restrict_frame,
+    unpack_resolution,
 )
 
 
@@ -88,7 +95,7 @@ def _build_run_args(payload: dict[str, Any]) -> list[str]:
         "--output-path",
         str(payload["output_path"]),
         "--ui-layouts",
-        "studio",
+        "default",
         "--ui-workflow",
         "instant_runner",
     ]
@@ -147,6 +154,94 @@ def _encode_preview_frame(preview_vision_frame: Any) -> tuple[str, int, int, str
     )
 
 
+def _encode_bgr_frame_base64(vision_frame: Any) -> str:
+    ok, encoded = cv2.imencode(".png", vision_frame)
+    if not ok:
+        raise RuntimeError("人脸缩略图 PNG 编码失败。")
+    return base64.b64encode(encoded.tobytes()).decode("ascii")
+
+
+def _extract_face_choices(target_vision_frame: Any) -> list[dict[str, Any]]:
+    face_choices: list[dict[str, Any]] = []
+    faces = sort_and_filter_faces([], get_many_faces([target_vision_frame]))
+    selected_position = int(state_manager.get_item("reference_face_position") or 0)
+    frame_height, frame_width = target_vision_frame.shape[:2]
+
+    for index, face in enumerate(faces):
+        start_x, start_y, end_x, end_y = map(int, face.bounding_box)
+        start_x = max(0, min(start_x, frame_width))
+        start_y = max(0, min(start_y, frame_height))
+        end_x = max(0, min(end_x, frame_width))
+        end_y = max(0, min(end_y, frame_height))
+        if end_x <= start_x or end_y <= start_y:
+            continue
+
+        padding_x = int((end_x - start_x) * 0.25)
+        padding_y = int((end_y - start_y) * 0.25)
+        crop_start_x = max(0, start_x - padding_x)
+        crop_start_y = max(0, start_y - padding_y)
+        crop_end_x = min(frame_width, end_x + padding_x)
+        crop_end_y = min(frame_height, end_y + padding_y)
+        crop_vision_frame = target_vision_frame[crop_start_y:crop_end_y, crop_start_x:crop_end_x]
+        crop_vision_frame = fit_cover_frame(crop_vision_frame, (128, 128))
+
+        face_choices.append(
+            {
+                "index": index,
+                "image_base64": _encode_bgr_frame_base64(crop_vision_frame),
+                "bounding_box": [start_x, start_y, end_x, end_y],
+                "selected": index == selected_position,
+            },
+        )
+    return face_choices
+
+
+def _prepare_compare_frame(target_vision_frame: Any, preview_resolution: str) -> Any:
+    compare_vision_frame = restrict_frame(target_vision_frame, unpack_resolution(preview_resolution))
+    if analyse_frame(compare_vision_frame[:, :, :3]):
+        return obscure_frame(compare_vision_frame)
+    return compare_vision_frame
+
+
+def _build_preview_payload(
+    *,
+    preview_vision_frame: Any,
+    before_vision_frame: Any,
+    after_vision_frame: Any,
+    target_media_type: str,
+    preview_mode: str,
+    preview_resolution: str,
+    frame_number: int,
+    reference_frame_number: int,
+    face_choices: list[dict[str, Any]],
+    video_frame_total: int | None = None,
+) -> dict[str, Any]:
+    image_base64, width, height, orientation = _encode_preview_frame(preview_vision_frame)
+    before_image_base64, _, _, _ = _encode_preview_frame(before_vision_frame)
+    after_image_base64, _, _, _ = _encode_preview_frame(after_vision_frame)
+    payload = {
+        "ok": True,
+        "mime_type": "image/png",
+        "image_base64": image_base64,
+        "before_image_base64": before_image_base64,
+        "after_image_base64": after_image_base64,
+        "width": width,
+        "height": height,
+        "orientation": orientation,
+        "target_media_type": target_media_type,
+        "preview_mode": preview_mode,
+        "preview_resolution": preview_resolution,
+        "frame_number": frame_number,
+        "reference_frame_number": reference_frame_number,
+        "face_selector_mode": state_manager.get_item("face_selector_mode"),
+        "reference_face_position": state_manager.get_item("reference_face_position"),
+        "face_choices": face_choices,
+    }
+    if video_frame_total is not None:
+        payload["video_frame_total"] = video_frame_total
+    return payload
+
+
 def _generate_preview(payload: dict[str, Any]) -> dict[str, Any]:
     options = _initialize_state(payload)
     preview_mode = str(options.get("preview_mode") or "default")
@@ -172,24 +267,36 @@ def _generate_preview(payload: dict[str, Any]) -> dict[str, Any]:
             source_vision_frames,
             source_audio_frame,
             source_voice_frame,
-            target_vision_frame,
+            [target_vision_frame],
             preview_mode,
             preview_resolution,
         )
-        image_base64, width, height, orientation = _encode_preview_frame(preview_vision_frame)
-        return {
-            "ok": True,
-            "mime_type": "image/png",
-            "image_base64": image_base64,
-            "width": width,
-            "height": height,
-            "orientation": orientation,
-            "target_media_type": "image",
-            "preview_mode": preview_mode,
-            "preview_resolution": preview_resolution,
-            "frame_number": 0,
-            "reference_frame_number": 0,
-        }
+        before_vision_frame = _prepare_compare_frame(target_vision_frame, preview_resolution)
+        face_choices = _extract_face_choices(reference_vision_frame)
+        after_vision_frame = (
+            preview_vision_frame
+            if preview_mode == "default"
+            else process_preview_frame(
+                reference_vision_frame,
+                source_vision_frames,
+                source_audio_frame,
+                source_voice_frame,
+                [target_vision_frame],
+                "default",
+                preview_resolution,
+            )
+        )
+        return _build_preview_payload(
+            preview_vision_frame=preview_vision_frame,
+            before_vision_frame=before_vision_frame,
+            after_vision_frame=after_vision_frame,
+            target_media_type="image",
+            preview_mode=preview_mode,
+            preview_resolution=preview_resolution,
+            frame_number=0,
+            reference_frame_number=0,
+            face_choices=face_choices,
+        )
 
     if is_video(target_path):
         video_frame_total = count_video_frame_total(target_path)
@@ -210,25 +317,37 @@ def _generate_preview(payload: dict[str, Any]) -> dict[str, Any]:
             source_vision_frames,
             source_audio_frame,
             source_voice_frame,
-            temp_vision_frame,
+            [temp_vision_frame],
             preview_mode,
             preview_resolution,
         )
-        image_base64, width, height, orientation = _encode_preview_frame(preview_vision_frame)
-        return {
-            "ok": True,
-            "mime_type": "image/png",
-            "image_base64": image_base64,
-            "width": width,
-            "height": height,
-            "orientation": orientation,
-            "target_media_type": "video",
-            "preview_mode": preview_mode,
-            "preview_resolution": preview_resolution,
-            "frame_number": preview_frame_number,
-            "reference_frame_number": preview_frame_number,
-            "video_frame_total": video_frame_total,
-        }
+        before_vision_frame = _prepare_compare_frame(temp_vision_frame, preview_resolution)
+        face_choices = _extract_face_choices(reference_vision_frame)
+        after_vision_frame = (
+            preview_vision_frame
+            if preview_mode == "default"
+            else process_preview_frame(
+                reference_vision_frame,
+                source_vision_frames,
+                source_audio_frame,
+                source_voice_frame,
+                [temp_vision_frame],
+                "default",
+                preview_resolution,
+            )
+        )
+        return _build_preview_payload(
+            preview_vision_frame=preview_vision_frame,
+            before_vision_frame=before_vision_frame,
+            after_vision_frame=after_vision_frame,
+            target_media_type="video",
+            preview_mode=preview_mode,
+            preview_resolution=preview_resolution,
+            frame_number=preview_frame_number,
+            reference_frame_number=preview_frame_number,
+            face_choices=face_choices,
+            video_frame_total=video_frame_total,
+        )
 
     raise RuntimeError("当前目标文件不是可预览的图片或视频。")
 
