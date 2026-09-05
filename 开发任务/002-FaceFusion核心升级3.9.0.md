@@ -19,7 +19,7 @@
 1. [已完成] 仓库 Bridge、FaceFusion 和 WebUI 真实启动验证。
 2. [已完成] 创建 `backup/v001` 并同步安装目录必要文件。
 3. [已完成] 安装版正式 launcher、Flutter、Bridge、FaceFusion 联合稳定性验证。
-4. [进行中] 提交本轮文件并推送远程，随后回填 commit。
+4. [已完成] 提交本轮文件并推送远程。
 
 ## 当前 TODO
 
@@ -30,7 +30,7 @@
 - [x] 完成仓库级静态检查和相关测试
 - [x] 完成 Bridge/FaceFusion 实际启动验证
 - [x] 检查安装目录同步策略并按验证结果部署
-- [ ] 更新文档、提交并推送
+- [x] 更新文档、提交并推送
 
 ## 最近验证状态
 
@@ -38,7 +38,8 @@
 - 单元测试：核心版本/新模型、Bridge/worker/launcher、Job 管理相关合并回归 `71 passed, 1 warning`
 - 编译：本轮未修改 Flutter；Python 模块编译通过
 - 运行测试：仓库与安装目录 Bridge `/health` 200、核心 `3.9.0`、FaceFusion `ready`、WebUI 200；安装版 Flutter/launcher 稳定观察通过且无新增 Windows 崩溃事件
-- 最近 Git commit：`5edfa19 docs: record Flutter port alignment verification`
+- 最近功能 Git commit：`e0c8def feat: upgrade FaceFusion core to 3.9.0`
+- push：已推送 `origin/feat/facefusion-core-3.9.0`
 
 ---
 
@@ -82,7 +83,7 @@
 - [x] 阶段 2：核心 3.9.0 迁移
 - [x] 阶段 3：升级保护与兼容测试
 - [x] 阶段 4：集成和真实启动验证
-- [ ] 阶段 5：部署、提交与推送
+- [x] 阶段 5：部署、提交与推送
 
 ## 验收标准
 
@@ -126,6 +127,7 @@
 - 2026-09-05：启动任务，完成上游版本、历史故障和本地定制差异调查。
 - 2026-09-05：完成核心迁移、升级事务保护、自动回滚测试和仓库启动验证。
 - 2026-09-05：完成安装目录备份、同步与正式 launcher 联合稳定性验证。
+- 2026-09-05：功能提交 `e0c8def` 已推送到 `origin/feat/facefusion-core-3.9.0`，任务完成。
 
 ## 接力信息
 
