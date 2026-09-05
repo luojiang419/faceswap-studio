@@ -113,6 +113,7 @@ CORE_MODEL_USER_AGENT = "FaceSwap Studio Model Bootstrap/1.0"
 UPDATE_USER_AGENT = "FaceSwap Studio Updater/1.0"
 UPDATE_REPOSITORY = "luojiang419/faceswap-studio"
 FACEFUSION_CORE_REPOSITORY = "facefusion/facefusion"
+CORE_UPDATE_PAYLOAD_NAMES = ("facefusion", "facefusion.py", "requirements.txt", "install.py")
 UPDATE_MANIFEST_ASSET = "update-manifest.json"
 UPDATE_CACHE_DIRNAME = "FaceSwap Studio"
 STUDIO_ROOT_CHILD_NAMES = {
@@ -1253,6 +1254,109 @@ class FaceFusionRuntime:
             )
             self._append_log(f"[bridge] FaceFusion core download failed: {error}")
 
+    def _extract_core_update_source(self, package_path: Path, extract_dir: Path) -> Path:
+        import zipfile
+
+        if extract_dir.exists():
+            shutil.rmtree(extract_dir)
+        extract_dir.mkdir(parents=True, exist_ok=True)
+
+        with zipfile.ZipFile(package_path) as archive:
+            for member in archive.infolist():
+                member_path = extract_dir / member.filename
+                if not self._path_is_within(member_path, extract_dir):
+                    raise RuntimeError(f"FaceFusion core package contains an unsafe path: {member.filename}")
+            archive.extractall(extract_dir)
+
+        source_roots = [path for path in extract_dir.iterdir() if path.is_dir()]
+        if len(source_roots) != 1:
+            raise RuntimeError("FaceFusion core package must contain exactly one source directory.")
+        return source_roots[0]
+
+    def _validate_core_update_source(self, source_root: Path, expected_version: str) -> None:
+        missing_names = [name for name in CORE_UPDATE_PAYLOAD_NAMES if not (source_root / name).exists()]
+        if missing_names:
+            raise RuntimeError(f"FaceFusion core package is incomplete: {', '.join(missing_names)}")
+
+        preflight_script = """
+import inspect
+import sys
+
+source_root = sys.argv[1]
+expected_version = sys.argv[2].lstrip('v')
+sys.path.insert(0, source_root)
+
+import facefusion.choices as facefusion_choices
+from facefusion import core, metadata
+from facefusion.face_creator import get_many_faces
+from facefusion.filesystem import filter_audio_paths, get_file_extension, is_image, is_video
+from facefusion.processors.modules.age_modifier import choices as age_modifier_choices
+from facefusion.processors.modules.background_remover import choices as background_remover_choices
+from facefusion.processors.modules.deep_swapper import choices as deep_swapper_choices
+from facefusion.processors.modules.expression_restorer import choices as expression_restorer_choices
+from facefusion.processors.modules.face_debugger import choices as face_debugger_choices
+from facefusion.processors.modules.face_editor import choices as face_editor_choices
+from facefusion.processors.modules.face_enhancer import choices as face_enhancer_choices
+from facefusion.processors.modules.face_swapper import choices as face_swapper_choices
+from facefusion.processors.modules.frame_colorizer import choices as frame_colorizer_choices
+from facefusion.processors.modules.frame_enhancer import choices as frame_enhancer_choices
+from facefusion.processors.modules.lip_syncer import choices as lip_syncer_choices
+from facefusion.program import create_program
+from facefusion.uis import choices as ui_choices
+from facefusion.uis.components.preview import process_preview_frame
+from facefusion.vision import count_video_frame_total, read_static_image
+
+actual_version = str(metadata.get('version') or '').lstrip('v')
+if not actual_version or actual_version != expected_version:
+    raise RuntimeError(f'core version mismatch: expected {expected_version}, got {actual_version or "missing"}')
+preview_parameters = list(inspect.signature(process_preview_frame).parameters)
+if preview_parameters[4:5] != ['target_vision_frames']:
+    raise RuntimeError('preview API is incompatible with FaceSwap Studio workers')
+if get_many_faces.__module__ != 'facefusion.face_creator':
+    raise RuntimeError('face_creator API is incompatible with FaceSwap Studio workers')
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", preflight_script, str(source_root.resolve()), expected_version],
+            cwd=str(source_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            timeout=60,
+        )
+        if result.returncode != 0:
+            details = (result.stderr or result.stdout or "unknown import error").strip()
+            raise RuntimeError(f"FaceFusion core compatibility check failed: {details[-2000:]}")
+
+    def _copy_core_update_payload(self, source_root: Path, target_root: Path) -> None:
+        for name in CORE_UPDATE_PAYLOAD_NAMES:
+            source = source_root / name
+            target = target_root / name
+            if target.exists():
+                if target.is_dir() and not target.is_symlink():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
+            if not source.exists():
+                continue
+            if source.is_dir():
+                shutil.copytree(source, target)
+            else:
+                shutil.copy2(source, target)
+
+    def _backup_core_update_payload(self, backup_dir: Path) -> None:
+        backup_dir.mkdir(parents=True, exist_ok=False)
+        for name in CORE_UPDATE_PAYLOAD_NAMES:
+            source = self.repo_root / name
+            if not source.exists():
+                continue
+            target = backup_dir / name
+            if source.is_dir():
+                shutil.copytree(source, target)
+            else:
+                shutil.copy2(source, target)
+
     def apply_core_update(self) -> dict[str, Any]:
         core_update = dict(self.update_status().get("core_update") or {})
         package_path_value = str(core_update.get("package_path") or "").strip()
@@ -1282,67 +1386,63 @@ class FaceFusionRuntime:
                 error="FaceFusion queue process is still running.",
             )
 
+        backup_dir: Path | None = None
+        update_started = False
         try:
             self._set_core_update_state(
                 state="applying",
-                message="正在备份并应用 FaceFusion 核心升级...",
+                message="正在检查、备份并应用 FaceFusion 核心升级...",
                 error=None,
             )
-            import zipfile
-
             extract_dir = package_path.parent / "source"
-            if extract_dir.exists():
-                shutil.rmtree(extract_dir)
-            extract_dir.mkdir(parents=True, exist_ok=True)
-            with zipfile.ZipFile(package_path) as archive:
-                archive.extractall(extract_dir)
-
-            source_root = next((path for path in extract_dir.iterdir() if path.is_dir()), None)
-            if source_root is None:
-                raise RuntimeError("FaceFusion core package does not contain a source directory.")
-            if not (source_root / "facefusion").is_dir():
-                raise RuntimeError("FaceFusion core package does not contain the facefusion module.")
+            source_root = self._extract_core_update_source(package_path, extract_dir)
+            expected_version = str(core_update.get("latest_version") or "").strip()
+            if not expected_version:
+                raise RuntimeError("FaceFusion core update version is missing.")
+            self._validate_core_update_source(source_root, expected_version)
 
             backup_root = self._core_updates_root() / "backups"
-            backup_dir = backup_root / datetime.now().strftime("%Y%m%d-%H%M%S")
-            backup_dir.mkdir(parents=True, exist_ok=True)
-            for name in ("facefusion", "facefusion.py", "requirements.txt", "install.py"):
-                source = self.repo_root / name
-                if not source.exists():
-                    continue
-                target = backup_dir / name
-                if source.is_dir():
-                    shutil.copytree(source, target)
-                else:
-                    shutil.copy2(source, target)
-
-            for name in ("facefusion", "facefusion.py", "requirements.txt", "install.py"):
-                source = source_root / name
-                if not source.exists():
-                    continue
-                target = self.repo_root / name
-                if source.is_dir():
-                    if target.exists():
-                        shutil.rmtree(target)
-                    shutil.copytree(source, target)
-                else:
-                    shutil.copy2(source, target)
+            backup_dir = backup_root / datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+            self._backup_core_update_payload(backup_dir)
+            update_started = True
+            self._copy_core_update_payload(source_root, self.repo_root)
+            self._validate_core_update_source(self.repo_root, expected_version)
 
             self._set_core_update_state(
                 state="applied",
                 message="FaceFusion 核心升级已应用，重启 Bridge/FaceFusion 后生效。",
                 backup_path=str(backup_dir),
-                current_version=str(core_update.get("latest_version") or self._read_facefusion_core_version()),
+                current_version=expected_version,
                 update_available=False,
                 error=None,
                 completed_at=datetime.now().isoformat(timespec="seconds"),
             )
             self._append_log(f"[bridge] FaceFusion core update applied. Backup: {backup_dir}")
         except Exception as error:
+            rollback_error: Exception | None = None
+            rollback_succeeded = False
+            if update_started and backup_dir is not None:
+                try:
+                    self._copy_core_update_payload(backup_dir, self.repo_root)
+                    rollback_succeeded = True
+                    self._append_log(f"[bridge] FaceFusion core update rolled back: {backup_dir}")
+                except Exception as restore_error:
+                    rollback_error = restore_error
+                    self._append_log(f"[bridge] FaceFusion core rollback failed: {restore_error}")
+            if rollback_succeeded:
+                message = "FaceFusion 核心升级失败，已自动恢复原核心。"
+            elif update_started:
+                message = "FaceFusion 核心升级失败，自动恢复也失败，请使用备份恢复。"
+            else:
+                message = "FaceFusion 核心升级包兼容性检查失败，当前核心未修改。"
+            error_text = str(error)
+            if rollback_error is not None:
+                error_text = f"{error_text}; rollback failed: {rollback_error}"
             self._set_core_update_state(
                 state="failed",
-                message="FaceFusion 核心升级应用失败，当前文件已保留。",
-                error=str(error),
+                message=message,
+                backup_path=str(backup_dir) if backup_dir is not None else None,
+                error=error_text,
                 completed_at=datetime.now().isoformat(timespec="seconds"),
             )
             self._append_log(f"[bridge] FaceFusion core apply failed: {error}")
