@@ -207,6 +207,10 @@ function Get-FlutterExecutable {
 }
 
 function Use-FlutterMirrors {
-    $env:PUB_HOSTED_URL = "https://pub.flutter-io.cn"
-    $env:FLUTTER_STORAGE_BASE_URL = "https://storage.flutter-io.cn"
+    if ([string]::IsNullOrWhiteSpace($env:PUB_HOSTED_URL)) {
+        $env:PUB_HOSTED_URL = "https://pub.flutter-io.cn"
+    }
+    if ([string]::IsNullOrWhiteSpace($env:FLUTTER_STORAGE_BASE_URL)) {
+        $env:FLUTTER_STORAGE_BASE_URL = "https://storage.flutter-io.cn"
+    }
 }
