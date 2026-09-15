@@ -77,10 +77,53 @@ function Resolve-PythonHomeFromVenv {
     return (Resolve-Path -LiteralPath $pythonHome).Path
 }
 
+function Resolve-FullMediaTool {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ToolName,
+        [Parameter(Mandatory = $true)]
+        [string]$RepoRoot
+    )
+
+    $bundledRoot = Join-Path $RepoRoot ".runtime\ffmpeg"
+    $candidates = @((Join-Path $bundledRoot "$ToolName.exe"))
+    $markerPath = Join-Path $bundledRoot "ffmpeg-source.json"
+    if (Test-Path -LiteralPath $markerPath) {
+        try {
+            $marker = Get-Content -Raw -LiteralPath $markerPath | ConvertFrom-Json
+            if ($marker.source_path) {
+                $candidates += (Join-Path (Split-Path -Parent ([string]$marker.source_path)) "$ToolName.exe")
+            }
+        }
+        catch {
+            Write-Warning "Unable to read FFmpeg source marker: $markerPath"
+        }
+    }
+    $command = Get-Command $ToolName -ErrorAction SilentlyContinue
+    if ($command) {
+        $candidates += $command.Source
+    }
+    $candidates += "C:\ProgramData\chocolatey\lib\ffmpeg\tools\ffmpeg\bin\$ToolName.exe"
+
+    foreach ($candidate in $candidates | Select-Object -Unique) {
+        if (-not $candidate -or -not (Test-Path -LiteralPath $candidate)) {
+            continue
+        }
+        $item = Get-Item -LiteralPath $candidate
+        if ($item.Length -ge 5MB) {
+            return $item.FullName
+        }
+    }
+    throw "A full $ToolName.exe was not found. Install a complete FFmpeg distribution before building."
+}
+
 $repoRoot = Get-RepoRoot
 $stageRoot = Join-Path $repoRoot "build\installer\app"
 $installerOutput = Join-Path $repoRoot "dist\installer"
 $flutterDeployment = Join-Path $repoRoot "faceswap studio\runtime\windows_app\current"
+$flutterWebDeployment = Join-Path $repoRoot "faceswap studio\flutter_app\build\web"
+$offlineModelManifest = Join-Path $repoRoot "installer\core-models.txt"
+$offlineModelSource = Join-Path $repoRoot ".assets\models"
 $launcherFileName = ([string][char]0x542F) + ([string][char]0x52A8) + "FaceSwap Studio.exe"
 $launcherExe = Join-Path $repoRoot $launcherFileName
 $updaterExe = Join-Path $repoRoot "dist\FaceSwapStudioUpdater.exe"
@@ -97,8 +140,15 @@ if (-not $SkipFlutterBuild) {
         throw "Flutter build failed."
     }
 }
-elseif (-not (Test-Path -LiteralPath (Join-Path $flutterDeployment "faceswap_studio.exe"))) {
-    throw "Flutter deployment was not found. Rerun without -SkipFlutterBuild."
+elseif (
+    (-not (Test-Path -LiteralPath (Join-Path $flutterDeployment "faceswap_studio.exe"))) -or
+    (-not (Test-Path -LiteralPath (Join-Path $flutterWebDeployment "index.html")))
+) {
+    throw "Flutter desktop or web deployment was not found. Rerun without -SkipFlutterBuild."
+}
+
+if (-not (Test-Path -LiteralPath (Join-Path $flutterWebDeployment "index.html"))) {
+    throw "Flutter web deployment was not found at $flutterWebDeployment"
 }
 
 if (-not $SkipLauncherBuild) {
@@ -136,7 +186,13 @@ $excludeFiles = @("*.pyc", "*.pyo", "*.log")
 Copy-Directory -Source (Join-Path $repoRoot "facefusion") -Destination (Join-Path $stageRoot "facefusion") -ExcludeDirectories @("__pycache__") -ExcludeFiles $excludeFiles
 Copy-Directory -Source (Join-Path $repoRoot "faceswap studio\bridge") -Destination (Join-Path $stageRoot "faceswap studio\bridge") -ExcludeDirectories @("__pycache__") -ExcludeFiles $excludeFiles
 Copy-Directory -Source $flutterDeployment -Destination (Join-Path $stageRoot "faceswap studio\runtime\windows_app\current") -ExcludeFiles $excludeFiles
-Copy-Directory -Source (Join-Path $repoRoot ".runtime\ffmpeg") -Destination (Join-Path $stageRoot ".runtime\ffmpeg") -ExcludeFiles $excludeFiles
+Copy-Directory -Source $flutterWebDeployment -Destination (Join-Path $stageRoot "faceswap studio\flutter_app\build\web") -ExcludeFiles $excludeFiles
+$stagedMediaRoot = Join-Path $stageRoot ".runtime\ffmpeg"
+Ensure-Directory -Path $stagedMediaRoot | Out-Null
+$ffmpegSource = Resolve-FullMediaTool -ToolName "ffmpeg" -RepoRoot $repoRoot
+$ffprobeSource = Resolve-FullMediaTool -ToolName "ffprobe" -RepoRoot $repoRoot
+Copy-Item -LiteralPath $ffmpegSource -Destination (Join-Path $stagedMediaRoot "ffmpeg.exe") -Force
+Copy-Item -LiteralPath $ffprobeSource -Destination (Join-Path $stagedMediaRoot "ffprobe.exe") -Force
 Copy-Directory -Source (Join-Path $repoRoot ".venv-win") -Destination (Join-Path $stageRoot ".venv-win") -ExcludeDirectories @("__pycache__") -ExcludeFiles $excludeFiles
 
 $pythonHome = Resolve-PythonHomeFromVenv -PyvenvPath (Join-Path $repoRoot ".venv-win\pyvenv.cfg")
@@ -162,7 +218,24 @@ foreach ($file in @("common.ps1", "facefusion.ps1", "repair_runtime.ps1")) {
     Copy-FileToDirectory -Source (Join-Path $repoRoot "scripts\$file") -Destination (Join-Path $stageRoot "scripts")
 }
 
-Ensure-Directory -Path (Join-Path $stageRoot ".assets\models") | Out-Null
+$venvPython = Join-Path $repoRoot ".venv-win\Scripts\python.exe"
+$modelValidator = Join-Path $repoRoot "scripts\validate_offline_models.py"
+& $venvPython $modelValidator --manifest $offlineModelManifest --models-dir $offlineModelSource
+if ($LASTEXITCODE -ne 0) {
+    throw "Offline model validation failed."
+}
+$stagedModelsRoot = Join-Path $stageRoot ".assets\models"
+Ensure-Directory -Path $stagedModelsRoot | Out-Null
+$offlineModelNames = Get-Content -LiteralPath $offlineModelManifest |
+    ForEach-Object { $_.Trim() } |
+    Where-Object { $_ -and -not $_.StartsWith("#") }
+foreach ($modelName in $offlineModelNames) {
+    if ([System.IO.Path]::GetFileName($modelName) -ne $modelName) {
+        throw "Unsafe offline model manifest entry: $modelName"
+    }
+    Copy-Item -LiteralPath (Join-Path $offlineModelSource $modelName) -Destination $stagedModelsRoot -Force
+}
+Write-Host "Offline core models staged: $($offlineModelNames.Count) files"
 Ensure-Directory -Path (Join-Path $stageRoot "faceswap studio\data\jobs\drafted") | Out-Null
 Ensure-Directory -Path (Join-Path $stageRoot "faceswap studio\data\jobs\queued") | Out-Null
 Ensure-Directory -Path (Join-Path $stageRoot "faceswap studio\data\jobs\completed") | Out-Null

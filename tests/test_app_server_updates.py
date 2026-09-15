@@ -1,7 +1,6 @@
 import importlib.util
 import json
 import threading
-import zipfile
 from collections import deque
 from pathlib import Path
 
@@ -28,7 +27,6 @@ def create_runtime(tmp_path : Path) -> FaceFusionRuntime:
 	runtime._repo_root = repo_root
 	runtime._update_lock = threading.RLock()
 	runtime._update_download_thread = None
-	runtime._core_update_download_thread = None
 	runtime._process = None
 	runtime._queue_current_process = None
 	runtime._lock = threading.RLock()
@@ -42,111 +40,20 @@ def create_runtime(tmp_path : Path) -> FaceFusionRuntime:
 	return runtime
 
 
-def write_core_payload(root : Path, marker : str) -> None:
-	core_dir = root / 'facefusion'
-	core_dir.mkdir(parents = True, exist_ok = True)
-	(core_dir / '__init__.py').write_text('', encoding = 'utf-8')
-	(core_dir / 'marker.txt').write_text(marker, encoding = 'utf-8')
-	(root / 'facefusion.py').write_text(marker, encoding = 'utf-8')
-	(root / 'requirements.txt').write_text(marker, encoding = 'utf-8')
-	(root / 'install.py').write_text(marker, encoding = 'utf-8')
+def test_core_update_routes_removed() -> None:
+	client = TestClient(APP_SERVER_MODULE.app)
+	for route in ('/updates/core/download', '/updates/core/apply'):
+		assert client.post(route).status_code == 404
 
 
-def write_core_archive(tmp_path : Path, marker : str = 'new') -> Path:
-	package_path = tmp_path / 'facefusion-3.9.0.zip'
-	with zipfile.ZipFile(package_path, 'w') as archive:
-		archive.writestr('facefusion-source/facefusion/__init__.py', '')
-		archive.writestr('facefusion-source/facefusion/marker.txt', marker)
-		archive.writestr('facefusion-source/facefusion.py', marker)
-		archive.writestr('facefusion-source/requirements.txt', marker)
-		archive.writestr('facefusion-source/install.py', marker)
-	return package_path
-
-
-def prepare_core_update(runtime : FaceFusionRuntime, package_path : Path) -> None:
-	runtime._update_state['core_update'].update({
-		'state': 'downloaded',
-		'latest_version': '3.9.0',
-		'package_path': str(package_path),
-	})
-
-
-def test_core_update_preflight_accepts_current_core(tmp_path : Path) -> None:
+def test_check_updates_only_queries_app_release(monkeypatch, tmp_path : Path) -> None:
 	runtime = create_runtime(tmp_path)
-
-	runtime._validate_core_update_source(REPO_ROOT, '3.9.0')
-
-
-def test_apply_core_update_rejects_unsafe_archive(tmp_path : Path) -> None:
-	runtime = create_runtime(tmp_path)
-	write_core_payload(runtime.repo_root, 'old')
-	package_path = tmp_path / 'unsafe.zip'
-	with zipfile.ZipFile(package_path, 'w') as archive:
-		archive.writestr('../escaped.txt', 'unsafe')
-	prepare_core_update(runtime, package_path)
-
-	status = runtime.apply_core_update()
-
-	assert status['core_update']['state'] == 'failed'
-	assert status['core_update']['message'] == 'FaceFusion 核心升级包兼容性检查失败，当前核心未修改。'
-	assert (runtime.repo_root / 'facefusion' / 'marker.txt').read_text(encoding = 'utf-8') == 'old'
-	assert (package_path.parent / 'escaped.txt').exists() is False
-
-
-def test_apply_core_update_preflight_failure_preserves_current_core(monkeypatch, tmp_path : Path) -> None:
-	runtime = create_runtime(tmp_path)
-	write_core_payload(runtime.repo_root, 'old')
-	package_path = write_core_archive(tmp_path)
-	prepare_core_update(runtime, package_path)
-
-	def fail_preflight(source_root : Path, expected_version : str) -> None:
-		raise RuntimeError('incompatible core')
-
-	monkeypatch.setattr(runtime, '_validate_core_update_source', fail_preflight)
-
-	status = runtime.apply_core_update()
-
-	assert status['core_update']['state'] == 'failed'
-	assert status['core_update']['message'] == 'FaceFusion 核心升级包兼容性检查失败，当前核心未修改。'
-	assert status['core_update']['backup_path'] is None
-	assert (runtime.repo_root / 'facefusion' / 'marker.txt').read_text(encoding = 'utf-8') == 'old'
-
-
-def test_apply_core_update_postflight_failure_rolls_back(monkeypatch, tmp_path : Path) -> None:
-	runtime = create_runtime(tmp_path)
-	write_core_payload(runtime.repo_root, 'old')
-	package_path = write_core_archive(tmp_path)
-	prepare_core_update(runtime, package_path)
-
-	def validate_until_installed(source_root : Path, expected_version : str) -> None:
-		if source_root.resolve() == runtime.repo_root.resolve():
-			raise RuntimeError('installed core failed import')
-
-	monkeypatch.setattr(runtime, '_validate_core_update_source', validate_until_installed)
-
-	status = runtime.apply_core_update()
-
-	assert status['core_update']['state'] == 'failed'
-	assert status['core_update']['message'] == 'FaceFusion 核心升级失败，已自动恢复原核心。'
-	assert status['core_update']['backup_path']
-	assert (runtime.repo_root / 'facefusion' / 'marker.txt').read_text(encoding = 'utf-8') == 'old'
-	assert (runtime.repo_root / 'facefusion.py').read_text(encoding = 'utf-8') == 'old'
-
-
-def test_apply_core_update_success_keeps_backup(monkeypatch, tmp_path : Path) -> None:
-	runtime = create_runtime(tmp_path)
-	write_core_payload(runtime.repo_root, 'old')
-	package_path = write_core_archive(tmp_path)
-	prepare_core_update(runtime, package_path)
-	monkeypatch.setattr(runtime, '_validate_core_update_source', lambda source_root, expected_version : None)
-
-	status = runtime.apply_core_update()
-	backup_path = Path(status['core_update']['backup_path'])
-
-	assert status['core_update']['state'] == 'applied'
-	assert status['core_update']['current_version'] == '3.9.0'
-	assert (runtime.repo_root / 'facefusion' / 'marker.txt').read_text(encoding = 'utf-8') == 'new'
-	assert (backup_path / 'facefusion' / 'marker.txt').read_text(encoding = 'utf-8') == 'old'
+	monkeypatch.setattr(runtime, '_latest_release_metadata', lambda: ({'version': '0.1.1'}, {}))
+	monkeypatch.setattr(runtime, '_download_json', lambda *a, **k: (_ for _ in ()).throw(AssertionError('unexpected network request')))
+	status = runtime.check_updates()
+	assert status['state'] == 'current'
+	assert 'core_update' not in status
+	assert not hasattr(runtime, 'apply_core_update')
 
 
 def test_select_delta_package_matches_current_version(tmp_path : Path) -> None:

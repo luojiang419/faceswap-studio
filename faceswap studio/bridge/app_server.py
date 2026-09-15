@@ -25,7 +25,6 @@ if str(BRIDGE_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(BRIDGE_REPO_ROOT))
 
 import facefusion.choices as facefusion_choices
-from facefusion import metadata as facefusion_metadata
 from facefusion.filesystem import get_file_extension
 from facefusion.processors.modules.age_modifier import choices as age_modifier_choices
 from facefusion.processors.modules.background_remover import choices as background_remover_choices
@@ -112,8 +111,6 @@ CORE_MODEL_SCOPE = "core"
 CORE_MODEL_USER_AGENT = "FaceSwap Studio Model Bootstrap/1.0"
 UPDATE_USER_AGENT = "FaceSwap Studio Updater/1.0"
 UPDATE_REPOSITORY = "luojiang419/faceswap-studio"
-FACEFUSION_CORE_REPOSITORY = "facefusion/facefusion"
-CORE_UPDATE_PAYLOAD_NAMES = ("facefusion", "facefusion.py", "requirements.txt", "install.py")
 UPDATE_MANIFEST_ASSET = "update-manifest.json"
 UPDATE_CACHE_DIRNAME = "FaceSwap Studio"
 STUDIO_ROOT_CHILD_NAMES = {
@@ -189,7 +186,6 @@ class FaceFusionRuntime:
         self._model_bootstrap_thread: threading.Thread | None = None
         self._update_lock = threading.RLock()
         self._update_download_thread: threading.Thread | None = None
-        self._core_update_download_thread: threading.Thread | None = None
 
         psutil.cpu_percent(interval=None)
         self._prepare_paths()
@@ -885,31 +881,6 @@ class FaceFusionRuntime:
             version = "0.0.0"
         return version or "0.0.0"
 
-    def _read_facefusion_core_version(self) -> str:
-        return str(facefusion_metadata.get("version") or "0.0.0")
-
-    def _default_core_update_state(self) -> dict[str, Any]:
-        return {
-            "name": "FaceFusion 核心",
-            "state": "idle",
-            "message": "尚未检查 FaceFusion 核心更新。",
-            "current_version": self._read_facefusion_core_version(),
-            "latest_version": None,
-            "update_available": False,
-            "release_url": None,
-            "archive_url": None,
-            "package_path": None,
-            "backup_path": None,
-            "downloaded_bytes": 0,
-            "total_bytes": 0,
-            "percent": 0.0,
-            "speed_bps": 0.0,
-            "repository": os.environ.get("FACESWAP_STUDIO_FACEFUSION_REPOSITORY", FACEFUSION_CORE_REPOSITORY),
-            "error": None,
-            "checked_at": None,
-            "completed_at": None,
-        }
-
     def _default_update_state(self) -> dict[str, Any]:
         return {
             "state": "idle",
@@ -932,7 +903,6 @@ class FaceFusionRuntime:
             "scheduled_for_next_launch": False,
             "scheduled_at": None,
             "pending_package_path": None,
-            "core_update": self._default_core_update_state(),
         }
 
     def _copy_update_state(self) -> dict[str, Any]:
@@ -1090,364 +1060,6 @@ class FaceFusionRuntime:
         manifest["release_url"] = release.get("html_url")
         return manifest, asset_urls
 
-    def _check_facefusion_core_update(self) -> dict[str, Any]:
-        state = self._default_core_update_state()
-        state.update(
-            {
-                "state": "checking",
-                "message": "正在检查 FaceFusion 核心更新...",
-                "checked_at": datetime.now().isoformat(timespec="seconds"),
-            }
-        )
-        try:
-            repository = str(state["repository"])
-            release_api_url = f"https://api.github.com/repos/{repository}/releases/latest"
-            release = self._download_json(release_api_url)
-            latest_version = str(release.get("tag_name") or release.get("name") or "").lstrip("v")
-            if not latest_version:
-                raise RuntimeError("FaceFusion latest release does not contain a version.")
-
-            current_version = self._read_facefusion_core_version()
-            update_available = self._is_newer_version(latest_version, current_version)
-            state.update(
-                {
-                    "state": "update_available" if update_available else "current",
-                    "message": f"发现 FaceFusion 核心新版本 {latest_version}。"
-                    if update_available
-                    else "FaceFusion 核心已是当前可检测到的最新版本。",
-                    "current_version": current_version,
-                    "latest_version": latest_version,
-                    "update_available": update_available,
-                    "release_url": release.get("html_url"),
-                    "archive_url": release.get("zipball_url"),
-                    "error": None,
-                }
-            )
-        except Exception as error:
-            state.update(
-                {
-                    "state": "failed",
-                    "message": "FaceFusion 核心更新检查失败。",
-                    "update_available": False,
-                    "error": str(error),
-                }
-            )
-            self._append_log(f"[bridge] FaceFusion core update check failed: {error}")
-        return state
-
-    def _set_core_update_state(self, **updates: Any) -> dict[str, Any]:
-        with self._update_lock:
-            core_update = dict(self._update_state.get("core_update") or self._default_core_update_state())
-            core_update.update(updates)
-            self._update_state["core_update"] = core_update
-            return dict(core_update)
-
-    def _core_updates_root(self) -> Path:
-        return self._updates_root() / "facefusion-core"
-
-    def download_core_update(self) -> dict[str, Any]:
-        state = self.update_status()
-        core_update = dict(state.get("core_update") or {})
-        if core_update.get("state") in {"idle", "failed", "current"}:
-            state = self.check_updates()
-            core_update = dict(state.get("core_update") or {})
-        if not core_update.get("update_available"):
-            return self.update_status()
-
-        with self._update_lock:
-            if self._core_update_download_thread and self._core_update_download_thread.is_alive():
-                return self.update_status()
-            self._set_core_update_state(
-                state="downloading",
-                message="正在下载 FaceFusion 核心源码包...",
-                downloaded_bytes=0,
-                percent=0.0,
-                speed_bps=0.0,
-                error=None,
-            )
-            self._core_update_download_thread = threading.Thread(
-                target=self._download_core_update_worker,
-                daemon=True,
-            )
-            self._core_update_download_thread.start()
-            return self.update_status()
-
-    def _download_core_update_worker(self) -> None:
-        state = self.update_status()
-        core_update = dict(state.get("core_update") or {})
-        archive_url = str(core_update.get("archive_url") or "")
-        latest_version = str(core_update.get("latest_version") or "unknown")
-        if not archive_url:
-            self._set_core_update_state(
-                state="failed",
-                message="FaceFusion 核心源码包地址缺失。",
-                error="Missing FaceFusion archive URL.",
-            )
-            return
-
-        target_dir = self._core_updates_root() / latest_version
-        target_dir.mkdir(parents=True, exist_ok=True)
-        target_path = target_dir / f"facefusion-{latest_version}.zip"
-        temp_path = target_path.with_suffix(".zip.download")
-
-        try:
-            if temp_path.exists():
-                temp_path.unlink()
-            request = Request(archive_url, headers={"User-Agent": UPDATE_USER_AGENT})
-            started_at = time.monotonic()
-            downloaded = 0
-            expected_size = 0
-            with self._update_opener().open(request, timeout=30) as response, open(temp_path, "wb") as output:
-                content_length = response.headers.get("Content-Length")
-                if content_length:
-                    try:
-                        expected_size = int(content_length)
-                    except ValueError:
-                        expected_size = 0
-                last_tick = time.monotonic()
-                last_tick_bytes = 0
-                while True:
-                    chunk = response.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    output.write(chunk)
-                    downloaded += len(chunk)
-                    now = time.monotonic()
-                    tick_elapsed = max(now - last_tick, 0.001)
-                    speed = (downloaded - last_tick_bytes) / tick_elapsed
-                    if tick_elapsed >= 0.5:
-                        last_tick = now
-                        last_tick_bytes = downloaded
-                    percent = 0.0
-                    if expected_size > 0:
-                        percent = round(min(downloaded / expected_size * 100.0, 99.9), 2)
-                    elapsed = max(now - started_at, 0.001)
-                    self._set_core_update_state(
-                        downloaded_bytes=downloaded,
-                        total_bytes=expected_size,
-                        percent=percent,
-                        speed_bps=speed if speed > 0 else downloaded / elapsed,
-                    )
-
-            if expected_size > 0 and downloaded < expected_size:
-                raise RuntimeError("Downloaded FaceFusion core package is incomplete.")
-            temp_path.replace(target_path)
-            self._set_core_update_state(
-                state="downloaded",
-                message="FaceFusion 核心源码包下载完成。",
-                package_path=str(target_path),
-                downloaded_bytes=downloaded,
-                total_bytes=expected_size or downloaded,
-                percent=100.0,
-                speed_bps=0.0,
-                completed_at=datetime.now().isoformat(timespec="seconds"),
-                error=None,
-            )
-            self._append_log(f"[bridge] FaceFusion core package downloaded: {target_path}")
-        except Exception as error:
-            self._set_core_update_state(
-                state="failed",
-                message="FaceFusion 核心源码包下载失败。",
-                speed_bps=0.0,
-                error=str(error),
-                completed_at=datetime.now().isoformat(timespec="seconds"),
-            )
-            self._append_log(f"[bridge] FaceFusion core download failed: {error}")
-
-    def _extract_core_update_source(self, package_path: Path, extract_dir: Path) -> Path:
-        import zipfile
-
-        if extract_dir.exists():
-            shutil.rmtree(extract_dir)
-        extract_dir.mkdir(parents=True, exist_ok=True)
-
-        with zipfile.ZipFile(package_path) as archive:
-            for member in archive.infolist():
-                member_path = extract_dir / member.filename
-                if not self._path_is_within(member_path, extract_dir):
-                    raise RuntimeError(f"FaceFusion core package contains an unsafe path: {member.filename}")
-            archive.extractall(extract_dir)
-
-        source_roots = [path for path in extract_dir.iterdir() if path.is_dir()]
-        if len(source_roots) != 1:
-            raise RuntimeError("FaceFusion core package must contain exactly one source directory.")
-        return source_roots[0]
-
-    def _validate_core_update_source(self, source_root: Path, expected_version: str) -> None:
-        missing_names = [name for name in CORE_UPDATE_PAYLOAD_NAMES if not (source_root / name).exists()]
-        if missing_names:
-            raise RuntimeError(f"FaceFusion core package is incomplete: {', '.join(missing_names)}")
-
-        preflight_script = """
-import inspect
-import sys
-
-source_root = sys.argv[1]
-expected_version = sys.argv[2].lstrip('v')
-sys.path.insert(0, source_root)
-
-import facefusion.choices as facefusion_choices
-from facefusion import core, metadata
-from facefusion.face_creator import get_many_faces
-from facefusion.filesystem import filter_audio_paths, get_file_extension, is_image, is_video
-from facefusion.processors.modules.age_modifier import choices as age_modifier_choices
-from facefusion.processors.modules.background_remover import choices as background_remover_choices
-from facefusion.processors.modules.deep_swapper import choices as deep_swapper_choices
-from facefusion.processors.modules.expression_restorer import choices as expression_restorer_choices
-from facefusion.processors.modules.face_debugger import choices as face_debugger_choices
-from facefusion.processors.modules.face_editor import choices as face_editor_choices
-from facefusion.processors.modules.face_enhancer import choices as face_enhancer_choices
-from facefusion.processors.modules.face_swapper import choices as face_swapper_choices
-from facefusion.processors.modules.frame_colorizer import choices as frame_colorizer_choices
-from facefusion.processors.modules.frame_enhancer import choices as frame_enhancer_choices
-from facefusion.processors.modules.lip_syncer import choices as lip_syncer_choices
-from facefusion.program import create_program
-from facefusion.uis import choices as ui_choices
-from facefusion.uis.components.preview import process_preview_frame
-from facefusion.vision import count_video_frame_total, read_static_image
-
-actual_version = str(metadata.get('version') or '').lstrip('v')
-if not actual_version or actual_version != expected_version:
-    raise RuntimeError(f'core version mismatch: expected {expected_version}, got {actual_version or "missing"}')
-preview_parameters = list(inspect.signature(process_preview_frame).parameters)
-if preview_parameters[4:5] != ['target_vision_frames']:
-    raise RuntimeError('preview API is incompatible with FaceSwap Studio workers')
-if get_many_faces.__module__ != 'facefusion.face_creator':
-    raise RuntimeError('face_creator API is incompatible with FaceSwap Studio workers')
-"""
-        result = subprocess.run(
-            [sys.executable, "-c", preflight_script, str(source_root.resolve()), expected_version],
-            cwd=str(source_root),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            timeout=60,
-        )
-        if result.returncode != 0:
-            details = (result.stderr or result.stdout or "unknown import error").strip()
-            raise RuntimeError(f"FaceFusion core compatibility check failed: {details[-2000:]}")
-
-    def _copy_core_update_payload(self, source_root: Path, target_root: Path) -> None:
-        for name in CORE_UPDATE_PAYLOAD_NAMES:
-            source = source_root / name
-            target = target_root / name
-            if target.exists():
-                if target.is_dir() and not target.is_symlink():
-                    shutil.rmtree(target)
-                else:
-                    target.unlink()
-            if not source.exists():
-                continue
-            if source.is_dir():
-                shutil.copytree(source, target)
-            else:
-                shutil.copy2(source, target)
-
-    def _backup_core_update_payload(self, backup_dir: Path) -> None:
-        backup_dir.mkdir(parents=True, exist_ok=False)
-        for name in CORE_UPDATE_PAYLOAD_NAMES:
-            source = self.repo_root / name
-            if not source.exists():
-                continue
-            target = backup_dir / name
-            if source.is_dir():
-                shutil.copytree(source, target)
-            else:
-                shutil.copy2(source, target)
-
-    def apply_core_update(self) -> dict[str, Any]:
-        core_update = dict(self.update_status().get("core_update") or {})
-        package_path_value = str(core_update.get("package_path") or "").strip()
-        if not package_path_value:
-            return self._set_core_update_state(
-                state="failed",
-                message="FaceFusion 核心源码包尚未下载。",
-                error="FaceFusion core package was not downloaded.",
-            )
-        package_path = Path(package_path_value)
-        if not package_path.exists():
-            return self._set_core_update_state(
-                state="failed",
-                message="FaceFusion 核心源码包尚未下载。",
-                error="FaceFusion core package was not downloaded.",
-            )
-        if self._process and self._process.poll() is None:
-            return self._set_core_update_state(
-                state="failed",
-                message="请先停止 FaceFusion 后再升级核心。",
-                error="FaceFusion process is still running.",
-            )
-        if self._queue_current_process and self._queue_current_process.poll() is None:
-            return self._set_core_update_state(
-                state="failed",
-                message="请先停止生成队列后再升级核心。",
-                error="FaceFusion queue process is still running.",
-            )
-
-        backup_dir: Path | None = None
-        update_started = False
-        try:
-            self._set_core_update_state(
-                state="applying",
-                message="正在检查、备份并应用 FaceFusion 核心升级...",
-                error=None,
-            )
-            extract_dir = package_path.parent / "source"
-            source_root = self._extract_core_update_source(package_path, extract_dir)
-            expected_version = str(core_update.get("latest_version") or "").strip()
-            if not expected_version:
-                raise RuntimeError("FaceFusion core update version is missing.")
-            self._validate_core_update_source(source_root, expected_version)
-
-            backup_root = self._core_updates_root() / "backups"
-            backup_dir = backup_root / datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-            self._backup_core_update_payload(backup_dir)
-            update_started = True
-            self._copy_core_update_payload(source_root, self.repo_root)
-            self._validate_core_update_source(self.repo_root, expected_version)
-
-            self._set_core_update_state(
-                state="applied",
-                message="FaceFusion 核心升级已应用，重启 Bridge/FaceFusion 后生效。",
-                backup_path=str(backup_dir),
-                current_version=expected_version,
-                update_available=False,
-                error=None,
-                completed_at=datetime.now().isoformat(timespec="seconds"),
-            )
-            self._append_log(f"[bridge] FaceFusion core update applied. Backup: {backup_dir}")
-        except Exception as error:
-            rollback_error: Exception | None = None
-            rollback_succeeded = False
-            if update_started and backup_dir is not None:
-                try:
-                    self._copy_core_update_payload(backup_dir, self.repo_root)
-                    rollback_succeeded = True
-                    self._append_log(f"[bridge] FaceFusion core update rolled back: {backup_dir}")
-                except Exception as restore_error:
-                    rollback_error = restore_error
-                    self._append_log(f"[bridge] FaceFusion core rollback failed: {restore_error}")
-            if rollback_succeeded:
-                message = "FaceFusion 核心升级失败，已自动恢复原核心。"
-            elif update_started:
-                message = "FaceFusion 核心升级失败，自动恢复也失败，请使用备份恢复。"
-            else:
-                message = "FaceFusion 核心升级包兼容性检查失败，当前核心未修改。"
-            error_text = str(error)
-            if rollback_error is not None:
-                error_text = f"{error_text}; rollback failed: {rollback_error}"
-            self._set_core_update_state(
-                state="failed",
-                message=message,
-                backup_path=str(backup_dir) if backup_dir is not None else None,
-                error=error_text,
-                completed_at=datetime.now().isoformat(timespec="seconds"),
-            )
-            self._append_log(f"[bridge] FaceFusion core apply failed: {error}")
-        return self.update_status()
-
     def _resolve_update_url(self, package: dict[str, Any], asset_urls: dict[str, str]) -> str | None:
         direct_url = package.get("url") or package.get("download_url")
         if direct_url:
@@ -1477,9 +1089,6 @@ if get_many_faces.__module__ != 'facefusion.face_creator':
     def update_status(self) -> dict[str, Any]:
         state = self._copy_update_state()
         state["current_version"] = self._read_app_version()
-        core_update = dict(state.get("core_update") or self._default_core_update_state())
-        core_update["current_version"] = self._read_facefusion_core_version()
-        state["core_update"] = core_update
         return self._apply_pending_update_marker_to_state(state)
 
     def check_updates(self) -> dict[str, Any]:
@@ -1495,7 +1104,6 @@ if get_many_faces.__module__ != 'facefusion.face_creator':
 
         try:
             current_version = self._read_app_version()
-            core_update = self._check_facefusion_core_update()
             manifest, asset_urls = self._latest_release_metadata()
             latest_version = str(manifest.get("version") or "")
             if not latest_version:
@@ -1515,19 +1123,14 @@ if get_many_faces.__module__ != 'facefusion.face_creator':
                 "release_url": release_url,
                 "manifest": manifest,
                 "selected_delta": selected_delta,
-                "core_update": core_update,
                 "error": None,
             }
 
             if not update_available:
                 message = "当前已是最新版本。"
-                if core_update.get("update_available"):
-                    message = f"壳软件已是最新版本，FaceFusion 核心发现新版本 {core_update.get('latest_version')}。"
                 state_updates.update({"state": "current", "message": message})
             elif selected_delta:
                 message = f"发现新版本 {latest_version}。"
-                if core_update.get("update_available"):
-                    message += f" FaceFusion 核心也发现新版本 {core_update.get('latest_version')}。"
                 state_updates.update(
                     {
                         "state": "update_available",
@@ -1538,8 +1141,6 @@ if get_many_faces.__module__ != 'facefusion.face_creator':
                 )
             else:
                 message = "当前版本没有可用增量包，请下载全量安装器。"
-                if core_update.get("update_available"):
-                    message += f" FaceFusion 核心发现新版本 {core_update.get('latest_version')}。"
                 state_updates.update(
                     {
                         "state": "full_required",
@@ -1556,7 +1157,6 @@ if get_many_faces.__module__ != 'facefusion.face_creator':
                 message="检查更新失败。",
                 update_available=False,
                 delta_available=False,
-                core_update=self._check_facefusion_core_update(),
                 error=str(error),
             )
             self._append_log(f"[bridge] Update check failed: {error}")
@@ -7016,16 +6616,6 @@ def updates_schedule() -> dict[str, Any]:
 @app.post("/updates/apply")
 def updates_apply() -> dict[str, Any]:
     return runtime.apply_update()
-
-
-@app.post("/updates/core/download")
-def updates_core_download() -> dict[str, Any]:
-    return runtime.download_core_update()
-
-
-@app.post("/updates/core/apply")
-def updates_core_apply() -> dict[str, Any]:
-    return runtime.apply_core_update()
 
 
 @app.get("/metrics/system")

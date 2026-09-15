@@ -41,6 +41,9 @@ class BridgeClient {
   Future<Map<String, dynamic>> downloadUpdate() async =>
       _postJson('/updates/download');
 
+  Future<Map<String, dynamic>> scheduleUpdate() async =>
+      _postJson('/updates/schedule');
+
   Future<Map<String, dynamic>> applyUpdate() async =>
       _postJson('/updates/apply');
 
