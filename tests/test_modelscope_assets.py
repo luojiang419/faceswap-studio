@@ -4,6 +4,7 @@ import importlib
 import json
 from pathlib import Path
 import threading
+import time
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, ProxyHandler, build_opener
 import zlib
@@ -28,6 +29,10 @@ def server():
             start, _, requested_end = self.headers.get('Range', 'bytes=0-')[6:].partition('-')
             offset = int(start)
             calls.append(offset)
+            if mode['value'] == 'rate-limit':
+                mode['value'] = 'range'
+                self.send_response(429); self.send_header('Retry-After', '1'); self.end_headers()
+                return
             if mode['value'] == 'ignore': offset = 0
             end = min(len(content)-1, offset + 8191) if mode['value'] == 'segments' else len(content)-1
             if requested_end and mode['value'] != 'ignore': end = min(end, int(requested_end))
@@ -80,6 +85,28 @@ def test_large_file_uses_bounded_ranges_and_preserves_full_sha(server, tmp_path)
     target = tmp_path / 'large-model.dfm'
     ms.download_file(url, target, size=len(payload), sha256=hashlib.sha256(payload).hexdigest(), allow_http=True)
     assert calls == [0, 64 * 1024**2]
+    assert target.read_bytes() == payload
+
+
+def test_rate_limit_preserves_partial_and_maintenance_respects_retry_after(server, tmp_path, monkeypatch):
+    from scripts import modelscope_models as mirror
+    url, payload, calls, mode = server
+    target = tmp_path / 'rate-limited.onnx'
+    part = target.with_suffix('.onnx.part'); part.write_bytes(payload[:17])
+    mode['value'] = 'rate-limit'
+    with pytest.raises(mirror.HTTPError) as error:
+        ms.download_file(url, target, size=len(payload), sha256=hashlib.sha256(payload).hexdigest(), allow_http=True)
+    assert error.value.code == 429 and calls == [17]
+    assert part.read_bytes() == payload[:17]
+    mode['value'] = 'rate-limit'
+    original = mirror.download_file
+    monkeypatch.setattr(mirror, 'download_file', lambda *args, **kwargs: original(*args, **kwargs, allow_http=True))
+    asset = {'id': 'models-test/model.onnx', 'upstream_url': 'https://huggingface.co/models-test/model.onnx',
+             'size': len(payload), 'sha256': hashlib.sha256(payload).hexdigest()}
+    started = time.monotonic()
+    mirror.UpstreamDownloader(url).download(asset, target)
+    assert time.monotonic() - started >= 1
+    assert calls == [17, 17, 17]
     assert target.read_bytes() == payload
 
 

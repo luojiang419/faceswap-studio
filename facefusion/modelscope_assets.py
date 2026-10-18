@@ -10,7 +10,7 @@ from functools import lru_cache
 from http.client import HTTPException
 from pathlib import Path, PurePosixPath
 from typing import Callable
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import ProxyHandler, Request, build_opener
 
@@ -105,7 +105,9 @@ def download_file(url: str, destination: Path, *, size: int, sha256: str,
 						if progress:
 							progress(offset, size)
 					stream.flush()
-		except (OSError, URLError, HTTPException):
+		except (OSError, URLError, HTTPException) as error:
+			if isinstance(error, HTTPError) and error.code == 429:
+				raise
 			failures += 1
 			if failures >= 3:
 				raise

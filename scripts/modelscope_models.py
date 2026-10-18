@@ -5,6 +5,7 @@ import argparse
 import ast
 import concurrent.futures
 import copy
+from email.utils import parsedate_to_datetime
 import hashlib
 import json
 from pathlib import Path
@@ -13,6 +14,7 @@ import sys
 import threading
 import time
 from urllib.parse import urlencode
+from urllib.error import HTTPError
 from urllib.request import ProxyHandler, Request, build_opener
 import zlib
 
@@ -22,6 +24,50 @@ from facefusion.modelscope_assets import download_file, file_sha256
 
 DEFAULT_REPO = 'jiangjiang419/facefusion-workbench-updates'
 PREFIX = 'models/facefusion-3.9.0-v1'
+
+
+class UpstreamDownloader:
+    """全部线程共享限流等待，避免429后换文件继续请求同一端点。"""
+    def __init__(self, endpoint, proxy=None):
+        self.endpoint = endpoint
+        self.proxy = proxy
+        self.lock = threading.Lock()
+        self.not_before = 0
+        self.blocked = None
+
+    def download(self, asset, target):
+        for attempt in range(4):
+            while True:
+                with self.lock:
+                    blocked, delay = self.blocked, self.not_before - time.monotonic()
+                if blocked:
+                    raise RuntimeError(blocked)
+                if delay <= 0:
+                    break
+                time.sleep(min(30, delay))
+            opener = build_opener(ProxyHandler({'http': self.proxy, 'https': self.proxy} if self.proxy else {}))
+            url = asset['upstream_url'].replace('https://huggingface.co/', self.endpoint.rstrip('/') + '/', 1)
+            try:
+                return download_file(url, target, size=asset['size'], sha256=asset['sha256'], opener=opener)
+            except HTTPError as error:
+                if error.code != 429:
+                    raise
+                value = error.headers.get('Retry-After', '')
+                try:
+                    delay = float(value)
+                except ValueError:
+                    try:
+                        delay = parsedate_to_datetime(value).timestamp() - time.time()
+                    except (ValueError, TypeError, OverflowError):
+                        delay = 60
+                delay = max(1, delay)
+                with self.lock:
+                    self.not_before = max(self.not_before, time.monotonic() + delay)
+                    if attempt == 3 or delay > 600:
+                        self.blocked = '上游持续限流，已暂停本轮新增下载；保留证明与分片，恢复通路后可续传'
+                print(f'RATE LIMITED: wait {delay:.0f}s ' + asset['id'], flush=True)
+                if self.blocked:
+                    raise RuntimeError(self.blocked) from error
 
 
 def save(path, value):
@@ -272,6 +318,7 @@ def publish(directory, workers=4, proxy=None, upstream_endpoint='https://hugging
     cache.mkdir(exist_ok=True)
     lock = threading.Lock()
     commit_lock = threading.Lock()
+    upstream = UpstreamDownloader(upstream_endpoint, proxy)
     counters = {'done': 0, 'bytes': 0, 'failed': 0}
     def worker(asset):
         proof_path = proofs / (hashlib.sha256(asset['id'].encode()).hexdigest() + '.json')
@@ -295,11 +342,9 @@ def publish(directory, workers=4, proxy=None, upstream_endpoint='https://hugging
                     local = candidate
                 else:
                     generated = cache / asset['sha256'] / Path(asset['id']).name
-                    opener = build_opener(ProxyHandler({'http': proxy, 'https': proxy} if proxy else {}))
                     with lock:
                         print('DOWNLOAD ' + asset['id'] + f' {asset["size"] / 1024**2:.1f}MiB', flush=True)
-                    upstream_url = asset['upstream_url'].replace('https://huggingface.co/', upstream_endpoint.rstrip('/') + '/', 1)
-                    download_file(upstream_url, generated, size=asset['size'], sha256=asset['sha256'], opener=opener)
+                    upstream.download(asset, generated)
                     local = generated
                 checksum = 0
                 with local.open('rb') as stream:
