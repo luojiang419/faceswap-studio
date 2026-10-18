@@ -141,7 +141,7 @@ def publish(output):
     (activation / "README.md").write_text(
         "---\nlicense: other\ntasks:\n- face-generation\n---\n# FaceSwap Studio 桌面更新\n\n"
         "此仓库存放 FaceSwap Studio 桌面更新、运行包及内置可选模型镜像，不包含用户数据。\n\n"
-        "客户端通过 public/latest.json 验证 Ed25519 签名，下载后校验 SHA-256。模型各自沿用上游许可，来源与许可见 models/facefusion-3.9.0-v1/catalog.json，不能将全部模型视为 Apache 授权。\n"
+        "客户端通过 public/latest.json 验证 Ed25519 签名，下载后校验 SHA-256。优先使用已验证的魔搭模型；尚无镜像的权重标记外网下载，自动使用系统代理。模型各自沿用上游许可，来源与许可见 models/facefusion-3.9.0-v1/catalog.json，不能将全部模型视为 Apache 授权。\n"
         "已有旧版首次接入请参阅源码仓库 docs/自动更新说明.md。\n", "utf-8")
     api.upload_folder(repo_id=repo, folder_path=str(activation), commit_message=f"activate: FaceSwap Studio {manifest['version']}")
     if json.loads(read_remote(latest_url)) != envelope:

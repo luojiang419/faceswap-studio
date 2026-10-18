@@ -90,6 +90,18 @@ def test_default_workspace_options_use_video_quality_100(tmp_path : Path) -> Non
 	assert defaults['execution_thread_count'] == 14
 
 
+def test_external_model_label_and_domestic_env_allow_system_proxy(tmp_path):
+    runtime = create_runtime(tmp_path)
+    schema = runtime.workspace_options_schema()
+    assert '外网下载' in schema['fields']['frame_colorizer_model']['choice_labels']['deoldify_stable']
+    runtime._settings['model_download_mode'] = APP_SERVER_MODULE.MODEL_DOWNLOAD_MODE_DOMESTIC
+    env = {'HTTPS_PROXY': 'http://old-proxy:9999', 'NO_PROXY': '*'}
+    runtime._apply_model_download_env(env)
+    assert env['NO_PROXY'] == APP_SERVER_MODULE.LOCAL_NO_PROXY
+    assert 'HTTPS_PROXY' not in env
+    assert env['FACEFUSION_DISABLE_PROXY'] == '1'
+
+
 def test_facefusion_webui_command_uses_supported_default_layout(tmp_path : Path) -> None:
 	runtime = create_runtime(tmp_path)
 

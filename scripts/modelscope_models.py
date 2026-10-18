@@ -229,8 +229,58 @@ def verify_anonymous(asset, local=None, full=False):
     return {'anonymousRangeVerified': True, 'samples': samples}
 
 
+def routed_catalog(directory):
+    plan = json.loads((directory / 'plan.json').read_text('utf-8'))
+    result = {key: copy.deepcopy(plan[key]) for key in ('protocol', 'product', 'models', 'assets', 'repository', 'upstream', 'total_bytes')}
+    for asset in result['assets']:
+        proof_path = directory / 'proofs' / (hashlib.sha256(asset['id'].encode()).hexdigest() + '.json')
+        if proof_path.exists():
+            proof = json.loads(proof_path.read_text('utf-8'))
+            mode = 'anonymousFullSha256Verified' if asset['kind'] == 'hashes' else 'anonymousRangeVerified'
+            if proof.get('verified') is not True or proof.get(mode) is not True or any(proof.get(key) != asset[key] for key in ('id', 'sha256', 'size', 'url')):
+                raise ValueError('已有镜像证明无效：' + asset['id'])
+            asset['download_origin'] = 'modelscope'
+            asset['download_label'] = '魔搭下载'
+        else:
+            asset['url'] = asset['upstream_url']
+            asset['download_origin'] = 'external'
+            asset['download_label'] = '外网下载'
+            asset['proxy_policy'] = 'system_auto'
+    result['routing_policy'] = 'verified-modelscope-else-upstream-system-proxy-v1'
+    return result
+
+
+def audit_routing(directory, catalog):
+    plan = json.loads((directory / 'plan.json').read_text('utf-8'))
+    actual = inventory()
+    if actual['models'] != plan['models'] or {a['id']: a for a in actual['assets']} != {
+            a['id']: {key: a[key] for key in ('id', 'path', 'kind', 'models')} for a in plan['assets']}:
+        raise ValueError('当前源码与下载计划不同')
+    if catalog != routed_catalog(directory):
+        raise ValueError('模型来源清单与已验证证明或固定上游不一致')
+    from facefusion.modelscope_assets import catalog as load_catalog, _urls
+    load_catalog.cache_clear(); _urls.cache_clear()
+    try:
+        if len(load_catalog()) != len(catalog['assets']):
+            raise ValueError('客户端未能解析全部模型来源')
+    finally:
+        load_catalog.cache_clear(); _urls.cache_clear()
+    mirrored = sum(a['download_origin'] == 'modelscope' for a in catalog['assets'])
+    report = {'complete': True, 'allMirrored': mirrored == len(catalog['assets']),
+              'modelCount': len(actual['models']), 'assetCount': len(catalog['assets']),
+              'mirroredAssetCount': mirrored, 'externalAssetCount': len(catalog['assets']) - mirrored,
+              'catalogSha256': file_sha256(ROOT / 'facefusion/model_catalog.json'), 'sourceInventoryMatches': True}
+    save(directory / 'routing-audit.json', report)
+    return report
+
+
 def audit(directory):
     """只有源码、计划、逐项证明和最终清单完全一致，才允许发布清单。"""
+    path = ROOT / 'facefusion/model_catalog.json'
+    if path.exists():
+        value = json.loads(path.read_text('utf-8'))
+        if value.get('routing_policy'):
+            return audit_routing(directory, value)
     plan = json.loads((directory / 'plan.json').read_text('utf-8'))
     publication = json.loads((directory / 'publication.json').read_text('utf-8'))
     if publication.get('complete') is not True or publication.get('missing') or publication.get('failures'):
@@ -276,7 +326,11 @@ def publish_catalog(directory):
     config = json.loads((ROOT / 'update-config.json').read_text('utf-8'))
     if config['repository'] != plan['repository']:
         raise ValueError('模型镜像与应用发布仓库不一致')
-    proof = publish_asset(ROOT / 'facefusion/model_catalog.json', plan['prefix'] + '/catalog.json')
+    # 魔搭普通文本对象统一LF，先规范化发布副本，避免Windows CRLF造成字节校验不符。
+    source = ROOT / 'facefusion/model_catalog.json'
+    normalized = directory / 'catalog.json'
+    normalized.write_bytes(source.read_bytes().replace(b'\r\n', b'\n'))
+    proof = publish_asset(normalized, plan['prefix'] + '/catalog.json')
     save(directory / 'catalog-publication.json', {**report, **proof})
     return proof
 
@@ -427,7 +481,7 @@ def publish(directory, workers=4, proxy=None, upstream_endpoint='https://hugging
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=['prepare', 'publish', 'audit', 'publish-catalog'])
+    parser.add_argument('mode', choices=['prepare', 'publish', 'audit', 'publish-catalog', 'route-catalog'])
     parser.add_argument('--directory', type=Path, default=ROOT / 'build/modelscope-all-models')
     parser.add_argument('--proxy', help='仅供维护者读取上游；客户端魔搭下载不使用此设置')
     parser.add_argument('--upstream-endpoint', choices=['https://huggingface.co', 'https://hf-mirror.com'], default='https://huggingface.co',
@@ -436,6 +490,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
     if args.mode == 'prepare':
         prepare(args.directory.resolve(), args.proxy)
+    elif args.mode == 'route-catalog':
+        save(ROOT / 'facefusion/model_catalog.json', routed_catalog(args.directory.resolve()))
+        print(json.dumps(audit(args.directory.resolve()), ensure_ascii=False, indent=2))
     elif args.mode == 'audit':
         print(json.dumps(audit(args.directory.resolve()), ensure_ascii=False, indent=2))
     elif args.mode == 'publish-catalog':

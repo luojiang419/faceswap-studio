@@ -26,8 +26,10 @@ def conditional_download(download_directory_path : str, urls : List[str]) -> Non
 			target = os.path.join(download_directory_path, asset['id'].split('/')[-1])
 			partial_size = min(get_file_size(target + '.part'), asset['size'])
 			try:
+				if asset.get('download_origin') == 'external':
+					logger.info('外网下载 · 自动使用系统代理：' + os.path.basename(target), __name__)
 				with tqdm(total = asset['size'], initial = partial_size, desc = translator.get('downloading'), unit = 'B', unit_scale = True, unit_divisor = 1024, ascii = ' =', disable = state_manager.get_item('log_level') in [ 'warn', 'error' ]) as progress:
-					progress.set_postfix(download_provider = 'modelscope', file_name = os.path.basename(target))
+					progress.set_postfix(download_provider = asset.get('download_origin', 'modelscope'), file_name = os.path.basename(target))
 					download_asset(asset, target, progress = lambda done, total: progress.update(done - progress.n))
 			except (OSError, ValueError) as error:
 				logger.error('模型下载失败：' + str(error), __name__)

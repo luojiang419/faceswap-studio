@@ -492,7 +492,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   Text('模型下载方式', style: theme.textTheme.titleMedium),
                   const SizedBox(height: 6),
                   Text(
-                    '全部内置模型均可按需从魔搭获取，已安装模型会校验复用。',
+                    '优先从魔搭补齐模型；标记“外网下载”的模型自动检测并使用系统代理。已安装模型会校验复用。',
                     style: theme.textTheme.bodySmall,
                   ),
                   const SizedBox(height: 10),

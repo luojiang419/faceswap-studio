@@ -198,6 +198,40 @@ def test_provider_selection_and_legacy_explicit_urls(monkeypatch):
     assert download.resolve_download_url('models-test', 'optional.onnx') == item['url']
 
 
+def test_external_asset_uses_detected_system_proxy_and_full_sha(server, tmp_path, monkeypatch):
+    url, payload, calls, _ = server
+    # 本机HTTP服务器充当显式代理；未监听的目标端口只有经过代理才能下载。
+    import urllib.request
+    monkeypatch.setattr(urllib.request, 'proxy_bypass', lambda host: False)
+    monkeypatch.setenv('NO_PROXY', 'localhost,127.0.0.1')
+    monkeypatch.setenv('no_proxy', 'localhost,127.0.0.1')
+    monkeypatch.setenv('FACEFUSION_DISABLE_PROXY', '1')
+    monkeypatch.setattr(ms, 'system_proxies', lambda: {'http': url, 'https': url})
+    original = ms.download_file
+    monkeypatch.setattr(ms, 'download_file', lambda *args, **kwargs: original(*args, **kwargs, allow_http=True))
+    asset = {'url': 'http://127.0.0.1:1/optional.onnx', 'download_origin': 'external',
+             'size': len(payload), 'sha256': hashlib.sha256(payload).hexdigest()}
+    target = tmp_path / 'optional.onnx'
+    ms.download_asset(asset, target)
+    assert calls == [0]
+    assert target.read_bytes() == payload
+
+
+def test_external_catalog_requires_fixed_upstream_commit(catalog_file):
+    record = descriptor(b'data')
+    commit = 'a' * 40
+    record.update(download_origin='external', upstream_commit=commit,
+                  upstream_url=f'https://huggingface.co/facefusion/models-test/resolve/{commit}/optional.onnx')
+    record['url'] = record['upstream_url']
+    catalog_file.write_text(json.dumps({'protocol': 1, 'product': 'facefusion-models', 'assets': [record]}), 'utf-8')
+    assert ms.catalog()[record['id']]['download_origin'] == 'external'
+    ms.catalog.cache_clear()
+    record['url'] = record['url'].replace(commit, 'main')
+    catalog_file.write_text(json.dumps({'protocol': 1, 'product': 'facefusion-models', 'assets': [record]}), 'utf-8')
+    with pytest.raises(ValueError, match='固定'):
+        ms.catalog()
+
+
 def test_full_inventory_matches_actual_builtin_functions(monkeypatch):
     scanned = inventory()
     assert len(scanned['models']) == 247

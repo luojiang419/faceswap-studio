@@ -1,10 +1,7 @@
 import 'package:flutter/material.dart';
 
 typedef WorkspaceOptionsUpdater =
-    Future<void> Function(
-      Map<String, dynamic> payload, {
-      bool clearPreview,
-    });
+    Future<void> Function(Map<String, dynamic> payload, {bool clearPreview});
 
 class WorkspaceFloatingOptionsOverlay extends StatefulWidget {
   const WorkspaceFloatingOptionsOverlay({
@@ -39,10 +36,7 @@ class _WorkspaceFloatingOptionsOverlayState
   double? _dragPanelWidth;
 
   double _clampPanelWidth(double value) {
-    return value.clamp(
-      widget.minPanelWidth,
-      widget.maxPanelWidth,
-    ).toDouble();
+    return value.clamp(widget.minPanelWidth, widget.maxPanelWidth).toDouble();
   }
 
   void _handleResizeStart(DragStartDetails details) {
@@ -183,8 +177,9 @@ class _WorkspaceOptionsPanelFrame extends StatelessWidget {
                   width: 4,
                   margin: const EdgeInsets.symmetric(vertical: 20),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.outlineVariant
-                        .withValues(alpha: 0.7),
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.outlineVariant.withValues(alpha: 0.7),
                     borderRadius: BorderRadius.circular(999),
                   ),
                 ),
@@ -297,8 +292,7 @@ class _WorkspaceOptionsPanelState extends State<WorkspaceOptionsPanel> {
           ),
         );
         for (var index = 0; index < controllers.length; index++) {
-          final nextText =
-              index < values.length ? '${values[index]}' : '0';
+          final nextText = index < values.length ? '${values[index]}' : '0';
           if (controllers[index].text != nextText) {
             controllers[index].text = nextText;
           }
@@ -332,13 +326,17 @@ class _WorkspaceOptionsPanelState extends State<WorkspaceOptionsPanel> {
     }
     final minimum = (field.minimum ?? 0).round();
     final maximum = (field.maximum ?? 255).round();
-    final currentValues = widget.state.intListValue(field.key, fallbackLength: 4);
+    final currentValues = widget.state.intListValue(
+      field.key,
+      fallbackLength: 4,
+    );
     final nextValues = <int>[];
     for (var index = 0; index < controllers.length; index++) {
       final rawValue = controllers[index].text.trim();
       final parsedValue = int.tryParse(rawValue);
-      final fallbackValue =
-          index < currentValues.length ? currentValues[index] : minimum;
+      final fallbackValue = index < currentValues.length
+          ? currentValues[index]
+          : minimum;
       final normalizedValue = parsedValue == null
           ? fallbackValue
           : parsedValue.clamp(minimum, maximum);
@@ -359,6 +357,9 @@ class _WorkspaceOptionsPanelState extends State<WorkspaceOptionsPanel> {
       _selectedOutputVideoEncoder == 'prores_ks';
 
   String _displayChoiceLabel(WorkspaceOptionField field, String choice) {
+    if (field.choiceLabels.containsKey(choice)) {
+      return field.choiceLabels[choice]!;
+    }
     if (field.key == 'output_video_encoder' && choice == 'prores_ks') {
       return 'ProRes 422 (MOV)';
     }
@@ -369,6 +370,10 @@ class _WorkspaceOptionsPanelState extends State<WorkspaceOptionsPanel> {
   }
 
   String? _fieldHelperText(WorkspaceOptionField field) {
+    final selected = field.selectValue(widget.state.options[field.key]);
+    if (selected != null && field.choiceLabels.containsKey(selected)) {
+      return '外网下载 · 自动检测并使用系统代理，已安装模型会复用。';
+    }
     if (field.key == 'output_video_encoder') {
       return _isProResOutputSelected
           ? '当前会输出 .mov，视频预设不适用。'
@@ -387,7 +392,9 @@ class _WorkspaceOptionsPanelState extends State<WorkspaceOptionsPanel> {
     if (field.key == 'output_video_preset' && _isProResOutputSelected) {
       return false;
     }
-    if (!field.isSatisfiedByProcessors(widget.state.stringListValue('processors'))) {
+    if (!field.isSatisfiedByProcessors(
+      widget.state.stringListValue('processors'),
+    )) {
       return false;
     }
     if (!field.matchesDependency(widget.state.options)) {
@@ -442,9 +449,7 @@ class _WorkspaceOptionsPanelState extends State<WorkspaceOptionsPanel> {
                   ),
                 ),
                 FilledButton.tonalIcon(
-                  onPressed: widget.busy
-                      ? null
-                      : () => widget.onResetOptions(),
+                  onPressed: widget.busy ? null : () => widget.onResetOptions(),
                   icon: Icon(
                     Icons.restart_alt_rounded,
                     size: compact ? 18 : 20,
@@ -605,7 +610,9 @@ class _WorkspaceOptionsPanelState extends State<WorkspaceOptionsPanel> {
       if (sectionFields == null || sectionFields.isEmpty) {
         continue;
       }
-      widgets.add(_WorkspaceSectionTitle(title: sectionLabels[section] ?? section));
+      widgets.add(
+        _WorkspaceSectionTitle(title: sectionLabels[section] ?? section),
+      );
       widgets.add(SizedBox(height: widget.compact ? 8 : 10));
       widgets.addAll(
         sectionFields.map(
@@ -647,8 +654,9 @@ class _WorkspaceOptionsPanelState extends State<WorkspaceOptionsPanel> {
       );
     }
     if (field.control == 'frame_range') {
-      final totalFrames =
-          (widget.targetVideoFrameTotal ?? 0).clamp(0, 1 << 20).toDouble();
+      final totalFrames = (widget.targetVideoFrameTotal ?? 0)
+          .clamp(0, 1 << 20)
+          .toDouble();
       return _buildRangeField(
         context,
         field,
@@ -826,9 +834,9 @@ class _WorkspaceOptionsPanelState extends State<WorkspaceOptionsPanel> {
       children: [
         Text(
           field.label,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
+          style: Theme.of(
+            context,
+          ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 8),
         for (var index = 0; index < labels.length; index++) ...[
@@ -871,16 +879,19 @@ class _WorkspaceOptionsPanelState extends State<WorkspaceOptionsPanel> {
             Expanded(
               child: Text(
                 field.label,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
               ),
             ),
             Text('${currentValue.round()}'),
           ],
         ),
         Slider(
-          value: currentValue.clamp(field.minimum ?? 0.0, field.maximum ?? 100.0),
+          value: currentValue.clamp(
+            field.minimum ?? 0.0,
+            field.maximum ?? 100.0,
+          ),
           min: field.minimum ?? 0.0,
           max: field.maximum ?? 100.0,
           divisions: field.divisions,
@@ -980,9 +991,9 @@ class _WorkspaceOptionsPanelState extends State<WorkspaceOptionsPanel> {
       children: [
         Text(
           field.label,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
+          style: Theme.of(
+            context,
+          ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 8),
         Row(
@@ -1022,7 +1033,8 @@ class _WorkspaceOptionsPanelState extends State<WorkspaceOptionsPanel> {
   ) {
     final theme = Theme.of(context);
     final value = widget.state.options[field.key];
-    final currentValue = _numericDrafts[field.key] ?? field.primaryDoubleValue(value);
+    final currentValue =
+        _numericDrafts[field.key] ?? field.primaryDoubleValue(value);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1078,7 +1090,8 @@ class _WorkspaceOptionsPanelState extends State<WorkspaceOptionsPanel> {
   }
 
   String? _fieldRangeHint(WorkspaceOptionField field) {
-    if (field.key == 'preview_frame_number' && widget.targetVideoFrameTotal != null) {
+    if (field.key == 'preview_frame_number' &&
+        widget.targetVideoFrameTotal != null) {
       return '范围 0 - ${widget.targetVideoFrameTotal}';
     }
     if (field.minimum == null || field.maximum == null) {
@@ -1181,7 +1194,10 @@ class WorkspaceOptionsState {
     if (values.length >= fallbackLength) {
       return values;
     }
-    return <int>[...values, ...List<int>.filled(fallbackLength - values.length, 0)];
+    return <int>[
+      ...values,
+      ...List<int>.filled(fallbackLength - values.length, 0),
+    ];
   }
 
   bool boolValue(String key) {
@@ -1216,6 +1232,7 @@ class WorkspaceOptionField {
     required this.sectionLabel,
     required this.label,
     required this.choices,
+    this.choiceLabels = const <String, String>{},
     required this.visibleFor,
     required this.dependsValues,
     required this.requiresProcessors,
@@ -1228,10 +1245,7 @@ class WorkspaceOptionField {
     this.pairLabel,
   });
 
-  factory WorkspaceOptionField.fromJson(
-    String key,
-    Map<String, dynamic> json,
-  ) {
+  factory WorkspaceOptionField.fromJson(String key, Map<String, dynamic> json) {
     return WorkspaceOptionField(
       key: key,
       type: '${json['type'] ?? 'select'}',
@@ -1239,6 +1253,10 @@ class WorkspaceOptionField {
       section: '${json['section'] ?? 'misc'}',
       sectionLabel: '${json['section_label'] ?? json['section'] ?? 'misc'}',
       label: '${json['label'] ?? key}',
+      choiceLabels:
+          (json['choice_labels'] as Map<String, dynamic>? ??
+                  const <String, dynamic>{})
+              .map((key, value) => MapEntry(key, '$value')),
       choices: (json['choices'] as List<dynamic>? ?? const <dynamic>[])
           .map((item) => '$item')
           .toList(),
@@ -1271,6 +1289,7 @@ class WorkspaceOptionField {
   final String sectionLabel;
   final String label;
   final List<String> choices;
+  final Map<String, String> choiceLabels;
   final List<String> visibleFor;
   final List<String> dependsValues;
   final List<String> requiresProcessors;

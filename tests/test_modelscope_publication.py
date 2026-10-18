@@ -36,6 +36,42 @@ def test_completed_catalog_has_matching_source_and_proofs(completed):
     assert result['allProofsMatch'] is True
 
 
+def test_routed_catalog_marks_only_unproven_assets_external(completed):
+    directory, _, proof = completed
+    plan = json.loads((directory / 'plan.json').read_text('utf-8'))
+    plan['assets'][0].update(upstream_commit='a' * 40,
+        upstream_url='https://huggingface.co/facefusion/models-test/resolve/' + 'a' * 40 + '/example.onnx')
+    mirror.save(directory / 'plan.json', plan)
+    assert mirror.routed_catalog(directory)['assets'][0]['download_origin'] == 'modelscope'
+    proof.unlink()
+    record = mirror.routed_catalog(directory)['assets'][0]
+    assert record['download_origin'] == 'external'
+    assert record['download_label'] == '外网下载'
+    assert record['proxy_policy'] == 'system_auto'
+    assert record['url'] == plan['assets'][0]['upstream_url']
+    assert record['sha256'] == plan['assets'][0]['sha256']
+
+
+def test_catalog_publication_normalizes_text_without_changing_client_catalog(completed, monkeypatch):
+    from scripts import build_lightweight
+    directory, _, _ = completed
+    source = mirror.ROOT / 'facefusion/model_catalog.json'
+    before = source.read_bytes()
+    plan = json.loads((directory / 'plan.json').read_text('utf-8'))
+    plan['prefix'] = 'models/test-v1'
+    mirror.save(directory / 'plan.json', plan)
+    mirror.save(mirror.ROOT / 'update-config.json', {'repository': 'test/repo'})
+    def upload(path, remote):
+        content = path.read_bytes()
+        assert b'\r\n' not in content
+        assert json.loads(content) == json.loads(before)
+        return {'sha256': hashlib.sha256(content).hexdigest(), 'anonymousFullVerified': True}
+    monkeypatch.setattr(build_lightweight, 'publish_asset', upload)
+    result = mirror.publish_catalog(directory)
+    assert result['anonymousFullVerified'] is True
+    assert source.read_bytes() == before
+
+
 @pytest.mark.parametrize('damage', ['unfinished', 'missing-proof', 'wrong-sha', 'no-anonymous-proof', 'changed-source', 'changed-catalog'])
 def test_incomplete_or_stale_catalog_cannot_be_published(completed, damage, monkeypatch):
     directory, actual, proof = completed

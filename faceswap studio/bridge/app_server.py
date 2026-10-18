@@ -2090,6 +2090,8 @@ class FaceFusionRuntime:
         }
 
     def workspace_options_schema(self) -> dict[str, Any]:
+        from facefusion.modelscope_assets import model_download_labels
+        download_labels = model_download_labels()
         with self._lock:
             options = dict(self._workspace_options)
 
@@ -2134,6 +2136,9 @@ class FaceFusionRuntime:
             }
             if choices is not None:
                 payload["choices"] = [str(item) for item in choices]
+                if key.endswith('_model'):
+                    payload['choice_labels'] = {str(item): str(item) + ' · ' + download_labels[str(item)]
+                                                for item in choices if str(item) in download_labels}
             if minimum is not None:
                 payload["minimum"] = minimum
             if maximum is not None:
@@ -4574,8 +4579,8 @@ class FaceFusionRuntime:
             env["FACEFUSION_HUGGINGFACE_MIRRORS"] = DOMESTIC_HUGGINGFACE_MIRROR
             env["FACEFUSION_GITHUB_MIRRORS"] = OFFICIAL_GITHUB_URL
             env["FACEFUSION_DISABLE_PROXY"] = "1"
-            env["NO_PROXY"] = "*"
-            env["no_proxy"] = "*"
+            env["NO_PROXY"] = LOCAL_NO_PROXY
+            env["no_proxy"] = LOCAL_NO_PROXY
             for proxy_key in proxy_keys:
                 env.pop(proxy_key, None)
             return

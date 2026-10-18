@@ -156,7 +156,8 @@ def verify_remote_asset(url, size, expected):
                         digest = hashlib.sha256()
                 else:
                     raise ValueError('匿名回读状态无效')
-                while chunk := response.read(256 * 1024):
+                read = getattr(response, 'read1', response.read)
+                while chunk := read(256 * 1024):
                     offset += len(chunk)
                     if offset > size:
                         raise ValueError('匿名回读超过资源大小')

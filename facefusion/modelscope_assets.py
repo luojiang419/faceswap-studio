@@ -12,7 +12,7 @@ from pathlib import Path, PurePosixPath
 from typing import Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
-from urllib.request import ProxyHandler, Request, build_opener
+from urllib.request import ProxyHandler, Request, build_opener, getproxies
 
 
 def file_sha256(path: Path) -> str:
@@ -37,8 +37,13 @@ def catalog() -> dict:
 			raise ValueError('模型清单路径无效')
 		if key in records or not isinstance(item['size'], int) or item['size'] <= 0 or not re.fullmatch(r'[a-f0-9]{64}', item['sha256']):
 			raise ValueError('模型清单大小、哈希或重复项无效')
-		if parsed.scheme != 'https' or parsed.hostname != 'modelscope.cn' or parsed.username:
-			raise ValueError('模型清单下载地址必须使用魔搭HTTPS')
+		origin = item.get('download_origin', 'modelscope')
+		host = 'huggingface.co' if origin == 'external' else 'modelscope.cn'
+		if origin not in ('modelscope', 'external') or parsed.scheme != 'https' or parsed.hostname != host or parsed.username:
+			raise ValueError('模型清单下载地址与来源不一致')
+		if origin == 'external' and (item['url'] != item.get('upstream_url') or not re.fullmatch(r'[a-f0-9]{40}', item.get('upstream_commit', '')) or
+				f"/resolve/{item['upstream_commit']}/" not in parsed.path):
+			raise ValueError('外网模型必须固定上游提交')
 		records[key] = item
 	return records
 
@@ -54,6 +59,34 @@ def _urls() -> dict:
 
 def asset_for_url(url: str) -> dict | None:
 	return _urls().get(url)
+
+
+def system_proxies() -> dict:
+	"""读取环境和Windows系统代理，不猜测端口；支持Bridge传入的自定义代理。"""
+	proxies = getproxies()
+	if not any(proxies.get(key) for key in ('http', 'https')) and os.name == 'nt':
+		from urllib.request import getproxies_registry
+		proxies = getproxies_registry()
+	return proxies
+
+
+def asset_opener(asset: dict):
+	if asset.get('download_origin') == 'external':
+		proxies = system_proxies()
+		# 国内直连模式清除通用代理，但外网模型单独跟随系统代理。
+		return build_opener(ProxyHandler(proxies))
+	if os.environ.get('FACEFUSION_DISABLE_PROXY') == '1':
+		return build_opener(ProxyHandler({}))
+	return build_opener(ProxyHandler())
+
+
+def model_download_labels() -> dict:
+	labels = {}
+	for asset in catalog().values():
+		if asset.get('download_origin') == 'external':
+			for name in asset.get('models', []):
+				labels[name] = '外网下载'
+	return labels
 
 
 def download_file(url: str, destination: Path, *, size: int, sha256: str,
@@ -128,4 +161,4 @@ def download_file(url: str, destination: Path, *, size: int, sha256: str,
 
 
 def download_asset(asset: dict, destination: Path, progress=None, opener=None) -> Path:
-	return download_file(asset['url'], destination, size=asset['size'], sha256=asset['sha256'], progress=progress, opener=opener)
+	return download_file(asset['url'], destination, size=asset['size'], sha256=asset['sha256'], progress=progress, opener=opener or asset_opener(asset))
