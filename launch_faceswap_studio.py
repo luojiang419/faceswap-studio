@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 BRIDGE_CHECK_HOST = "127.0.0.1"
 BRIDGE_LISTEN_HOST = os.environ.get("FACESWAP_STUDIO_BRIDGE_HOST", "0.0.0.0")
 BRIDGE_HOST = BRIDGE_CHECK_HOST
-BRIDGE_PORT = 52741
+BRIDGE_PORT = int(os.environ.get("FACESWAP_STUDIO_BRIDGE_PORT", "52741"))
 BRIDGE_URL = f"http://{BRIDGE_HOST}:{BRIDGE_PORT}/health"
 MODEL_BOOTSTRAP_URL = f"http://{BRIDGE_HOST}:{BRIDGE_PORT}/models/bootstrap"
 FACEFUSION_STATUS_URL = f"http://{BRIDGE_HOST}:{BRIDGE_PORT}/facefusion/status"
@@ -155,120 +155,6 @@ def is_newer_version(latest: str, current: str) -> bool:
     return latest_parts > current_parts
 
 
-def updates_root() -> Path:
-    base = os.environ.get("LOCALAPPDATA")
-    if base:
-        return Path(base) / UPDATE_CACHE_DIRNAME / "updates"
-    return Path.home() / ".faceswap-studio" / "updates"
-
-
-def pending_update_marker_path() -> Path:
-    return updates_root() / "pending-update.json"
-
-
-def clear_pending_update_marker(studio_root: Path) -> None:
-    marker_path = pending_update_marker_path()
-    try:
-        if marker_path.exists():
-            marker_path.unlink()
-    except OSError as error:
-        write_launcher_log(studio_root, f"Unable to clear pending update marker: {error}")
-
-
-def read_pending_update_marker(repo_root: Path, studio_root: Path) -> dict[str, str] | None:
-    marker_path = pending_update_marker_path()
-    if not marker_path.exists():
-        return None
-
-    try:
-        payload = json.loads(marker_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        write_launcher_log(studio_root, f"Pending update marker is invalid and will be removed: {error}")
-        clear_pending_update_marker(studio_root)
-        return None
-
-    if not isinstance(payload, dict):
-        write_launcher_log(studio_root, "Pending update marker is not an object and will be removed.")
-        clear_pending_update_marker(studio_root)
-        return None
-
-    version = str(payload.get("version") or "").strip()
-    package_path = str(payload.get("package_path") or "").strip()
-    restart_path = str(payload.get("restart_path") or "").strip() or str(repo_root / "启动FaceSwap Studio.exe")
-    root_path = str(payload.get("root_path") or "").strip() or str(repo_root)
-    if not version or not package_path:
-        write_launcher_log(studio_root, "Pending update marker is missing required fields and will be removed.")
-        clear_pending_update_marker(studio_root)
-        return None
-
-    if Path(root_path).resolve() != repo_root.resolve():
-        write_launcher_log(studio_root, "Pending update marker does not belong to this installation and will be removed.")
-        clear_pending_update_marker(studio_root)
-        return None
-
-    if not is_newer_version(version, read_app_version(repo_root)):
-        write_launcher_log(studio_root, "Pending update marker targets a non-newer version and will be removed.")
-        clear_pending_update_marker(studio_root)
-        return None
-
-    return {
-        "version": version,
-        "package_path": package_path,
-        "restart_path": restart_path,
-        "root_path": root_path,
-        "scheduled_at": str(payload.get("scheduled_at") or "").strip(),
-    }
-
-
-def launch_pending_update(repo_root: Path, studio_root: Path) -> bool:
-    marker = read_pending_update_marker(repo_root, studio_root)
-    if not marker:
-        return False
-
-    package_path = Path(marker["package_path"]).resolve()
-    if not package_path.exists():
-        write_launcher_log(studio_root, f"Pending update package is missing and will be removed: {package_path}")
-        clear_pending_update_marker(studio_root)
-        return False
-
-    restart_path = Path(marker["restart_path"]).resolve()
-    if not restart_path.exists():
-        write_launcher_log(studio_root, f"Pending update restart executable is missing and will be removed: {restart_path}")
-        clear_pending_update_marker(studio_root)
-        return False
-
-    updater_source = repo_root / "FaceSwapStudioUpdater.exe"
-    if not updater_source.exists():
-        write_launcher_log(studio_root, f"Updater executable is missing and will be removed: {updater_source}")
-        clear_pending_update_marker(studio_root)
-        return False
-
-    runner_dir = updates_root() / "runner"
-    runner_dir.mkdir(parents=True, exist_ok=True)
-    updater_copy = runner_dir / "FaceSwapStudioUpdater.exe"
-    shutil.copy2(updater_source, updater_copy)
-
-    args = [
-        "--root",
-        str(repo_root),
-        "--package",
-        str(package_path),
-        "--restart",
-        str(restart_path),
-    ]
-    escaped_file = str(updater_copy).replace("'", "''")
-    escaped_args = ", ".join("'" + arg.replace("'", "''") + "'" for arg in args)
-    command = f"Start-Process -FilePath '{escaped_file}' -ArgumentList @({escaped_args}) -Verb RunAs"
-    powershell = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
-    clear_pending_update_marker(studio_root)
-    subprocess.Popen(
-        [powershell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
-    write_launcher_log(studio_root, f"Pending update launched for package: {package_path}")
-    return True
-
-
 def resolve_flutter_binary(repo_root: Path) -> Path | None:
     candidates: list[Path] = []
     for env_key in ["FACESWAP_STUDIO_FLUTTER_ROOT", "FLUTTER_ROOT"]:
@@ -311,6 +197,7 @@ def resolve_runtime_python(repo_root: Path) -> Path:
 
 def build_launcher_env(repo_root: Path, python_path: Path) -> dict[str, str]:
     env = dict(os.environ)
+    env["FACESWAP_STUDIO_LAUNCHER_PID"] = str(os.getpid())
     env["FACEFUSION_HUGGINGFACE_MIRRORS"] = "https://hf-mirror.com"
     env["FACEFUSION_GITHUB_MIRRORS"] = "https://github.com"
     env["FACEFUSION_DISABLE_PROXY"] = "1"
@@ -771,6 +658,10 @@ def terminate_process_tree(process: subprocess.Popen[str], studio_root: Path) ->
 def main() -> int:
     repo_root = resolve_repo_root()
     studio_root = repo_root / "faceswap studio"
+    if os.environ.get("FACESWAP_STUDIO_ISOLATED"):
+        global LAUNCHER_MUTEX_NAME
+        import hashlib
+        LAUNCHER_MUTEX_NAME += "." + hashlib.sha256(str(repo_root).encode()).hexdigest()[:16]
     single_instance_lock, already_running = acquire_single_instance_lock(studio_root)
     if already_running:
         if notify_running_instance():
@@ -778,7 +669,7 @@ def main() -> int:
         else:
             write_launcher_log(studio_root, "Duplicate launcher request ignored while the existing instance is starting.")
         return 0
-    if notify_running_instance():
+    if not os.environ.get("FACESWAP_STUDIO_ISOLATED") and notify_running_instance():
         write_launcher_log(
             studio_root,
             "Existing frontend window found without launcher mutex; activated and exiting.",
@@ -786,8 +677,8 @@ def main() -> int:
         release_single_instance_lock(single_instance_lock, studio_root)
         return 0
 
-    if launch_pending_update(repo_root, studio_root):
-        write_launcher_log(studio_root, "Launcher handed off to pending updater and will exit.")
+    from updater.startup import resume_update
+    if resume_update(repo_root):
         release_single_instance_lock(single_instance_lock, studio_root)
         return 0
 
@@ -821,7 +712,8 @@ def main() -> int:
         write_launcher_log(studio_root, f"Using flutter run fallback in: {flutter_project}")
 
     try:
-        cleanup_stale_runtime_processes(repo_root, studio_root)
+        if not os.environ.get("FACESWAP_STUDIO_ISOLATED"):
+            cleanup_stale_runtime_processes(repo_root, studio_root)
         bridge_process, bridge_log_handle = start_bridge_if_needed(repo_root, studio_root)
         if should_start_facefusion_on_launch(studio_root):
             deferred_facefusion_start_cancel = start_facefusion_service_delayed(

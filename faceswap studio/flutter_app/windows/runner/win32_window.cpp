@@ -2,6 +2,7 @@
 
 #include <dwmapi.h>
 #include <flutter_windows.h>
+#include <shellapi.h>
 
 #include "resource.h"
 
@@ -25,6 +26,14 @@ constexpr const wchar_t kWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
 constexpr const wchar_t kGetPreferredBrightnessRegKey[] =
   L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize";
 constexpr const wchar_t kGetPreferredBrightnessRegValue[] = L"AppsUseLightTheme";
+constexpr UINT kTrayIconMessage = WM_APP + 1;
+constexpr UINT kTrayIconId = 1;
+constexpr UINT kTrayMenuShowWindow = 1001;
+constexpr UINT kTrayMenuExitApplication = 1002;
+constexpr wchar_t kTrayIconTooltip[] = L"FaceSwap Studio";
+constexpr wchar_t kWindowTitle[] = L"faceswap_studio";
+constexpr wchar_t kActivateWindowMessageName[] =
+    L"FaceSwapStudio.ActivateWindow";
 
 // The number of Win32Window objects that currently exist.
 static int g_active_window_count = 0;
@@ -51,6 +60,11 @@ void EnableFullDpiSupportIfAvailable(HWND hwnd) {
     enable_non_client_dpi_scaling(hwnd);
   }
   FreeLibrary(user32_module);
+}
+
+UINT GetActivateWindowMessage() {
+  static const UINT message = RegisterWindowMessage(kActivateWindowMessageName);
+  return message;
 }
 
 }  // namespace
@@ -183,6 +197,19 @@ Win32Window::MessageHandler(HWND hwnd,
                             WPARAM const wparam,
                             LPARAM const lparam) noexcept {
   switch (message) {
+    default:
+      if (message == GetActivateWindowMessage()) {
+        RestoreFromTray();
+        return 0;
+      }
+      break;
+    case WM_CLOSE:
+      if (close_to_tray_ && !force_quit_) {
+        if (HideToTray()) {
+          return 0;
+        }
+      }
+      break;
     case WM_GETMINMAXINFO: {
       if (minimum_size_) {
         auto minmax_info = reinterpret_cast<MINMAXINFO*>(lparam);
@@ -198,12 +225,25 @@ Win32Window::MessageHandler(HWND hwnd,
       break;
     }
     case WM_DESTROY:
+      DestroyTrayIcon();
       window_handle_ = nullptr;
       Destroy();
       if (quit_on_close_) {
         PostQuitMessage(0);
       }
       return 0;
+    case WM_COMMAND:
+      switch (LOWORD(wparam)) {
+        case kTrayMenuShowWindow:
+          RestoreFromTray();
+          return 0;
+        case kTrayMenuExitApplication:
+          ExitFromTray();
+          return 0;
+      }
+      break;
+    case kTrayIconMessage:
+      return HandleTrayMessage(wparam, lparam);
 
     case WM_DPICHANGED: {
       auto newRectSize = reinterpret_cast<RECT*>(lparam);
@@ -237,6 +277,104 @@ Win32Window::MessageHandler(HWND hwnd,
   }
 
   return DefWindowProc(window_handle_, message, wparam, lparam);
+}
+
+bool Win32Window::HideToTray() {
+  if (!window_handle_) {
+    return false;
+  }
+  if (!tray_icon_visible_) {
+    NOTIFYICONDATA notify_icon_data{};
+    notify_icon_data.cbSize = sizeof(NOTIFYICONDATA);
+    notify_icon_data.hWnd = window_handle_;
+    notify_icon_data.uID = kTrayIconId;
+    notify_icon_data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+    notify_icon_data.uCallbackMessage = kTrayIconMessage;
+    notify_icon_data.hIcon =
+        LoadIcon(GetModuleHandle(nullptr), MAKEINTRESOURCE(IDI_APP_ICON));
+    wcscpy_s(notify_icon_data.szTip, kTrayIconTooltip);
+    if (!Shell_NotifyIcon(NIM_ADD, &notify_icon_data)) {
+      return false;
+    }
+    tray_icon_visible_ = true;
+  }
+  ShowWindow(window_handle_, SW_HIDE);
+  return true;
+}
+
+bool Win32Window::RestoreFromTray() {
+  if (!window_handle_) {
+    return false;
+  }
+  DestroyTrayIcon();
+  ShowWindow(window_handle_, SW_RESTORE);
+  ShowWindow(window_handle_, SW_SHOW);
+  BringWindowToTop(window_handle_);
+  SetForegroundWindow(window_handle_);
+  return true;
+}
+
+void Win32Window::ExitFromTray() {
+  force_quit_ = true;
+  close_to_tray_ = false;
+  DestroyTrayIcon();
+  if (window_handle_) {
+    PostMessage(window_handle_, WM_CLOSE, 0, 0);
+  }
+}
+
+void Win32Window::DestroyTrayIcon() {
+  if (!tray_icon_visible_ || !window_handle_) {
+    tray_icon_visible_ = false;
+    return;
+  }
+  NOTIFYICONDATA notify_icon_data{};
+  notify_icon_data.cbSize = sizeof(NOTIFYICONDATA);
+  notify_icon_data.hWnd = window_handle_;
+  notify_icon_data.uID = kTrayIconId;
+  Shell_NotifyIcon(NIM_DELETE, &notify_icon_data);
+  tray_icon_visible_ = false;
+}
+
+void Win32Window::ShowTrayMenu() {
+  if (!window_handle_) {
+    return;
+  }
+  HMENU menu = CreatePopupMenu();
+  if (!menu) {
+    return;
+  }
+  AppendMenu(menu, MF_STRING, kTrayMenuShowWindow, L"\u663E\u793A\u4E3B\u7A97\u53E3");
+  AppendMenu(menu, MF_STRING, kTrayMenuExitApplication, L"\u9000\u51FA\u7A0B\u5E8F");
+  POINT cursor_point{};
+  GetCursorPos(&cursor_point);
+  SetForegroundWindow(window_handle_);
+  TrackPopupMenu(
+      menu,
+      TPM_BOTTOMALIGN | TPM_LEFTALIGN | TPM_RIGHTBUTTON,
+      cursor_point.x,
+      cursor_point.y,
+      0,
+      window_handle_,
+      nullptr);
+  DestroyMenu(menu);
+}
+
+LRESULT Win32Window::HandleTrayMessage(WPARAM wparam,
+                                       LPARAM lparam) noexcept {
+  if (wparam != kTrayIconId) {
+    return 0;
+  }
+  switch (lparam) {
+    case WM_LBUTTONUP:
+      RestoreFromTray();
+      return 0;
+    case WM_RBUTTONUP:
+    case WM_CONTEXTMENU:
+      ShowTrayMenu();
+      return 0;
+  }
+  return 0;
 }
 
 void Win32Window::Destroy() {
@@ -279,6 +417,30 @@ HWND Win32Window::GetHandle() {
 
 void Win32Window::SetQuitOnClose(bool quit_on_close) {
   quit_on_close_ = quit_on_close;
+}
+
+void Win32Window::SetCloseToTray(bool close_to_tray) {
+  close_to_tray_ = close_to_tray;
+}
+
+void Win32Window::SetForceQuit(bool force_quit) {
+  force_quit_ = force_quit;
+}
+
+bool Win32Window::NotifyRunningInstance() {
+  const UINT activate_window_message = GetActivateWindowMessage();
+  const ULONGLONG deadline = GetTickCount64() + 5000;
+
+  while (GetTickCount64() < deadline) {
+    HWND existing_window = FindWindow(kWindowClassName, kWindowTitle);
+    if (existing_window) {
+      DWORD_PTR result = 0;
+      return SendMessageTimeout(existing_window, activate_window_message, 0, 0,
+                                SMTO_ABORTIFHUNG, 1000, &result) != 0;
+    }
+    Sleep(100);
+  }
+  return false;
 }
 
 bool Win32Window::OnCreate() {

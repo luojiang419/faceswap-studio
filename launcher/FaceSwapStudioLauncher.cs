@@ -83,6 +83,7 @@ internal static class FaceSwapStudioLauncher
             RedirectStandardError = true
         };
 
+        startInfo.EnvironmentVariables["FACESWAP_STUDIO_WRAPPER_PID"] = Process.GetCurrentProcess().Id.ToString();
         startInfo.EnvironmentVariables["FACEFUSION_HUGGINGFACE_MIRRORS"] = "https://hf-mirror.com";
         startInfo.EnvironmentVariables["FACEFUSION_GITHUB_MIRRORS"] = "https://github.com";
         startInfo.EnvironmentVariables["FACEFUSION_DISABLE_PROXY"] = "1";

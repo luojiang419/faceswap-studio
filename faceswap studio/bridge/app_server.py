@@ -63,7 +63,7 @@ def get_output_file_extension(target_path: str, output_video_encoder: str | None
 
 
 BRIDGE_HOST = os.environ.get("FACESWAP_STUDIO_BRIDGE_HOST", "127.0.0.1")
-BRIDGE_PORT = 52741
+BRIDGE_PORT = int(os.environ.get("FACESWAP_STUDIO_BRIDGE_PORT", "52741"))
 FACEFUSION_UI_HOST = "0.0.0.0"
 FACEFUSION_UI_PORT = 7860
 FACEFUSION_LOCAL_HOST = "127.0.0.1"
@@ -149,7 +149,7 @@ CORE_MODEL_PACKAGE: list[dict[str, Any]] = [
     {"label": "常用人脸增强", "base": "models-3.0.0", "file": "gfpgan_1.4.hash", "size": 8},
     {"label": "常用人脸增强", "base": "models-3.0.0", "file": "gfpgan_1.4.onnx", "size": 340299087},
     {"label": "常用画面增强", "base": "models-3.0.0", "file": "span_kendata_x4.hash", "size": 8},
-    {"label": "常用画面增强", "base": "models-3.0.0", "file": "span_kendata_x4.onnx", "size": 0},
+    {"label": "常用画面增强", "base": "models-3.0.0", "file": "span_kendata_x4.onnx", "size": 1718947},
 ]
 
 
@@ -435,7 +435,7 @@ class FaceFusionRuntime:
 
     def _default_settings(self) -> dict[str, Any]:
         return {
-            "theme": "dark",
+            "theme": "light",
             "facefusion_host": FACEFUSION_UI_HOST,
             "facefusion_port": FACEFUSION_UI_PORT,
             "default_output_dir": self._default_output_dir(),
@@ -443,6 +443,7 @@ class FaceFusionRuntime:
             "custom_proxy_url": DEFAULT_CUSTOM_PROXY_URL,
             "close_behavior": WINDOW_CLOSE_BEHAVIOR_MINIMIZE_TO_TRAY,
             "sidebar_expanded": False,
+            "auto_check_updates": True,
             "content_analyser_score": DEFAULT_CONTENT_ANALYSER_SCORE,
             "workspace_options_panel_width": DEFAULT_WORKSPACE_OPTIONS_PANEL_WIDTH,
         }
@@ -468,6 +469,7 @@ class FaceFusionRuntime:
             "custom_proxy_url": self._normalize_proxy_url(payload.get("custom_proxy_url")),
             "close_behavior": self._normalize_close_behavior(payload.get("close_behavior")),
             "sidebar_expanded": payload.get("sidebar_expanded") is True,
+            "auto_check_updates": payload.get("auto_check_updates", True) is True,
             "content_analyser_score": self._normalize_content_analyser_score(payload.get("content_analyser_score")),
             "workspace_options_panel_width": self._normalize_workspace_options_panel_width(
                 payload.get("workspace_options_panel_width")
@@ -882,480 +884,31 @@ class FaceFusionRuntime:
         return version or "0.0.0"
 
     def _default_update_state(self) -> dict[str, Any]:
-        return {
-            "state": "idle",
-            "message": "尚未检查更新。",
-            "current_version": self._read_app_version(),
-            "latest_version": None,
-            "update_available": False,
-            "delta_available": False,
-            "full_installer_url": None,
-            "release_url": None,
-            "asset_name": None,
-            "package_path": None,
-            "downloaded_bytes": 0,
-            "total_bytes": 0,
-            "percent": 0.0,
-            "speed_bps": 0.0,
-            "error": None,
-            "checked_at": None,
-            "completed_at": None,
-            "scheduled_for_next_launch": False,
-            "scheduled_at": None,
-            "pending_package_path": None,
-        }
+        return {"state": "idle", "update_available": False}
 
-    def _copy_update_state(self) -> dict[str, Any]:
+    def _signed_updates(self):
+        from updater.service import UpdateService
         with self._update_lock:
-            return dict(self._update_state)
-
-    def _set_update_state(self, **updates: Any) -> None:
-        with self._update_lock:
-            self._update_state.update(updates)
-
-    def _updates_root(self) -> Path:
-        base = os.environ.get("LOCALAPPDATA")
-        if base:
-            return Path(base) / UPDATE_CACHE_DIRNAME / "updates"
-        return Path.home() / ".faceswap-studio" / "updates"
-
-    def _pending_update_marker_path(self) -> Path:
-        return self._updates_root() / "pending-update.json"
-
-    def _clear_pending_update_marker(self) -> None:
-        marker_path = self._pending_update_marker_path()
-        try:
-            if marker_path.exists():
-                marker_path.unlink()
-        except OSError as error:
-            self._append_log(f"[bridge] Failed to clear pending update marker: {error}")
-
-    def _read_pending_update_marker(self) -> dict[str, Any] | None:
-        marker_path = self._pending_update_marker_path()
-        if not marker_path.exists():
-            return None
-
-        try:
-            payload = json.loads(marker_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as error:
-            self._append_log(f"[bridge] Pending update marker is invalid and will be removed: {error}")
-            self._clear_pending_update_marker()
-            return None
-
-        if not isinstance(payload, dict):
-            self._append_log("[bridge] Pending update marker is not an object and will be removed.")
-            self._clear_pending_update_marker()
-            return None
-
-        version = str(payload.get("version") or "").strip()
-        package_path = str(payload.get("package_path") or "").strip()
-        if not version or not package_path:
-            self._append_log("[bridge] Pending update marker is missing required fields and will be removed.")
-            self._clear_pending_update_marker()
-            return None
-
-        return {
-            "version": version,
-            "package_path": package_path,
-            "restart_path": str(payload.get("restart_path") or "").strip(),
-            "root_path": str(payload.get("root_path") or "").strip(),
-            "scheduled_at": str(payload.get("scheduled_at") or "").strip() or None,
-        }
-
-    def _write_pending_update_marker(self, package_path: Path, version: str) -> dict[str, Any]:
-        marker_path = self._pending_update_marker_path()
-        marker_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "version": version,
-            "package_path": str(package_path),
-            "restart_path": str(self.repo_root / "启动FaceSwap Studio.exe"),
-            "root_path": str(self.repo_root),
-            "scheduled_at": datetime.now().isoformat(timespec="seconds"),
-        }
-        marker_path.write_text(
-            json.dumps(payload, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        return payload
-
-    def _apply_pending_update_marker_to_state(self, state: dict[str, Any]) -> dict[str, Any]:
-        marker = self._read_pending_update_marker()
-        if not marker:
-            state["scheduled_for_next_launch"] = False
-            state["scheduled_at"] = None
-            state["pending_package_path"] = None
-            return state
-
-        marker_version = str(marker.get("version") or "").strip()
-        marker_path = Path(str(marker.get("package_path") or ""))
-        current_version = str(state.get("current_version") or self._read_app_version())
-        if not marker_version or not marker_path.exists() or not self._is_newer_version(marker_version, current_version):
-            self._clear_pending_update_marker()
-            state["scheduled_for_next_launch"] = False
-            state["scheduled_at"] = None
-            state["pending_package_path"] = None
-            return state
-
-        state["scheduled_for_next_launch"] = True
-        state["scheduled_at"] = marker.get("scheduled_at")
-        state["pending_package_path"] = str(marker_path)
-        state["package_path"] = str(state.get("package_path") or marker_path)
-        if not state.get("latest_version"):
-            state["latest_version"] = marker_version
-        if not state.get("asset_name"):
-            state["asset_name"] = marker_path.name
-        if state.get("state") in {"idle", "current"}:
-            state["state"] = "downloaded"
-            state["message"] = "更新包已下载，并安排在下次启动时安装。"
-        return state
-
-    def _update_opener(self):
-        return self._network_opener(disable_proxy_for_domestic=True)
-
-    def _version_parts(self, version: str) -> tuple[int, ...]:
-        parts: list[int] = []
-        for segment in version.strip().lstrip("v").replace("-", ".").split("."):
-            digits = "".join(ch for ch in segment if ch.isdigit())
-            if digits:
-                parts.append(int(digits))
-            else:
-                parts.append(0)
-        return tuple(parts or [0])
-
-    def _is_newer_version(self, latest: str, current: str) -> bool:
-        latest_parts = list(self._version_parts(latest))
-        current_parts = list(self._version_parts(current))
-        width = max(len(latest_parts), len(current_parts))
-        latest_parts += [0] * (width - len(latest_parts))
-        current_parts += [0] * (width - len(current_parts))
-        return latest_parts > current_parts
-
-    def _download_json(self, url: str, timeout: int = 20) -> dict[str, Any]:
-        request = Request(url, headers={"Accept": "application/json", "User-Agent": UPDATE_USER_AGENT})
-        with self._update_opener().open(request, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8-sig"))
-
-    def _latest_release_metadata(self) -> tuple[dict[str, Any], dict[str, str]]:
-        manifest_override = os.environ.get("FACESWAP_STUDIO_UPDATE_MANIFEST_URL")
-        if manifest_override:
-            manifest = self._download_json(manifest_override)
-            return manifest, {}
-
-        repository = os.environ.get("FACESWAP_STUDIO_UPDATE_REPOSITORY", UPDATE_REPOSITORY)
-        release_api_url = f"https://api.github.com/repos/{repository}/releases/latest"
-        release = self._download_json(release_api_url)
-        assets = release.get("assets") or []
-        asset_urls: dict[str, str] = {}
-        for asset in assets:
-            name = str(asset.get("name") or "")
-            url = str(asset.get("browser_download_url") or "")
-            if name and url:
-                asset_urls[name] = url
-
-        manifest_url = asset_urls.get(UPDATE_MANIFEST_ASSET)
-        if not manifest_url:
-            raise RuntimeError(f"{UPDATE_MANIFEST_ASSET} was not found in the latest release.")
-
-        manifest = self._download_json(manifest_url)
-        manifest["release_url"] = release.get("html_url")
-        return manifest, asset_urls
-
-    def _resolve_update_url(self, package: dict[str, Any], asset_urls: dict[str, str]) -> str | None:
-        direct_url = package.get("url") or package.get("download_url")
-        if direct_url:
-            return str(direct_url)
-        asset_name = str(package.get("asset_name") or "")
-        if asset_name:
-            return asset_urls.get(asset_name)
-        return None
-
-    def _select_delta_package(
-        self,
-        manifest: dict[str, Any],
-        asset_urls: dict[str, str],
-        current_version: str,
-    ) -> dict[str, Any] | None:
-        for package in manifest.get("delta_packages") or []:
-            if str(package.get("from_version") or "") != current_version:
-                continue
-            url = self._resolve_update_url(package, asset_urls)
-            if not url:
-                continue
-            selected = dict(package)
-            selected["download_url"] = url
-            return selected
-        return None
+            if not hasattr(self, "_signed_update_service"):
+                self._signed_update_service = UpdateService(self.repo_root, self._append_log)
+            return self._signed_update_service
 
     def update_status(self) -> dict[str, Any]:
-        state = self._copy_update_state()
-        state["current_version"] = self._read_app_version()
-        return self._apply_pending_update_marker_to_state(state)
+        return self._signed_updates().status()
 
     def check_updates(self) -> dict[str, Any]:
-        with self._update_lock:
-            self._update_state = self._default_update_state()
-            self._update_state.update(
-                {
-                    "state": "checking",
-                    "message": "正在检查更新...",
-                    "checked_at": datetime.now().isoformat(timespec="seconds"),
-                }
-            )
-
-        try:
-            current_version = self._read_app_version()
-            manifest, asset_urls = self._latest_release_metadata()
-            latest_version = str(manifest.get("version") or "")
-            if not latest_version:
-                raise RuntimeError("Update manifest does not contain a version.")
-
-            full_package = dict(manifest.get("full_package") or {})
-            full_installer_url = self._resolve_update_url(full_package, asset_urls)
-            release_url = manifest.get("release_url")
-            update_available = self._is_newer_version(latest_version, current_version)
-            selected_delta = self._select_delta_package(manifest, asset_urls, current_version)
-
-            state_updates: dict[str, Any] = {
-                "latest_version": latest_version,
-                "update_available": update_available,
-                "delta_available": bool(update_available and selected_delta),
-                "full_installer_url": full_installer_url,
-                "release_url": release_url,
-                "manifest": manifest,
-                "selected_delta": selected_delta,
-                "error": None,
-            }
-
-            if not update_available:
-                message = "当前已是最新版本。"
-                state_updates.update({"state": "current", "message": message})
-            elif selected_delta:
-                message = f"发现新版本 {latest_version}。"
-                state_updates.update(
-                    {
-                        "state": "update_available",
-                        "message": message,
-                        "asset_name": selected_delta.get("asset_name"),
-                        "total_bytes": int(selected_delta.get("size") or 0),
-                    }
-                )
-            else:
-                message = "当前版本没有可用增量包，请下载全量安装器。"
-                state_updates.update(
-                    {
-                        "state": "full_required",
-                        "message": message,
-                        "asset_name": full_package.get("asset_name"),
-                        "total_bytes": int(full_package.get("size") or 0),
-                    }
-                )
-
-            self._set_update_state(**state_updates)
-        except Exception as error:
-            self._set_update_state(
-                state="failed",
-                message="检查更新失败。",
-                update_available=False,
-                delta_available=False,
-                error=str(error),
-            )
-            self._append_log(f"[bridge] Update check failed: {error}")
-
-        return self.update_status()
+        return self._signed_updates().check()
 
     def download_update(self) -> dict[str, Any]:
-        state = self._copy_update_state()
-        if state.get("state") in {"idle", "failed", "current"}:
-            state = self.check_updates()
-        if not state.get("update_available"):
-            return self.update_status()
-        if not state.get("delta_available"):
-            return self.update_status()
-
-        with self._update_lock:
-            if self._update_download_thread and self._update_download_thread.is_alive():
-                return dict(self._update_state)
-            self._update_state.update(
-                {
-                    "state": "downloading",
-                    "message": "正在下载更新包...",
-                    "downloaded_bytes": 0,
-                    "percent": 0.0,
-                    "speed_bps": 0.0,
-                    "error": None,
-                }
-            )
-            self._update_download_thread = threading.Thread(target=self._download_update_worker, daemon=True)
-            self._update_download_thread.start()
-            return dict(self._update_state)
-
-    def _download_update_worker(self) -> None:
-        state = self._copy_update_state()
-        package = dict(state.get("selected_delta") or {})
-        download_url = str(package.get("download_url") or "")
-        if not download_url:
-            self._set_update_state(state="failed", message="更新包下载地址缺失。", error="Missing delta download URL")
-            return
-
-        version = str(state.get("latest_version") or "unknown")
-        asset_name = str(package.get("asset_name") or Path(urlparse(download_url).path).name or "update.delta.zip")
-        expected_hash = str(package.get("sha256") or "")
-        expected_size = int(package.get("size") or 0)
-        target_dir = self._updates_root() / version
-        target_dir.mkdir(parents=True, exist_ok=True)
-        target_path = target_dir / asset_name
-        temp_path = target_path.with_suffix(target_path.suffix + ".download")
-
-        try:
-            if temp_path.exists():
-                temp_path.unlink()
-            request = Request(download_url, headers={"User-Agent": UPDATE_USER_AGENT})
-            started_at = time.monotonic()
-            downloaded = 0
-            with self._update_opener().open(request, timeout=30) as response, open(temp_path, "wb") as output:
-                content_length = response.headers.get("Content-Length")
-                if content_length:
-                    try:
-                        expected_size = int(content_length)
-                    except ValueError:
-                        pass
-                last_tick = time.monotonic()
-                last_tick_bytes = 0
-                while True:
-                    chunk = response.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    output.write(chunk)
-                    downloaded += len(chunk)
-                    now = time.monotonic()
-                    tick_elapsed = max(now - last_tick, 0.001)
-                    speed = (downloaded - last_tick_bytes) / tick_elapsed
-                    if tick_elapsed >= 0.5:
-                        last_tick = now
-                        last_tick_bytes = downloaded
-                    percent = 0.0
-                    if expected_size > 0:
-                        percent = round(min(downloaded / expected_size * 100.0, 99.9), 2)
-                    elapsed = max(now - started_at, 0.001)
-                    self._set_update_state(
-                        downloaded_bytes=downloaded,
-                        total_bytes=expected_size,
-                        percent=percent,
-                        speed_bps=speed if speed > 0 else downloaded / elapsed,
-                    )
-
-            if expected_size > 0 and downloaded < expected_size:
-                raise RuntimeError("Downloaded update package is incomplete.")
-
-            actual_hash = hashlib.sha256(temp_path.read_bytes()).hexdigest().upper()
-            if expected_hash and actual_hash.upper() != expected_hash.upper():
-                raise RuntimeError("Update package SHA256 mismatch.")
-
-            temp_path.replace(target_path)
-            self._set_update_state(
-                state="downloaded",
-                message="更新包下载完成。",
-                package_path=str(target_path),
-                downloaded_bytes=downloaded,
-                total_bytes=expected_size or downloaded,
-                percent=100.0,
-                speed_bps=0.0,
-                completed_at=datetime.now().isoformat(timespec="seconds"),
-                error=None,
-            )
-            self._clear_pending_update_marker()
-            self._append_log(f"[bridge] Update package downloaded: {target_path}")
-        except Exception as error:
-            self._set_update_state(
-                state="failed",
-                message="更新包下载失败。",
-                speed_bps=0.0,
-                error=str(error),
-                completed_at=datetime.now().isoformat(timespec="seconds"),
-            )
-            self._append_log(f"[bridge] Update download failed: {error}")
+        return self._signed_updates().download()
 
     def schedule_update(self) -> dict[str, Any]:
-        state = self.update_status()
-        package_path_value = str(state.get("package_path") or "").strip()
-        if not package_path_value:
-            return {
-                **state,
-                "state": "failed",
-                "message": "更新包尚未下载。",
-                "error": "Update package was not downloaded.",
-            }
-
-        package_path = Path(package_path_value)
-        if not package_path.exists():
-            self._clear_pending_update_marker()
-            return {
-                **state,
-                "state": "failed",
-                "message": "更新包尚未下载。",
-                "error": "Update package was not downloaded.",
-            }
-
-        latest_version = str(state.get("latest_version") or "").strip() or self._read_app_version()
-        marker = self._write_pending_update_marker(package_path, latest_version)
-        self._set_update_state(
-            message="更新包已安排在下次启动时安装。",
-            error=None,
-            package_path=str(package_path),
-            scheduled_for_next_launch=True,
-            scheduled_at=marker.get("scheduled_at"),
-            pending_package_path=str(package_path),
-        )
-        self._append_log(f"[bridge] Update scheduled for next launch: {package_path}")
-        return self.update_status()
+        return self._signed_updates().apply(scheduled=True)
 
     def apply_update(self) -> dict[str, Any]:
-        state = self.update_status()
-        package_path = Path(str(state.get("package_path") or ""))
-        if not package_path.exists():
-            self._clear_pending_update_marker()
-            return {
-                **state,
-                "state": "failed",
-                "message": "更新包尚未下载。",
-                "error": "Update package was not downloaded.",
-            }
-
-        updater_source = self.repo_root / "FaceSwapStudioUpdater.exe"
-        if not updater_source.exists():
-            return {
-                **state,
-                "state": "failed",
-                "message": "更新程序缺失。",
-                "error": f"Updater not found: {updater_source}",
-            }
-
-        updater_dir = self._updates_root() / "runner"
-        updater_dir.mkdir(parents=True, exist_ok=True)
-        updater_copy = updater_dir / "FaceSwapStudioUpdater.exe"
-        shutil.copy2(updater_source, updater_copy)
-
-        restart_path = self.repo_root / "启动FaceSwap Studio.exe"
-        args = [
-            "--root",
-            str(self.repo_root),
-            "--package",
-            str(package_path),
-            "--restart",
-            str(restart_path),
-        ]
-        escaped_file = str(updater_copy).replace("'", "''")
-        escaped_args = ", ".join("'" + arg.replace("'", "''") + "'" for arg in args)
-        command = f"Start-Process -FilePath '{escaped_file}' -ArgumentList @({escaped_args}) -Verb RunAs"
-        powershell = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
-        subprocess.Popen(
-            [powershell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        self._clear_pending_update_marker()
-        self._set_update_state(state="applying", message="更新程序已启动，请确认系统权限提示。", error=None)
-        self._append_log("[bridge] Updater launched.")
-        return self.update_status()
+        if self._queue_runner_active or self._queue_current_process is not None:
+            return {**self.update_status(), "state": "failed", "message": "请等待生成队列完成后再安装更新。"}
+        return self._signed_updates().apply()
 
     def _default_workspace_state(self) -> dict[str, Any]:
         return {
@@ -6209,6 +5762,8 @@ class FaceFusionRuntime:
             self._settings["custom_proxy_url"] = self._normalize_proxy_url(payload["custom_proxy_url"])
         if "close_behavior" in payload:
             self._settings["close_behavior"] = self._normalize_close_behavior(payload["close_behavior"])
+        if "auto_check_updates" in payload:
+            self._settings["auto_check_updates"] = payload["auto_check_updates"] is True
         if "sidebar_expanded" in payload:
             self._settings["sidebar_expanded"] = payload["sidebar_expanded"] is True
         if "content_analyser_score" in payload:
@@ -6802,3 +6357,9 @@ def works_download(work_id: str):
 @app.post("/works/{work_id}/open-directory")
 def works_open_directory(work_id: str) -> dict[str, Any]:
     return runtime.open_work_directory(work_id)
+
+
+@app.post("/updates/healthy")
+def confirm_startup() -> dict[str, Any]:
+    from updater.startup import confirm_ready
+    return confirm_ready(runtime.repo_root)

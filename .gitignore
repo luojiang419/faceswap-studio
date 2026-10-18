@@ -32,3 +32,8 @@ faceswap studio/data/**
 faceswap studio/runtime/**
 !faceswap studio/runtime/
 !faceswap studio/runtime/.gitkeep
+
+.update-private/
+.pytest_cache/
+
+/FaceSwapStudioUpdater.exe

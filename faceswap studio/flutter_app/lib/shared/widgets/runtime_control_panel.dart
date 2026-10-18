@@ -36,13 +36,8 @@ class RuntimeControlPanel extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final useHorizontalActions =
-            constraints.maxWidth >= (compact ? 380 : 460);
         final topGap = compact ? 8.0 : 14.0;
         final bodyGap = compact ? 5.0 : 8.0;
-        final actionGap = compact ? 8.0 : 12.0;
-        final primaryHeight = compact ? 34.0 : 42.0;
-        final secondaryHeight = compact ? 30.0 : 40.0;
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -124,79 +119,67 @@ class RuntimeControlPanel extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
             SizedBox(height: compact ? 10 : 18),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: bridgeOnline && !_isFaceFusionRunning && !busy
-                    ? onStart
-                    : null,
-                icon: Icon(Icons.play_arrow_rounded, size: compact ? 18 : 24),
-                label: const Text('启动 FaceFusion'),
-                style: FilledButton.styleFrom(
-                  minimumSize: Size.fromHeight(primaryHeight),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.icon(
+                  onPressed: bridgeOnline && !_isFaceFusionRunning && !busy
+                      ? onStart
+                      : null,
+                  icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                  label: const Text('启动 FaceFusion'),
+                  style: FilledButton.styleFrom(
+                    minimumSize: Size(compact ? 156 : 178, 38),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                    textStyle: TextStyle(
+                      fontFamily: theme.textTheme.labelLarge?.fontFamily,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
-              ),
+                OutlinedButton.icon(
+                  onPressed: bridgeOnline && _isFaceFusionRunning && !busy
+                      ? onStop
+                      : null,
+                  icon: const Icon(Icons.stop_rounded, size: 16),
+                  label: const Text('停止'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(82, 38),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    textStyle: TextStyle(
+                      fontFamily: theme.textTheme.labelLarge?.fontFamily,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: bridgeOnline && !busy ? onOpenBrowser : null,
+                  icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                  label: const Text('浏览器打开'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(126, 38),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    textStyle: TextStyle(
+                      fontFamily: theme.textTheme.labelLarge?.fontFamily,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
             ),
-            SizedBox(height: actionGap),
-            if (useHorizontalActions)
-              Row(
-                children: [
-                  Expanded(
-                    child: FilledButton.tonalIcon(
-                      onPressed: bridgeOnline && _isFaceFusionRunning && !busy
-                          ? onStop
-                          : null,
-                      icon: Icon(Icons.stop_rounded, size: compact ? 16 : 24),
-                      label: const Text('停止'),
-                      style: FilledButton.styleFrom(
-                        minimumSize: Size.fromHeight(secondaryHeight),
-                      ),
-                    ),
-                  ),
-                  SizedBox(width: actionGap),
-                  Expanded(
-                    child: FilledButton.tonalIcon(
-                      onPressed: bridgeOnline && !busy ? onOpenBrowser : null,
-                      icon: Icon(
-                        Icons.open_in_browser_rounded,
-                        size: compact ? 16 : 24,
-                      ),
-                      label: const Text('浏览器打开'),
-                      style: FilledButton.styleFrom(
-                        minimumSize: Size.fromHeight(secondaryHeight),
-                      ),
-                    ),
-                  ),
-                ],
-              )
-            else
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  FilledButton.tonalIcon(
-                    onPressed: bridgeOnline && _isFaceFusionRunning && !busy
-                        ? onStop
-                        : null,
-                    icon: Icon(Icons.stop_rounded, size: compact ? 16 : 24),
-                    label: const Text('停止'),
-                    style: FilledButton.styleFrom(
-                      minimumSize: Size.fromHeight(secondaryHeight),
-                    ),
-                  ),
-                  SizedBox(height: actionGap),
-                  FilledButton.tonalIcon(
-                    onPressed: bridgeOnline && !busy ? onOpenBrowser : null,
-                    icon: Icon(
-                      Icons.open_in_browser_rounded,
-                      size: compact ? 16 : 24,
-                    ),
-                    label: const Text('浏览器打开'),
-                    style: FilledButton.styleFrom(
-                      minimumSize: Size.fromHeight(secondaryHeight),
-                    ),
-                  ),
-                ],
-              ),
           ],
         );
       },

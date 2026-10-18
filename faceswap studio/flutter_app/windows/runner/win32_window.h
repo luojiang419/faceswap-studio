@@ -55,6 +55,9 @@ class Win32Window {
 
   // If true, closing this window will quit the application.
   void SetQuitOnClose(bool quit_on_close);
+  void SetCloseToTray(bool close_to_tray);
+  void SetForceQuit(bool force_quit);
+  static bool NotifyRunningInstance();
 
   // Return a RECT representing the bounds of the current client area.
   RECT GetClientArea();
@@ -94,7 +97,17 @@ class Win32Window {
   // Update the window frame's theme to match the system theme.
   static void UpdateTheme(HWND const window);
 
+  bool HideToTray();
+  bool RestoreFromTray();
+  void ExitFromTray();
+  void DestroyTrayIcon();
+  void ShowTrayMenu();
+  LRESULT HandleTrayMessage(WPARAM wparam, LPARAM lparam) noexcept;
+
   bool quit_on_close_ = false;
+  bool close_to_tray_ = false;
+  bool force_quit_ = false;
+  bool tray_icon_visible_ = false;
 
   // window handle for top level window.
   HWND window_handle_ = nullptr;

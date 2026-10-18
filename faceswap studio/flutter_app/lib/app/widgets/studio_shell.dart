@@ -1,21 +1,26 @@
 import 'package:faceswap_studio/features/about/presentation/about_page.dart';
 import 'package:faceswap_studio/features/home/presentation/home_page.dart';
+import 'package:faceswap_studio/features/personas/presentation/personas_page.dart';
 import 'package:faceswap_studio/features/settings/presentation/settings_page.dart';
 import 'package:faceswap_studio/features/works/presentation/works_page.dart';
 import 'package:faceswap_studio/features/workspace/presentation/workspace_page.dart';
 import 'package:flutter/material.dart';
 
-enum StudioSection { home, workspace, works, settings, about }
+enum StudioSection { home, workspace, personas, works, settings, about }
 
 class StudioShell extends StatefulWidget {
   const StudioShell({
     required this.themeMode,
     required this.onToggleTheme,
+    required this.sidebarExpanded,
+    required this.onSidebarExpandedChanged,
     super.key,
   });
 
   final ThemeMode themeMode;
   final VoidCallback onToggleTheme;
+  final bool sidebarExpanded;
+  final ValueChanged<bool> onSidebarExpandedChanged;
 
   @override
   State<StudioShell> createState() => _StudioShellState();
@@ -24,113 +29,199 @@ class StudioShell extends StatefulWidget {
 class _StudioShellState extends State<StudioShell> {
   StudioSection _section = StudioSection.home;
 
+  Widget _buildSection() {
+    return switch (_section) {
+      StudioSection.home => const HomePage(key: ValueKey('home')),
+      StudioSection.workspace => const WorkspacePage(
+        key: ValueKey('workspace'),
+      ),
+      StudioSection.personas => const PersonasPage(key: ValueKey('personas')),
+      StudioSection.works => const WorksPage(key: ValueKey('works')),
+      StudioSection.settings => SettingsPage(
+        key: const ValueKey('settings'),
+        themeMode: widget.themeMode,
+        onToggleTheme: widget.onToggleTheme,
+      ),
+      StudioSection.about => const AboutPage(key: ValueKey('about')),
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-
+    final scheme = theme.colorScheme;
+    final expanded = widget.sidebarExpanded;
+    const labels = ['首页', '工作台', '人物形象', '作品管理', '设置', '关于'];
+    const icons = [
+      Icons.space_dashboard_outlined,
+      Icons.tune_rounded,
+      Icons.badge_outlined,
+      Icons.photo_library_outlined,
+      Icons.settings_outlined,
+      Icons.info_outline_rounded,
+    ];
     return Scaffold(
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(18),
-          child: Row(
-            children: [
-              ConstrainedBox(
-                constraints: const BoxConstraints.tightFor(width: 300),
-                child: Card(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(18, 22, 18, 18),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Facefusion Studion',
-                          style: theme.textTheme.headlineMedium,
+        child: Row(
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOutCubic,
+              width: expanded ? 236 : 122,
+              decoration: BoxDecoration(
+                color: scheme.surface,
+                border: Border(right: BorderSide(color: scheme.outlineVariant)),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 24),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        width: 52,
+                        height: 52,
+                        decoration: BoxDecoration(
+                          color: scheme.primary,
+                          borderRadius: BorderRadius.circular(16),
                         ),
-                        const SizedBox(height: 8),
-                        Text(
-                          '统一控制 FaceFusion、队列、作品与设置的桌面工作台。',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
+                        child: Icon(
+                          Icons.face_retouching_natural_rounded,
+                          color: scheme.onPrimary,
+                          size: 30,
                         ),
-                        const SizedBox(height: 28),
+                      ),
+                      if (expanded) ...[
+                        const SizedBox(width: 12),
                         Expanded(
-                          child: NavigationRail(
-                            extended: true,
-                            selectedIndex: StudioSection.values.indexOf(_section),
-                            onDestinationSelected: (index) {
-                              setState(() {
-                                _section = StudioSection.values[index];
-                              });
-                            },
-                            destinations: const [
-                              NavigationRailDestination(
-                                icon: Icon(Icons.home_outlined),
-                                selectedIcon: Icon(Icons.home_rounded),
-                                label: Text('首页'),
-                              ),
-                              NavigationRailDestination(
-                                icon: Icon(Icons.dashboard_customize_outlined),
-                                selectedIcon: Icon(Icons.dashboard_customize),
-                                label: Text('工作台'),
-                              ),
-                              NavigationRailDestination(
-                                icon: Icon(Icons.photo_library_outlined),
-                                selectedIcon: Icon(Icons.photo_library),
-                                label: Text('作品管理'),
-                              ),
-                              NavigationRailDestination(
-                                icon: Icon(Icons.settings_outlined),
-                                selectedIcon: Icon(Icons.settings),
-                                label: Text('设置'),
-                              ),
-                              NavigationRailDestination(
-                                icon: Icon(Icons.info_outline),
-                                selectedIcon: Icon(Icons.info),
-                                label: Text('关于'),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        FilledButton.icon(
-                          onPressed: widget.onToggleTheme,
-                          icon: Icon(
-                            widget.themeMode == ThemeMode.dark
-                                ? Icons.light_mode_outlined
-                                : Icons.dark_mode_outlined,
-                          ),
-                          label: Text(
-                            widget.themeMode == ThemeMode.dark ? '切换浅色主题' : '切换暗色主题',
+                          child: Text(
+                            'FaceSwap\nStudio',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              height: 1.3,
+                            ),
                           ),
                         ),
                       ],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 18),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: IndexedStack(
-                    index: StudioSection.values.indexOf(_section),
-                    children: [
-                      const HomePage(key: ValueKey('home')),
-                      const WorkspacePage(key: ValueKey('workspace')),
-                      const WorksPage(key: ValueKey('works')),
-                      SettingsPage(
-                        key: const ValueKey('settings'),
-                        themeMode: widget.themeMode,
-                        onToggleTheme: widget.onToggleTheme,
-                      ),
-                      const AboutPage(key: ValueKey('about')),
                     ],
                   ),
-                ),
+                  const SizedBox(height: 30),
+                  Expanded(
+                    child: ListView.separated(
+                      itemCount: labels.length,
+                      separatorBuilder: (_, index) => const SizedBox(height: 9),
+                      itemBuilder: (context, index) {
+                        final selected = _section.index == index;
+                        final color = selected
+                            ? scheme.onSurface
+                            : scheme.onSurfaceVariant;
+                        return Material(
+                          color: selected
+                              ? scheme.surfaceContainerHighest
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(10),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(10),
+                            onTap: () => setState(
+                              () => _section = StudioSection.values[index],
+                            ),
+                            child: Container(
+                              constraints: const BoxConstraints(minHeight: 65),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(10),
+                                border: selected
+                                    ? Border.all(color: scheme.outlineVariant)
+                                    : null,
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                vertical: 12,
+                                horizontal: 8,
+                              ),
+                              child: expanded
+                                  ? Row(
+                                      children: [
+                                        Icon(
+                                          icons[index],
+                                          size: 21,
+                                          color: color,
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Text(
+                                          labels[index],
+                                          style: TextStyle(
+                                            color: color,
+                                            fontSize: 13,
+                                            fontWeight: selected
+                                                ? FontWeight.w700
+                                                : FontWeight.w500,
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  : Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          icons[index],
+                                          size: 21,
+                                          color: selected
+                                              ? scheme.primary
+                                              : color,
+                                        ),
+                                        const SizedBox(height: 7),
+                                        Text(
+                                          labels[index],
+                                          style: TextStyle(
+                                            color: color,
+                                            fontSize: 12,
+                                            fontWeight: selected
+                                                ? FontWeight.w700
+                                                : FontWeight.w500,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Divider(),
+                  IconButton(
+                    onPressed: widget.onToggleTheme,
+                    tooltip: widget.themeMode == ThemeMode.dark
+                        ? '浅色主题'
+                        : '深色主题',
+                    icon: Icon(
+                      widget.themeMode == ThemeMode.dark
+                          ? Icons.light_mode_outlined
+                          : Icons.dark_mode_outlined,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => widget.onSidebarExpandedChanged(!expanded),
+                    tooltip: expanded ? '折叠导航' : '展开导航',
+                    icon: Icon(
+                      expanded
+                          ? Icons.keyboard_double_arrow_left_rounded
+                          : Icons.keyboard_double_arrow_right_rounded,
+                    ),
+                  ),
+                  if (expanded) ...[
+                    const SizedBox(height: 10),
+                    Text('本地 AI 换脸工作台', style: theme.textTheme.bodySmall),
+                  ],
+                ],
               ),
-            ],
-          ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: _buildSection(),
+              ),
+            ),
+          ],
         ),
       ),
     );

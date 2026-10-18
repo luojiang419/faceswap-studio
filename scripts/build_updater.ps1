@@ -56,4 +56,5 @@ finally {
     Pop-Location
 }
 
+Copy-Item -LiteralPath $outputPath -Destination (Join-Path $repoRoot "FaceSwapStudioUpdater.exe") -Force
 Write-Host "Updater rebuilt: $outputPath"

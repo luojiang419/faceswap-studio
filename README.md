@@ -12,6 +12,14 @@ FaceSwap Studio 是基于 FaceFusion 推理引擎、Flutter 桌面前端和 Pyth
 - 设置持久化：主题和默认输出目录由本地 Bridge 持久化保存。
 - 启动链路收敛：仓库内已提供启动器、Bridge、Flutter 应用和部署脚本，便于直接运行或继续开发。
 
+## 主题、更新与轻量分发
+
+工作台已统一为 VoxCPM Studio 的中性浅色与暖黑深色主题。新版支持魔搭 Ed25519 签名更新、独立更新窗口、事务备份与失败回滚，并提供约 1.4 MiB 的原生轻量安装器。首次安装联网下载 Python、常用模型和 FFmpeg，安装后更新只替换应用文件，保留配置与作品。
+
+- 本地安装器：`dist/modelscope/installer-final/FaceSwap安装器.exe`。
+- [安装、更新与发布说明](docs/魔搭更新与轻量安装器.md)。
+- [魔搭分发仓库](https://modelscope.cn/models/jiangjiang419/facefusion-workbench-updates)。
+
 ## 安装方式
 
 ### 方式一：使用 Windows 安装包
@@ -22,9 +30,9 @@ FaceSwap Studio 是基于 FaceFusion 推理引擎、Flutter 桌面前端和 Pyth
 2. 安装器会优先选择 `D:\Program Files\FaceSwap Studio`。
 3. 如果 D 盘空间不足，会自动选择其他可用磁盘下的 `Program Files\FaceSwap Studio`。
 4. 安装完成后，桌面会出现 `FaceSwap Studio` 快捷方式。
-5. 首次启动时，如果核心模型缺失，软件会弹窗下载核心小包，并显示进度、速度和当前文件。
-6. 下载完成后会自动启动 FaceFusion。
-7. 启动后会检查公开 GitHub Release 更新；有增量包时会弹窗确认下载和安装。
+5. 完整安装包内置常用核心模型、Python 虚拟环境、FFmpeg 和 FFprobe，安装后可直接启动 FaceFusion。
+6. 只有选择安装包未包含的可选模型时，才需要联网下载对应文件。
+7. 启动后会检查魔搭签名更新；发现更新后可下载并安装，失败自动回滚。
 
 开发者可以使用下面命令生成安装包：
 
@@ -34,22 +42,26 @@ FaceSwap Studio 是基于 FaceFusion 推理引擎、Flutter 桌面前端和 Pyth
 
 说明：
 
-- 安装包内置 Python 运行时、项目虚拟环境、Bridge、Flutter 桌面运行包和 FFmpeg。
-- 模型不会预置到安装包中，首次运行只下载核心小包，避免安装包体积过大。
+- 安装包内置 Python 运行时、项目虚拟环境、Bridge、Flutter 桌面运行包、FFmpeg 和 FFprobe。
+- 安装包预置默认换脸、检测、关键点、识别、遮罩、NSFW、人声分离、人脸增强和画面增强所需的常用核心模型。
+- 非默认的可选模型不预置，首次选择时由 FaceFusion 按需下载。
 - 软件版本以仓库根目录 `VERSION` 为准，安装器和更新 manifest 都会读取它。
 - 如果 Windows 弹出 SmartScreen 或未知发布者提示，需要手动选择继续运行。
 
-生成 GitHub Release 更新产物：
+旧 GitHub Release 发布方式（历史参考，当前客户端请使用上方魔搭发布流程）：
 
 ```powershell
-./scripts/build_update_package.ps1 -FromManifest .\dist\updates\<old-version>\files-<old-version>.json -FromVersion <old-version>
+./scripts/publish_release.ps1 -Repository <owner>/<repo> -ValidateOnly
+./scripts/build_update_package.ps1
+./scripts/build_update_package.ps1 -FromVersion 0.1.1,0.1.0 -FromManifest .\dist\updates\0.1.1\files-0.1.1.json,.\dist\updates\0.1.0\files-0.1.0.json
 ./scripts/publish_release.ps1 -Repository <owner>/<repo>
 ```
 
 说明：
 
-- `build_update_package.ps1` 会生成 `update-manifest.json`、当前文件 manifest 和文件级 delta zip。
-- `publish_release.ps1` 通过 GitHub CLI 上传全量安装器、delta zip、文件 manifest 和更新 manifest。
+- `build_update_package.ps1` 默认会基于 `dist/updates` 中最近 3 个正式版本的 manifest，生成多基线 `delta_packages`、当前文件 manifest 和 `update-manifest.json`。
+- `publish_release.ps1 -ValidateOnly` 会先做本地预检，校验安装器、文件 manifest、delta zip、delta manifest 与 `update-manifest.json` 的引用、大小和哈希是否一致。
+- `publish_release.ps1` 通过 GitHub CLI 上传全量安装器、全部 delta zip、对应 delta manifest、文件 manifest 和更新 manifest。
 - 首版没有上一版 manifest，或者 delta 超过 GitHub 单文件限制时，可以使用 `-SkipDelta`，客户端会提示下载全量安装器。
 - 客户端默认读取公开 Release，不内置 GitHub token；delta 不可用时会提示下载全量安装器。
 
@@ -148,7 +160,7 @@ Bridge 服务源码位于：
 - `scripts/build_installer.ps1`
   构建 Windows 安装器。
 - `scripts/build_update_package.ps1`
-  构建 Release 更新 manifest 和文件级 delta 包。
+  构建 Release 更新 manifest，并可同时生成最近 3 个正式版本到最新版的文件级 delta 包。
 - `scripts/publish_release.ps1`
   通过 GitHub CLI 发布或上传 Release 资产。
 - `FaceSwapStudioUpdater.exe`

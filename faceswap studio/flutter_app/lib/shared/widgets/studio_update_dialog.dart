@@ -219,6 +219,11 @@ class _StudioUpdateDialogState extends State<StudioUpdateDialog> {
     });
     try {
       final status = await _client.applyUpdate();
+      if (status['state'] == 'applying') {
+        const channel = MethodChannel('faceswap_studio/window');
+        await channel.invokeMethod<void>('exitForUpdate');
+        return;
+      }
       if (mounted) {
         setState(() {
           _status = status;
@@ -361,6 +366,17 @@ class _StudioUpdateDialogState extends State<StudioUpdateDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('${_status['message'] ?? '发现可用更新。'}'),
+            if ('${_status['notes'] ?? ''}'.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text('${_status['notes']}', style: theme.textTheme.bodySmall),
+            ],
+            if ('${_status['release_id'] ?? ''}'.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                '发布序号：${_status['release_id']}',
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
             const SizedBox(height: 14),
             Wrap(
               spacing: 12,

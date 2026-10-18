@@ -187,6 +187,8 @@ Copy-Directory -Source (Join-Path $repoRoot "facefusion") -Destination (Join-Pat
 Copy-Directory -Source (Join-Path $repoRoot "faceswap studio\bridge") -Destination (Join-Path $stageRoot "faceswap studio\bridge") -ExcludeDirectories @("__pycache__") -ExcludeFiles $excludeFiles
 Copy-Directory -Source $flutterDeployment -Destination (Join-Path $stageRoot "faceswap studio\runtime\windows_app\current") -ExcludeFiles $excludeFiles
 Copy-Directory -Source $flutterWebDeployment -Destination (Join-Path $stageRoot "faceswap studio\flutter_app\build\web") -ExcludeFiles $excludeFiles
+Copy-Directory -Source (Join-Path $repoRoot "updater") -Destination (Join-Path $stageRoot "updater") -ExcludeDirectories @("__pycache__") -ExcludeFiles @("*.pyc", "*.cs")
+Copy-FileToDirectory -Source (Join-Path $repoRoot "update-config.json") -Destination $stageRoot
 $stagedMediaRoot = Join-Path $stageRoot ".runtime\ffmpeg"
 Ensure-Directory -Path $stagedMediaRoot | Out-Null
 $ffmpegSource = Resolve-FullMediaTool -ToolName "ffmpeg" -RepoRoot $repoRoot

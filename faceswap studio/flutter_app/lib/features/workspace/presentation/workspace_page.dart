@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:faceswap_studio/shared/services/bridge_client.dart';
@@ -8,6 +9,8 @@ import 'package:faceswap_studio/shared/widgets/studio_media_viewer.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_all/webview_all.dart';
+
+import 'workspace_options_panel.dart';
 
 class WorkspacePage extends StatelessWidget {
   const WorkspacePage({super.key});
@@ -47,6 +50,85 @@ class WorkspacePage extends StatelessWidget {
   }
 }
 
+Future<bool> _confirmWorkspaceAction(
+  BuildContext context, {
+  required String title,
+  required String message,
+  required String confirmLabel,
+  bool destructive = false,
+}) async {
+  final theme = Theme.of(context);
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(title),
+      content: Text(message),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          style: destructive
+              ? FilledButton.styleFrom(
+                  backgroundColor: theme.colorScheme.error,
+                  foregroundColor: theme.colorScheme.onError,
+                )
+              : null,
+          child: Text(confirmLabel),
+        ),
+      ],
+    ),
+  );
+  return confirmed == true;
+}
+
+Future<String?> _showPersonaNameDialog(BuildContext context) async {
+  final controller = TextEditingController();
+  try {
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('保存人物形象'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: '人物形象名称',
+            hintText: '例如：张三正装',
+          ),
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) {
+            final name = controller.text.trim();
+            if (name.isNotEmpty) {
+              Navigator.of(context).pop(name);
+            }
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final name = controller.text.trim();
+              if (name.isNotEmpty) {
+                Navigator.of(context).pop(name);
+              }
+            },
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    return result;
+  } finally {
+    controller.dispose();
+  }
+}
+
 class _OperationWorkbench extends StatefulWidget {
   const _OperationWorkbench();
 
@@ -56,6 +138,10 @@ class _OperationWorkbench extends StatefulWidget {
 
 class _OperationWorkbenchState extends State<_OperationWorkbench>
     with AutomaticKeepAliveClientMixin {
+  static const double _defaultWorkspaceOptionsPanelWidth = 430.0;
+  static const double _minWorkspaceOptionsPanelWidth = 320.0;
+  static const double _maxWorkspaceOptionsPanelWidth = 760.0;
+
   final BridgeClient _client = BridgeClient();
 
   Timer? _pollTimer;
@@ -68,15 +154,17 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
   bool _controllerReady = false;
   bool _isPinned = true;
   bool _previewInFlight = false;
+  int? _lastVideoFrameTotal;
   String _serviceState = 'stopped';
   String _webuiUrl = 'http://127.0.0.1:7860';
   String _workspaceMessage = '选择源文件和目标文件后即可添加到队列或立即生成。';
   String _previewMessage = '选择源文件、目标文件并调整参数后，即可生成原生预览。';
   int _pageProgress = 0;
   String? _lastLoadedUrl;
+  double _workspaceOptionsPanelWidth = _defaultWorkspaceOptionsPanelWidth;
   _WorkspaceDraft? _workspaceDraft;
-  _WorkspaceOptionsSchema? _workspaceOptionsSchema;
-  _WorkspaceOptionsState? _workspaceOptionsState;
+  WorkspaceOptionsSchema? _workspaceOptionsSchema;
+  WorkspaceOptionsState? _workspaceOptionsState;
   _WorkspacePreviewResult? _workspacePreviewResult;
 
   @override
@@ -89,12 +177,73 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
     super.initState();
     if (!_useNativeWorkbenchMode) {
       _initController();
+    } else {
+      _loadWorkspacePanelWidth();
     }
     _refresh();
     _pollTimer = Timer.periodic(
       const Duration(milliseconds: 1200),
       (_) => _refresh(),
     );
+  }
+
+  double _normalizeWorkspacePanelWidth(dynamic value) {
+    final parsedValue = value is num
+        ? value.toDouble()
+        : double.tryParse('$value') ?? _defaultWorkspaceOptionsPanelWidth;
+    return parsedValue.clamp(
+      _minWorkspaceOptionsPanelWidth,
+      _maxWorkspaceOptionsPanelWidth,
+    ).toDouble();
+  }
+
+  Future<void> _loadWorkspacePanelWidth() async {
+    try {
+      final settings = await _client.getSettings();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _workspaceOptionsPanelWidth = _normalizeWorkspacePanelWidth(
+          settings['workspace_options_panel_width'],
+        );
+      });
+    } catch (_) {}
+  }
+
+  void _setWorkspacePanelWidth(double width) {
+    final normalizedWidth = _normalizeWorkspacePanelWidth(width);
+    if ((_workspaceOptionsPanelWidth - normalizedWidth).abs() < 0.5) {
+      return;
+    }
+    setState(() {
+      _workspaceOptionsPanelWidth = normalizedWidth;
+    });
+  }
+
+  Future<void> _persistWorkspacePanelWidth(double width) async {
+    final normalizedWidth = _normalizeWorkspacePanelWidth(width);
+    _setWorkspacePanelWidth(normalizedWidth);
+    try {
+      final settings = await _client.updateSettings({
+        'workspace_options_panel_width': normalizedWidth,
+      });
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _workspaceOptionsPanelWidth = _normalizeWorkspacePanelWidth(
+          settings['workspace_options_panel_width'],
+        );
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _workspaceMessage = '参数面板宽度保存失败: $error';
+      });
+    }
   }
 
   @override
@@ -163,11 +312,11 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
           ? _WorkspaceDraft.fromJson(results[1] as Map<String, dynamic>)
           : null;
       final workspaceOptionsState = _useNativeWorkbenchMode
-          ? _WorkspaceOptionsState.fromJson(results[2] as Map<String, dynamic>)
+          ? WorkspaceOptionsState.fromJson(results[2] as Map<String, dynamic>)
           : null;
       final workspaceOptionsSchema =
           _useNativeWorkbenchMode && results.length > 3
-          ? _WorkspaceOptionsSchema.fromJson(results[3] as Map<String, dynamic>)
+          ? WorkspaceOptionsSchema.fromJson(results[3] as Map<String, dynamic>)
           : null;
 
       if (!mounted) {
@@ -203,7 +352,10 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
     }
   }
 
-  Future<void> _updateWorkspaceOptions(Map<String, dynamic> payload) async {
+  Future<void> _updateWorkspaceOptions(
+    Map<String, dynamic> payload, {
+    bool clearPreview = true,
+  }) async {
     if (_actionInFlight) {
       return;
     }
@@ -215,10 +367,10 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
         _client.updateWorkspaceOptions(payload),
         _client.getWorkspaceOptionsSchema(),
       ]);
-      final optionsState = _WorkspaceOptionsState.fromJson(
+      final optionsState = WorkspaceOptionsState.fromJson(
         results[0] as Map<String, dynamic>,
       );
-      final optionsSchema = _WorkspaceOptionsSchema.fromJson(
+      final optionsSchema = WorkspaceOptionsSchema.fromJson(
         results[1] as Map<String, dynamic>,
       );
       if (!mounted) {
@@ -227,7 +379,10 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
       setState(() {
         _workspaceOptionsState = optionsState;
         _workspaceOptionsSchema = optionsSchema;
-        _workspacePreviewResult = null;
+        if (clearPreview) {
+          _workspacePreviewResult = null;
+          _lastVideoFrameTotal = null;
+        }
         _previewMessage = '参数已更新，请重新生成预览以确认当前效果。';
       });
     } catch (error) {
@@ -250,6 +405,16 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
     if (_actionInFlight) {
       return;
     }
+    final confirmed = await _confirmWorkspaceAction(
+      context,
+      title: '重置参数面板',
+      message: '确定将参数面板恢复为默认值吗？当前参数草稿会被覆盖。',
+      confirmLabel: '重置',
+      destructive: true,
+    );
+    if (!mounted || !confirmed) {
+      return;
+    }
     setState(() {
       _actionInFlight = true;
     });
@@ -258,10 +423,10 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
         _client.resetWorkspaceOptions(),
         _client.getWorkspaceOptionsSchema(),
       ]);
-      final optionsState = _WorkspaceOptionsState.fromJson(
+      final optionsState = WorkspaceOptionsState.fromJson(
         results[0] as Map<String, dynamic>,
       );
-      final optionsSchema = _WorkspaceOptionsSchema.fromJson(
+      final optionsSchema = WorkspaceOptionsSchema.fromJson(
         results[1] as Map<String, dynamic>,
       );
       if (!mounted) {
@@ -271,6 +436,7 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
         _workspaceOptionsState = optionsState;
         _workspaceOptionsSchema = optionsSchema;
         _workspacePreviewResult = null;
+        _lastVideoFrameTotal = null;
         _previewMessage = '参数已重置为默认值，请重新生成预览。';
       });
     } catch (error) {
@@ -318,6 +484,8 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
         }
         setState(() {
           _workspacePreviewResult = previewResult;
+          _lastVideoFrameTotal =
+              previewResult.videoFrameTotal ?? _lastVideoFrameTotal;
           _previewMessage = '预览已更新，参数变更后可再次生成。';
         });
       } else {
@@ -343,7 +511,20 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
     }
   }
 
-  Future<void> _loadWebUiIfNeeded({bool force = false}) async {
+  Future<void> _previewWorkspaceAtFrame(int frameNumber) async {
+    await _updateWorkspaceOptions(<String, dynamic>{
+      'preview_frame_number': frameNumber,
+    }, clearPreview: false);
+    if (!mounted) {
+      return;
+    }
+    await _previewWorkspace();
+  }
+
+  Future<void> _loadWebUiIfNeeded({
+    bool force = false,
+    bool showError = false,
+  }) async {
     if (!_controllerReady || !_isWebUiReady) {
       return;
     }
@@ -354,7 +535,14 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
     try {
       await _controller!.loadRequest(Uri.parse(_webuiUrl));
       _lastLoadedUrl = _webuiUrl;
-    } catch (_) {}
+    } catch (error) {
+      if (!showError || !mounted) {
+        return;
+      }
+      setState(() {
+        _workspaceMessage = '加载 WebUI 失败: $error';
+      });
+    }
   }
 
   Future<void> _reloadWebUi() async {
@@ -368,19 +556,43 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
     setState(() {
       _lastLoadedUrl = null;
     });
-    await _loadWebUiIfNeeded(force: true);
+    await _loadWebUiIfNeeded(force: true, showError: true);
   }
 
   Future<void> _openBrowser() async {
     try {
-      await _client.openBrowser();
-    } catch (_) {}
+      final result = await _client.openBrowser();
+      if (result['ok'] == false && mounted) {
+        setState(() {
+          _workspaceMessage = '${result['message'] ?? '打开浏览器失败。'}';
+        });
+      }
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _workspaceMessage = '打开浏览器失败: $error';
+      });
+    }
   }
 
   Future<void> _openSourcePreview() async {
-    final path = _workspaceDraft?.primarySourcePath;
-    final mediaType = _workspaceDraft?.primarySourceMediaType;
+    final draft = _workspaceDraft;
+    final path = draft?.primarySourcePath;
+    final mediaType = draft?.primarySourceMediaType;
     if (!mounted || path == null || mediaType != 'image') {
+      return;
+    }
+    final imagePaths = draft?.imageSourcePaths ?? const <String>[];
+    if (imagePaths.length > 1) {
+      final initialIndex = imagePaths.indexOf(path);
+      await showStudioImageGalleryViewer(
+        context,
+        filePaths: imagePaths,
+        initialIndex: initialIndex < 0 ? 0 : initialIndex,
+        title: 'SOURCE',
+      );
       return;
     }
     await showStudioImageViewer(context, filePath: path, title: 'SOURCE');
@@ -404,6 +616,16 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
     if (!mounted || previewResult == null) {
       return;
     }
+    if (previewResult.canCompare) {
+      await showStudioImageComparisonViewer(
+        context,
+        beforeImageBytes: previewResult.beforeImageBytes,
+        afterImageBytes: previewResult.afterImageBytes,
+        singleImageBytes: previewResult.imageBytes,
+        title: '原生预览',
+      );
+      return;
+    }
     await showStudioImageViewer(
       context,
       imageBytes: previewResult.imageBytes,
@@ -425,7 +647,14 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
       setState(() {
         _isPinned = !_isPinned;
       });
-    } catch (_) {}
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _workspaceMessage = '切换固定预览失败: $error';
+      });
+    }
   }
 
   bool get _isWebUiReady => _serviceState == 'ready';
@@ -457,13 +686,62 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
       return;
     }
     await _invokeWorkspaceAction(() async {
-      final draft = await _client.setWorkspaceSourcePaths(
+      _workspaceMessage = '正在自动提取源脸，请稍候。';
+      final result = await _client.extractWorkspaceSourceFaces(
         files.map((file) => file.path).toList(),
       );
-      _workspaceDraft = _WorkspaceDraft.fromJson(draft);
-      _workspaceMessage = '已更新源文件，共 ${_workspaceDraft!.sourcePaths.length} 个。';
+      final workspace = result['workspace'] as Map<String, dynamic>?;
+      if (workspace != null) {
+        _workspaceDraft = _WorkspaceDraft.fromJson(workspace);
+      }
+      if (result['ok'] == true) {
+        _workspaceMessage =
+            '${result['message'] ?? '已自动提取源脸。'} 当前共 ${_workspaceDraft?.sourcePaths.length ?? 0} 个源文件。';
+      } else {
+        _workspaceMessage = '${result['message'] ?? '源脸提取失败。'}';
+      }
       _workspacePreviewResult = null;
+      _lastVideoFrameTotal = null;
       _previewMessage = '源文件已更新，请重新生成预览。';
+    });
+  }
+
+  Future<void> _pickPersona() async {
+    final persona = await showDialog<_PersonaChoice>(
+      context: context,
+      builder: (context) => _PersonaPickerDialog(client: _client),
+    );
+    if (!mounted || persona == null) {
+      return;
+    }
+    await _invokeWorkspaceAction(() async {
+      final result = await _client.usePersona(persona.id);
+      final workspace = result['workspace'] as Map<String, dynamic>?;
+      if (workspace != null) {
+        _workspaceDraft = _WorkspaceDraft.fromJson(workspace);
+      }
+      _workspaceMessage =
+          '${result['message'] ?? '已加载人物形象。'} 当前共 ${_workspaceDraft?.sourcePaths.length ?? 0} 个源文件。';
+      _workspacePreviewResult = null;
+      _lastVideoFrameTotal = null;
+      _previewMessage = '人物形象已加载，请重新生成预览。';
+    });
+  }
+
+  Future<void> _savePersona() async {
+    if (_workspaceDraft?.sourcePaths.isEmpty ?? true) {
+      setState(() {
+        _workspaceMessage = '请先选择源图片并完成自动提取，再保存人物形象。';
+      });
+      return;
+    }
+    final name = await _showPersonaNameDialog(context);
+    if (!mounted || name == null) {
+      return;
+    }
+    await _invokeWorkspaceAction(() async {
+      final result = await _client.savePersona(name);
+      _workspaceMessage = '${result['message'] ?? '人物形象保存完成。'}';
     });
   }
 
@@ -499,26 +777,55 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
       _workspaceDraft = _WorkspaceDraft.fromJson(draft);
       _workspaceMessage = '已更新目标文件。';
       _workspacePreviewResult = null;
+      _lastVideoFrameTotal = null;
       _previewMessage = '目标文件已更新，请重新生成预览。';
     });
   }
 
   Future<void> _clearSourceFiles() async {
+    if (_workspaceDraft?.sourcePaths.isEmpty ?? true) {
+      return;
+    }
+    final confirmed = await _confirmWorkspaceAction(
+      context,
+      title: '清空源文件',
+      message: '确定清空当前已选择的源文件吗？预览结果会一并清除。',
+      confirmLabel: '清空',
+      destructive: true,
+    );
+    if (!mounted || !confirmed) {
+      return;
+    }
     await _invokeWorkspaceAction(() async {
       final draft = await _client.clearWorkspaceSourcePaths();
       _workspaceDraft = _WorkspaceDraft.fromJson(draft);
       _workspaceMessage = '已清空源文件。';
       _workspacePreviewResult = null;
+      _lastVideoFrameTotal = null;
       _previewMessage = '源文件已清空。';
     });
   }
 
   Future<void> _clearTargetFile() async {
+    if (_workspaceDraft?.targetPath == null) {
+      return;
+    }
+    final confirmed = await _confirmWorkspaceAction(
+      context,
+      title: '清空目标文件',
+      message: '确定清空当前目标文件吗？预览结果会一并清除。',
+      confirmLabel: '清空',
+      destructive: true,
+    );
+    if (!mounted || !confirmed) {
+      return;
+    }
     await _invokeWorkspaceAction(() async {
       final draft = await _client.clearWorkspaceTargetPath();
       _workspaceDraft = _WorkspaceDraft.fromJson(draft);
       _workspaceMessage = '已清空目标文件。';
       _workspacePreviewResult = null;
+      _lastVideoFrameTotal = null;
       _previewMessage = '目标文件已清空。';
     });
   }
@@ -690,8 +997,8 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                           colors: theme.brightness == Brightness.dark
-                              ? const [Color(0xFF07111A), Color(0xFF0B1623)]
-                              : const [Color(0xFFF7FBFD), Color(0xFFEAF3F8)],
+                              ? const [Color(0xFF171716), Color(0xFF20201E)]
+                              : const [Color(0xFFFFFFFF), Color(0xFFFAFAFA)],
                         ),
                         border: Border.all(
                           color: theme.colorScheme.outlineVariant.withValues(
@@ -708,16 +1015,26 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
                               draft: _workspaceDraft,
                               workspaceOptionsSchema: _workspaceOptionsSchema,
                               workspaceOptionsState: _workspaceOptionsState,
+                              workspaceOptionsPanelWidth:
+                                  _workspaceOptionsPanelWidth,
                               previewResult: _workspacePreviewResult,
+                              lastVideoFrameTotal: _lastVideoFrameTotal,
                               workspaceMessage: _workspaceMessage,
                               previewMessage: _previewMessage,
                               onPickSourceFiles: _pickSourceFiles,
+                              onPickPersona: _pickPersona,
+                              onSavePersona: _savePersona,
                               onClearSourceFiles: _clearSourceFiles,
                               onPickTargetFile: _pickTargetFile,
                               onClearTargetFile: _clearTargetFile,
                               onUpdateOptions: _updateWorkspaceOptions,
                               onResetOptions: _resetWorkspaceOptions,
+                              onWorkspaceOptionsPanelWidthChanged:
+                                  _setWorkspacePanelWidth,
+                              onWorkspaceOptionsPanelWidthChangeEnd:
+                                  _persistWorkspacePanelWidth,
                               onPreviewWorkspace: _previewWorkspace,
+                              onPreviewFrameSelected: _previewWorkspaceAtFrame,
                               onOpenSourcePreview: _openSourcePreview,
                               onOpenTargetPreview: _openTargetPreview,
                               onOpenPreviewResult: _openPreviewResult,
@@ -781,16 +1098,23 @@ class _NativeWorkbenchPane extends StatelessWidget {
     required this.draft,
     required this.workspaceOptionsSchema,
     required this.workspaceOptionsState,
+    required this.workspaceOptionsPanelWidth,
     required this.previewResult,
+    required this.lastVideoFrameTotal,
     required this.workspaceMessage,
     required this.previewMessage,
     required this.onPickSourceFiles,
+    required this.onPickPersona,
+    required this.onSavePersona,
     required this.onClearSourceFiles,
     required this.onPickTargetFile,
     required this.onClearTargetFile,
     required this.onUpdateOptions,
     required this.onResetOptions,
+    required this.onWorkspaceOptionsPanelWidthChanged,
+    required this.onWorkspaceOptionsPanelWidthChangeEnd,
     required this.onPreviewWorkspace,
+    required this.onPreviewFrameSelected,
     required this.onOpenSourcePreview,
     required this.onOpenTargetPreview,
     required this.onOpenPreviewResult,
@@ -804,18 +1128,27 @@ class _NativeWorkbenchPane extends StatelessWidget {
   final bool busy;
   final bool previewBusy;
   final _WorkspaceDraft? draft;
-  final _WorkspaceOptionsSchema? workspaceOptionsSchema;
-  final _WorkspaceOptionsState? workspaceOptionsState;
+  final WorkspaceOptionsSchema? workspaceOptionsSchema;
+  final WorkspaceOptionsState? workspaceOptionsState;
+  final double workspaceOptionsPanelWidth;
   final _WorkspacePreviewResult? previewResult;
+  final int? lastVideoFrameTotal;
   final String workspaceMessage;
   final String previewMessage;
   final VoidCallback onPickSourceFiles;
+  final VoidCallback onPickPersona;
+  final VoidCallback onSavePersona;
   final VoidCallback onClearSourceFiles;
   final VoidCallback onPickTargetFile;
   final VoidCallback onClearTargetFile;
-  final Future<void> Function(Map<String, dynamic> payload) onUpdateOptions;
+  final Future<void> Function(Map<String, dynamic> payload, {bool clearPreview})
+  onUpdateOptions;
   final Future<void> Function() onResetOptions;
+  final ValueChanged<double> onWorkspaceOptionsPanelWidthChanged;
+  final Future<void> Function(double width)
+  onWorkspaceOptionsPanelWidthChangeEnd;
   final Future<void> Function() onPreviewWorkspace;
+  final Future<void> Function(int frameNumber) onPreviewFrameSelected;
   final Future<void> Function() onOpenSourcePreview;
   final Future<void> Function() onOpenTargetPreview;
   final Future<void> Function() onOpenPreviewResult;
@@ -848,11 +1181,31 @@ class _NativeWorkbenchPane extends StatelessWidget {
             : useWideTopRow
             ? 264.0
             : 300.0;
+        final collapsedOptionsRailWidth = compact ? 44.0 : 48.0;
+        final collapsedOptionsRailGap = compact ? 10.0 : 12.0;
         final contentWidth = constraints.maxWidth > 1760
             ? 1760.0
             : constraints.maxWidth;
+        final panelMinWidth = compact
+            ? (constraints.maxWidth - 64.0).clamp(220.0, 320.0).toDouble()
+            : 320.0;
+        final panelViewportLimit = compact
+            ? constraints.maxWidth * 0.82
+            : constraints.maxWidth * 0.56;
+        final panelAvailableLimit =
+            constraints.maxWidth - (compact ? 84.0 : 240.0);
+        final panelMaxWidth = math.max(
+          panelMinWidth,
+          math.min(
+            760.0,
+            math.min(panelViewportLimit, panelAvailableLimit),
+          ),
+        );
+        final resolvedPanelWidth = workspaceOptionsPanelWidth
+            .clamp(panelMinWidth, panelMaxWidth)
+            .toDouble();
         final currentOptionsState =
-            workspaceOptionsState ?? const _WorkspaceOptionsState.empty();
+            workspaceOptionsState ?? const WorkspaceOptionsState.empty();
 
         final sourceCard = _WorkspaceDraftCard(
           compact: compact,
@@ -865,6 +1218,21 @@ class _NativeWorkbenchPane extends StatelessWidget {
           thumbnailPath: currentDraft.sourceThumbnail,
           mediaType: currentDraft.primarySourceMediaType,
           actionLabel: '选择源文件',
+          extraActions: [
+            _WorkspaceDraftAction(
+              label: '选择人物形象',
+              icon: Icons.badge_outlined,
+              onPressed: bridgeOnline && !busy ? onPickPersona : null,
+            ),
+            _WorkspaceDraftAction(
+              label: '保存人物形象',
+              icon: Icons.person_add_alt_1_outlined,
+              onPressed:
+                  bridgeOnline && !busy && currentDraft.sourcePaths.isNotEmpty
+                  ? onSavePersona
+                  : null,
+            ),
+          ],
           onOpenPreview:
               currentDraft.primarySourcePath != null &&
                   currentDraft.primarySourceMediaType == 'image'
@@ -906,7 +1274,15 @@ class _NativeWorkbenchPane extends StatelessWidget {
           canPreview: currentDraft.canSubmit && !busy,
           previewResult: previewResult,
           previewMessage: previewMessage,
+          workspaceOptionsSchema: workspaceOptionsSchema,
+          workspaceOptionsState: currentOptionsState,
           targetMediaType: currentDraft.targetMediaType,
+          previewFrameNumber:
+              (currentOptionsState.options['preview_frame_number'] as num?)
+                  ?.toInt() ??
+              0,
+          targetVideoFrameTotal: currentDraft.targetVideoFrameTotal,
+          lastVideoFrameTotal: lastVideoFrameTotal,
           onOpenPreviewResult: previewResult != null
               ? () => onOpenPreviewResult()
               : null,
@@ -914,12 +1290,22 @@ class _NativeWorkbenchPane extends StatelessWidget {
               bridgeOnline && currentDraft.canSubmit && !busy && !previewBusy
               ? onPreviewWorkspace
               : null,
+          onUpdateOptions: onUpdateOptions,
+          onPreviewFrameSelected:
+              bridgeOnline &&
+                  currentDraft.canSubmit &&
+                  !busy &&
+                  !previewBusy &&
+                  currentDraft.targetMediaType == 'video'
+              ? onPreviewFrameSelected
+              : null,
         );
 
-        final optionsPanel = _WorkspaceOptionsPanel(
+        final optionsPanel = WorkspaceOptionsPanel(
           compact: compact,
           busy: busy,
-          draft: currentDraft,
+          targetMediaType: currentDraft.targetMediaType,
+          targetVideoFrameTotal: currentDraft.targetVideoFrameTotal,
           schema: workspaceOptionsSchema,
           state: currentOptionsState,
           onUpdateOptions: onUpdateOptions,
@@ -948,8 +1334,6 @@ class _NativeWorkbenchPane extends StatelessWidget {
               targetCard,
               SizedBox(height: cardGap),
               previewPanel,
-              SizedBox(height: cardGap),
-              optionsPanel,
             ],
           );
         } else if (useWideTopRow) {
@@ -966,8 +1350,6 @@ class _NativeWorkbenchPane extends StatelessWidget {
                   Expanded(flex: 6, child: previewPanel),
                 ],
               ),
-              SizedBox(height: cardGap),
-              optionsPanel,
             ],
           );
         } else {
@@ -983,20 +1365,18 @@ class _NativeWorkbenchPane extends StatelessWidget {
                 ],
               ),
               SizedBox(height: cardGap),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(flex: 5, child: previewPanel),
-                  SizedBox(width: cardGap),
-                  Expanded(flex: 7, child: optionsPanel),
-                ],
-              ),
+              previewPanel,
             ],
           );
         }
 
-        return Padding(
-          padding: EdgeInsets.all(outerPadding),
+        final workspaceContent = Padding(
+          padding: EdgeInsets.fromLTRB(
+            outerPadding,
+            outerPadding,
+            outerPadding + collapsedOptionsRailWidth + collapsedOptionsRailGap,
+            outerPadding,
+          ),
           child: Align(
             alignment: Alignment.topCenter,
             child: SizedBox(
@@ -1023,9 +1403,7 @@ class _NativeWorkbenchPane extends StatelessWidget {
                           ),
                           SizedBox(height: compact ? 8 : 10),
                           Text(
-                            useWideTopRow
-                                ? '宽屏下优先展示 SOURCE / TARGET / PREVIEW，参数区滚动显示，底部按钮固定。'
-                                : '使用 Flutter 原生文件选择器准备 SOURCE / TARGET，调整参数、生成预览后提交本地队列。',
+                            '使用 Flutter 原生文件选择器准备 SOURCE / TARGET，参数从右侧浮层入口打开，预览后可提交本地队列。',
                             style: theme.textTheme.bodyMedium?.copyWith(
                               color: theme.colorScheme.onSurfaceVariant,
                               height: compact ? 1.25 : 1.4,
@@ -1045,6 +1423,22 @@ class _NativeWorkbenchPane extends StatelessWidget {
             ),
           ),
         );
+
+        return Stack(
+          children: [
+            Positioned.fill(child: workspaceContent),
+            WorkspaceFloatingOptionsOverlay(
+              compact: compact,
+              collapsedWidth: collapsedOptionsRailWidth,
+              panelWidth: resolvedPanelWidth,
+              minPanelWidth: panelMinWidth,
+              maxPanelWidth: panelMaxWidth,
+              onPanelWidthChanged: onWorkspaceOptionsPanelWidthChanged,
+              onPanelWidthChangeEnd: onWorkspaceOptionsPanelWidthChangeEnd,
+              child: optionsPanel,
+            ),
+          ],
+        );
       },
     );
   }
@@ -1060,6 +1454,7 @@ class _WorkspaceDraftCard extends StatelessWidget {
     required this.thumbnailPath,
     required this.mediaType,
     required this.actionLabel,
+    this.extraActions = const <_WorkspaceDraftAction>[],
     required this.onOpenPreview,
     required this.onPick,
     required this.onClear,
@@ -1073,6 +1468,7 @@ class _WorkspaceDraftCard extends StatelessWidget {
   final String? thumbnailPath;
   final String? mediaType;
   final String actionLabel;
+  final List<_WorkspaceDraftAction> extraActions;
   final VoidCallback? onOpenPreview;
   final VoidCallback? onPick;
   final VoidCallback? onClear;
@@ -1115,8 +1511,8 @@ class _WorkspaceDraftCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(18),
             child: Material(
               color: theme.brightness == Brightness.dark
-                  ? const Color(0xFF0A1420)
-                  : const Color(0xFFEAF2F8),
+                  ? const Color(0xFF20201E)
+                  : const Color(0xFFF5F5F5),
               child: InkWell(
                 onTap: mediaType == 'video' ? null : onOpenPreview,
                 child: SizedBox(
@@ -1175,38 +1571,88 @@ class _WorkspaceDraftCard extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
           ),
           SizedBox(height: compact ? 10 : 14),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton.tonalIcon(
-                  onPressed: onPick,
-                  icon: Icon(
-                    Icons.folder_open_rounded,
-                    size: compact ? 18 : 20,
-                  ),
-                  label: Text(actionLabel),
-                  style: FilledButton.styleFrom(
-                    minimumSize: Size(0, compact ? 36 : 40),
-                    padding: EdgeInsets.symmetric(
-                      horizontal: compact ? 12 : 16,
-                    ),
-                  ),
-                ),
+          _WorkspaceDraftActionsBar(
+            compact: compact,
+            actions: [
+              _WorkspaceDraftAction(
+                label: actionLabel,
+                icon: Icons.folder_open_rounded,
+                onPressed: onPick,
               ),
-              SizedBox(width: compact ? 10 : 12),
-              FilledButton.tonalIcon(
+              ...extraActions,
+              _WorkspaceDraftAction(
+                label: '清空',
+                icon: Icons.clear_rounded,
                 onPressed: onClear,
-                icon: Icon(Icons.clear_rounded, size: compact ? 18 : 20),
-                label: const Text('清空'),
-                style: FilledButton.styleFrom(
-                  minimumSize: Size(0, compact ? 36 : 40),
-                  padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 16),
-                ),
               ),
             ],
           ),
         ],
       ),
+    );
+  }
+}
+
+class _WorkspaceDraftAction {
+  const _WorkspaceDraftAction({
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback? onPressed;
+}
+
+class _WorkspaceDraftActionsBar extends StatelessWidget {
+  const _WorkspaceDraftActionsBar({
+    required this.compact,
+    required this.actions,
+  });
+
+  final bool compact;
+  final List<_WorkspaceDraftAction> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    final gap = compact ? 10.0 : 12.0;
+    final minActionWidth = compact ? 132.0 : 150.0;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxColumns = actions.length.clamp(1, 4).toInt();
+        var columns = maxColumns;
+        while (columns > 1 &&
+            constraints.maxWidth <
+                minActionWidth * columns + gap * (columns - 1)) {
+          columns -= 1;
+        }
+        final itemWidth = columns <= 1
+            ? constraints.maxWidth
+            : (constraints.maxWidth - gap * (columns - 1)) / columns;
+
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: [
+            for (final action in actions)
+              SizedBox(
+                width: itemWidth,
+                child: FilledButton.tonalIcon(
+                  onPressed: action.onPressed,
+                  icon: Icon(action.icon, size: compact ? 18 : 20),
+                  label: Text(action.label, overflow: TextOverflow.ellipsis),
+                  style: FilledButton.styleFrom(
+                    minimumSize: Size(0, compact ? 36 : 40),
+                    padding: EdgeInsets.symmetric(
+                      horizontal: compact ? 10 : 12,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }
@@ -1236,6 +1682,221 @@ class _MediaPlaceholder extends StatelessWidget {
   }
 }
 
+class _PersonaPickerDialog extends StatefulWidget {
+  const _PersonaPickerDialog({required this.client});
+
+  final BridgeClient client;
+
+  @override
+  State<_PersonaPickerDialog> createState() => _PersonaPickerDialogState();
+}
+
+class _PersonaPickerDialogState extends State<_PersonaPickerDialog> {
+  bool _loading = true;
+  String _message = '正在加载人物形象库...';
+  List<_PersonaChoice> _items = <_PersonaChoice>[];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _message = '正在加载人物形象库...';
+    });
+    try {
+      final result = await widget.client.getPersonas();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _items = (result['items'] as List<dynamic>? ?? const <dynamic>[])
+            .cast<Map<String, dynamic>>()
+            .map(_PersonaChoice.fromJson)
+            .toList();
+        _loading = false;
+        _message = _items.isEmpty ? '人物形象库为空，请先保存人物形象。' : '';
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _loading = false;
+        _message = '加载人物形象库失败：$error';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AlertDialog(
+      title: Row(
+        children: [
+          const Expanded(child: Text('选择人物形象')),
+          IconButton(
+            onPressed: _loading ? null : _load,
+            icon: const Icon(Icons.refresh_rounded),
+            tooltip: '刷新',
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 760,
+        height: 520,
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _items.isEmpty
+            ? Center(
+                child: Text(
+                  _message,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              )
+            : LayoutBuilder(
+                builder: (context, constraints) {
+                  final columns = constraints.maxWidth >= 680
+                      ? 3
+                      : constraints.maxWidth >= 440
+                      ? 2
+                      : 1;
+                  return GridView.builder(
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: columns,
+                      crossAxisSpacing: 12,
+                      mainAxisSpacing: 12,
+                      childAspectRatio: columns == 1 ? 1.8 : 0.82,
+                    ),
+                    itemCount: _items.length,
+                    itemBuilder: (context, index) {
+                      final item = _items[index];
+                      return _PersonaChoiceCard(
+                        item: item,
+                        onTap: () => Navigator.of(context).pop(item),
+                      );
+                    },
+                  );
+                },
+              ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+      ],
+    );
+  }
+}
+
+class _PersonaChoiceCard extends StatelessWidget {
+  const _PersonaChoiceCard({required this.item, required this.onTap});
+
+  final _PersonaChoice item;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Container(
+                width: double.infinity,
+                color: theme.brightness == Brightness.dark
+                    ? const Color(0xFF20201E)
+                    : const Color(0xFFF5F5F5),
+                child: item.previewPath == null
+                    ? Icon(
+                        Icons.face_retouching_natural_rounded,
+                        size: 46,
+                        color: theme.colorScheme.primary,
+                      )
+                    : Padding(
+                        padding: const EdgeInsets.all(10),
+                        child: Image.file(
+                          File(item.previewPath!),
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, _, _) => Icon(
+                            Icons.broken_image_outlined,
+                            color: theme.colorScheme.error,
+                          ),
+                        ),
+                      ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.name,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${item.faceCount} 张角度图',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PersonaChoice {
+  const _PersonaChoice({
+    required this.id,
+    required this.name,
+    required this.previewPath,
+    required this.faceCount,
+  });
+
+  factory _PersonaChoice.fromJson(Map<String, dynamic> json) {
+    final facePaths =
+        (json['face_paths'] as List<dynamic>? ?? const <dynamic>[])
+            .map((item) => '$item')
+            .where((item) => item.isNotEmpty && item != 'null')
+            .toList();
+    return _PersonaChoice(
+      id: '${json['id'] ?? ''}',
+      name: '${json['name'] ?? '未命名人物'}',
+      previewPath: json['preview_path'] as String?,
+      faceCount:
+          (json['face_count'] as num?)?.toInt() ??
+          (facePaths.isEmpty ? 0 : facePaths.length),
+    );
+  }
+
+  final String id;
+  final String name;
+  final String? previewPath;
+  final int faceCount;
+}
+
 class _WorkspaceDraft {
   const _WorkspaceDraft({
     required this.sourcePaths,
@@ -1243,6 +1904,7 @@ class _WorkspaceDraft {
     required this.sourceThumbnail,
     required this.targetThumbnail,
     required this.targetMediaType,
+    required this.targetVideoFrameTotal,
     required this.outputRoot,
     required this.outputDirectory,
     required this.canSubmit,
@@ -1254,6 +1916,7 @@ class _WorkspaceDraft {
       sourceThumbnail = null,
       targetThumbnail = null,
       targetMediaType = null,
+      targetVideoFrameTotal = null,
       outputRoot = '',
       outputDirectory = null,
       canSubmit = false;
@@ -1267,6 +1930,8 @@ class _WorkspaceDraft {
       sourceThumbnail: json['source_thumbnail'] as String?,
       targetThumbnail: json['target_thumbnail'] as String?,
       targetMediaType: json['target_media_type'] as String?,
+      targetVideoFrameTotal: (json['target_video_frame_total'] as num?)
+          ?.toInt(),
       outputRoot: '${json['output_root'] ?? ''}',
       outputDirectory: json['output_directory'] as String?,
       canSubmit: json['can_submit'] == true,
@@ -1278,12 +1943,26 @@ class _WorkspaceDraft {
   final String? sourceThumbnail;
   final String? targetThumbnail;
   final String? targetMediaType;
+  final int? targetVideoFrameTotal;
   final String outputRoot;
   final String? outputDirectory;
   final bool canSubmit;
 
   String? get primarySourcePath =>
       sourcePaths.isEmpty ? null : sourcePaths.first;
+
+  List<String> get imageSourcePaths {
+    return sourcePaths.where((path) {
+      final lowerPath = path.toLowerCase();
+      return lowerPath.endsWith('.jpg') ||
+          lowerPath.endsWith('.jpeg') ||
+          lowerPath.endsWith('.png') ||
+          lowerPath.endsWith('.webp') ||
+          lowerPath.endsWith('.bmp') ||
+          lowerPath.endsWith('.tif') ||
+          lowerPath.endsWith('.tiff');
+    }).toList();
+  }
 
   String? get primarySourceMediaType {
     final path = primarySourcePath;
@@ -1304,7 +1983,7 @@ class _WorkspaceDraft {
   }
 }
 
-class _WorkspacePreviewPanel extends StatelessWidget {
+class _WorkspacePreviewPanel extends StatefulWidget {
   const _WorkspacePreviewPanel({
     this.compact = false,
     required this.previewHeight,
@@ -1313,9 +1992,16 @@ class _WorkspacePreviewPanel extends StatelessWidget {
     required this.canPreview,
     required this.previewResult,
     required this.previewMessage,
+    required this.workspaceOptionsSchema,
+    required this.workspaceOptionsState,
     required this.targetMediaType,
+    required this.previewFrameNumber,
+    required this.targetVideoFrameTotal,
+    required this.lastVideoFrameTotal,
     required this.onOpenPreviewResult,
     required this.onPreview,
+    required this.onUpdateOptions,
+    required this.onPreviewFrameSelected,
   });
 
   final bool compact;
@@ -1325,16 +2011,251 @@ class _WorkspacePreviewPanel extends StatelessWidget {
   final bool canPreview;
   final _WorkspacePreviewResult? previewResult;
   final String previewMessage;
+  final WorkspaceOptionsSchema? workspaceOptionsSchema;
+  final WorkspaceOptionsState workspaceOptionsState;
   final String? targetMediaType;
+  final int previewFrameNumber;
+  final int? targetVideoFrameTotal;
+  final int? lastVideoFrameTotal;
   final VoidCallback? onOpenPreviewResult;
   final Future<void> Function()? onPreview;
+  final Future<void> Function(Map<String, dynamic> payload, {bool clearPreview})
+  onUpdateOptions;
+  final Future<void> Function(int frameNumber)? onPreviewFrameSelected;
+
+  @override
+  State<_WorkspacePreviewPanel> createState() => _WorkspacePreviewPanelState();
+}
+
+class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
+  double? _sliderFrameValue;
+  StudioComparisonMode _comparisonMode = StudioComparisonMode.wipe;
+  bool _comparisonEnabled = true;
+  double _comparisonDivider = 0.5;
+
+  @override
+  void didUpdateWidget(covariant _WorkspacePreviewPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final displayedFrame = _displayedFrameNumber;
+    if (_sliderFrameValue != null &&
+        oldWidget.previewResult?.frameNumber !=
+            widget.previewResult?.frameNumber &&
+        displayedFrame.toDouble() != _sliderFrameValue) {
+      _sliderFrameValue = null;
+    }
+  }
+
+  int get _displayedFrameNumber {
+    if (_sliderFrameValue != null) {
+      return _sliderFrameValue!.round();
+    }
+    if (widget.previewResult?.targetMediaType == 'video') {
+      return widget.previewResult!.frameNumber;
+    }
+    return widget.previewFrameNumber;
+  }
+
+  int? get _videoFrameTotal {
+    return widget.previewResult?.videoFrameTotal ??
+        widget.lastVideoFrameTotal ??
+        widget.targetVideoFrameTotal;
+  }
+
+  bool get _showVideoSlider {
+    final total = _videoFrameTotal;
+    return widget.targetMediaType == 'video' && total != null && total > 1;
+  }
+
+  bool get _canScrubVideo => _showVideoSlider && !widget.previewBusy;
+
+  String _frameSliderLabel(int currentFrame, int? videoFrameTotal) {
+    if (widget.targetMediaType == 'video') {
+      if (videoFrameTotal != null && videoFrameTotal > 1) {
+        return '帧 $currentFrame / ${videoFrameTotal - 1}';
+      }
+      return '生成一次视频预览后可拖动选帧';
+    }
+    if (widget.targetMediaType == 'image') {
+      return '图片目标无需选帧';
+    }
+    return '选择视频目标后可拖动选帧';
+  }
+
+  Widget _buildComparisonControls({required bool canCompare}) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        FilledButton.tonalIcon(
+          onPressed: canCompare
+              ? () {
+                  setState(() {
+                    _comparisonEnabled = !_comparisonEnabled;
+                    if (_comparisonEnabled) {
+                      _comparisonMode = StudioComparisonMode.wipe;
+                    }
+                  });
+                }
+              : null,
+          icon: Icon(
+            canCompare && _comparisonEnabled
+                ? Icons.compare_arrows_rounded
+                : Icons.visibility_off_rounded,
+            size: 18,
+          ),
+          label: Text(
+            canCompare ? (_comparisonEnabled ? '划像开' : '划像关') : '划像不可用',
+          ),
+          style: FilledButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            minimumSize: const Size(0, 36),
+          ),
+        ),
+        if (canCompare && _comparisonEnabled)
+          SegmentedButton<StudioComparisonMode>(
+            segments: const [
+              ButtonSegment<StudioComparisonMode>(
+                value: StudioComparisonMode.wipe,
+                icon: Icon(Icons.compare_arrows_rounded, size: 18),
+                label: Text('划像'),
+              ),
+              ButtonSegment<StudioComparisonMode>(
+                value: StudioComparisonMode.split,
+                icon: Icon(Icons.splitscreen_rounded, size: 18),
+                label: Text('双屏'),
+              ),
+            ],
+            selected: {_comparisonMode},
+            onSelectionChanged: (selection) {
+              setState(() {
+                _comparisonEnabled = true;
+                _comparisonMode = selection.first;
+              });
+            },
+            showSelectedIcon: false,
+            style: const ButtonStyle(visualDensity: VisualDensity.compact),
+          ),
+      ],
+    );
+  }
+
+  String get _faceSelectorMode {
+    final rawValue = widget.workspaceOptionsState.options['face_selector_mode'];
+    final value = rawValue == null ? 'many' : '$rawValue';
+    return switch (value) {
+      'many' || 'one' || 'reference' => value,
+      _ => 'many',
+    };
+  }
+
+  int get _referenceFacePosition {
+    final rawValue =
+        widget.workspaceOptionsState.options['reference_face_position'];
+    if (rawValue is num) {
+      return rawValue.toInt();
+    }
+    return int.tryParse('$rawValue') ?? 0;
+  }
+
+  Future<void> _selectReferenceFace(_PreviewFaceChoice face) async {
+    await widget.onUpdateOptions(<String, dynamic>{
+      'face_selector_mode': 'reference',
+      'reference_face_position': face.index,
+    }, clearPreview: false);
+  }
+
+  Widget _buildFaceSelectorControls(ThemeData theme) {
+    final selectedMode = _faceSelectorMode;
+    final selectedPosition = _referenceFacePosition;
+    final previewResult = widget.previewResult;
+    final faceChoices =
+        previewResult?.faceChoices ?? const <_PreviewFaceChoice>[];
+    final controlsEnabled = widget.bridgeOnline && !widget.previewBusy;
+
+    return Container(
+      padding: EdgeInsets.all(widget.compact ? 12 : 14),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(
+          alpha: theme.brightness == Brightness.dark ? 0.22 : 0.46,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.35),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '参考脸缩略图',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              _PreviewMetaChip(
+                label: selectedMode == 'reference'
+                    ? 'reference #$selectedPosition'
+                    : '当前模式 $selectedMode',
+              ),
+            ],
+          ),
+          SizedBox(height: widget.compact ? 10 : 12),
+          Text(
+            '点击缩略图会写入参考脸位置并自动切换到 reference 模式。排序、性别、种族、年龄和距离请在右侧参数面板的进阶控制中调整。',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              height: 1.35,
+            ),
+          ),
+          SizedBox(height: widget.compact ? 10 : 12),
+          if (previewResult == null)
+            const _FaceSelectorEmptyState(message: '生成预览后显示当前帧检测到的人脸')
+          else if (faceChoices.isEmpty)
+            const _FaceSelectorEmptyState(message: '当前帧未检测到人脸')
+          else
+            SizedBox(
+              height: widget.compact ? 84 : 92,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: faceChoices.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 10),
+                itemBuilder: (context, index) {
+                  final face = faceChoices[index];
+                  return _FaceChoiceTile(
+                    face: face,
+                    compact: widget.compact,
+                    selected:
+                        (selectedMode == 'reference' &&
+                            face.index == selectedPosition) ||
+                        face.selected,
+                    enabled: controlsEnabled,
+                    onSelected: () => _selectReferenceFace(face),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final previewResult = widget.previewResult;
+    final canCompare = previewResult?.canCompare == true;
+    final currentFrame = _displayedFrameNumber;
+    final videoFrameTotal = _videoFrameTotal;
+    final sliderMaxFrame = _showVideoSlider ? videoFrameTotal! - 1 : 1;
+    final sliderValue = currentFrame.clamp(0, sliderMaxFrame).toDouble();
 
     return Container(
-      padding: EdgeInsets.all(compact ? 14 : 18),
+      padding: EdgeInsets.all(widget.compact ? 14 : 18),
       decoration: BoxDecoration(
         color: theme.cardTheme.color,
         borderRadius: BorderRadius.circular(22),
@@ -1346,32 +2267,49 @@ class _WorkspacePreviewPanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Wrap(
-            spacing: compact ? 8 : 10,
-            runSpacing: compact ? 8 : 10,
+            spacing: widget.compact ? 8 : 10,
+            runSpacing: widget.compact ? 8 : 10,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               Text(
                 '原生预览',
                 style:
-                    (compact
+                    (widget.compact
                             ? theme.textTheme.titleSmall
                             : theme.textTheme.titleMedium)
                         ?.copyWith(fontWeight: FontWeight.w800),
               ),
               _WorkspacePill(
-                compact: compact,
+                compact: widget.compact,
                 active: previewResult != null,
                 label: previewResult == null ? '未生成' : '已生成',
               ),
-              if (targetMediaType != null)
+              if (widget.targetMediaType != null)
                 _WorkspacePill(
-                  compact: compact,
+                  compact: widget.compact,
                   active: true,
-                  label: targetMediaType == 'video' ? '视频目标' : '图片目标',
+                  label: widget.targetMediaType == 'video' ? '视频目标' : '图片目标',
                 ),
+              FilledButton.icon(
+                onPressed:
+                    widget.bridgeOnline &&
+                        widget.canPreview &&
+                        !widget.previewBusy &&
+                        widget.onPreview != null
+                    ? () => widget.onPreview!()
+                    : null,
+                icon: Icon(
+                  Icons.preview_outlined,
+                  size: widget.compact ? 18 : 20,
+                ),
+                label: Text(previewResult == null ? '生成预览' : '重新生成预览'),
+                style: FilledButton.styleFrom(
+                  minimumSize: Size(0, widget.compact ? 36 : 40),
+                ),
+              ),
             ],
           ),
-          SizedBox(height: compact ? 8 : 10),
+          SizedBox(height: widget.compact ? 8 : 10),
           Text(
             '使用当前参数草稿生成单帧 PNG 预览，确认效果后再入队。',
             style: theme.textTheme.bodySmall?.copyWith(
@@ -1379,22 +2317,30 @@ class _WorkspacePreviewPanel extends StatelessWidget {
               height: 1.35,
             ),
           ),
-          SizedBox(height: compact ? 12 : 14),
+          if (previewResult != null) ...[
+            SizedBox(height: widget.compact ? 10 : 12),
+            _buildComparisonControls(canCompare: canCompare),
+            if (!canCompare) ...[
+              SizedBox(height: widget.compact ? 8 : 10),
+              _PreviewMetaChip(label: '当前预览缺少原始静帧，请重新生成预览'),
+            ],
+          ],
+          SizedBox(height: widget.compact ? 12 : 14),
           ClipRRect(
             borderRadius: BorderRadius.circular(18),
             child: Material(
               color: theme.brightness == Brightness.dark
-                  ? const Color(0xFF0A1420)
-                  : const Color(0xFFEAF2F8),
+                  ? const Color(0xFF20201E)
+                  : const Color(0xFFF5F5F5),
               child: InkWell(
-                onTap: onOpenPreviewResult,
+                onTap: widget.onOpenPreviewResult,
                 child: SizedBox(
-                  height: previewHeight,
+                  height: widget.previewHeight,
                   width: double.infinity,
                   child: Stack(
                     children: [
                       Positioned.fill(
-                        child: previewBusy
+                        child: widget.previewBusy
                             ? Center(
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
@@ -1415,24 +2361,56 @@ class _WorkspacePreviewPanel extends StatelessWidget {
                                 ),
                               )
                             : previewResult != null
-                            ? Image.memory(
-                                previewResult!.imageBytes,
-                                fit: BoxFit.contain,
-                                gaplessPlayback: true,
-                                errorBuilder: (_, _, _) => _MediaPlaceholder(
-                                  compact: compact,
-                                  mediaType: targetMediaType,
-                                ),
-                              )
+                            ? previewResult.canCompare
+                                  ? StudioImageComparisonFrame(
+                                      beforeImage: MemoryImage(
+                                        previewResult.beforeImageBytes,
+                                      ),
+                                      afterImage: MemoryImage(
+                                        previewResult.afterImageBytes,
+                                      ),
+                                      singleImage: MemoryImage(
+                                        previewResult.imageBytes,
+                                      ),
+                                      mode: _comparisonEnabled
+                                          ? _comparisonMode
+                                          : StudioComparisonMode.single,
+                                      divider: _comparisonDivider,
+                                      onDividerChanged: (value) {
+                                        setState(() {
+                                          _comparisonDivider = value;
+                                        });
+                                      },
+                                      followPointer:
+                                          _comparisonEnabled &&
+                                          _comparisonMode ==
+                                              StudioComparisonMode.wipe,
+                                      beforeLabel:
+                                          previewResult.targetMediaType ==
+                                              'video'
+                                          ? '原视频帧'
+                                          : '原图',
+                                      afterLabel: '换脸结果',
+                                    )
+                                  : Image.memory(
+                                      previewResult.imageBytes,
+                                      fit: BoxFit.contain,
+                                      gaplessPlayback: true,
+                                      errorBuilder: (_, _, _) =>
+                                          _MediaPlaceholder(
+                                            compact: widget.compact,
+                                            mediaType: widget.targetMediaType,
+                                          ),
+                                    )
                             : _MediaPlaceholder(
-                                compact: compact,
-                                mediaType: targetMediaType,
+                                compact: widget.compact,
+                                mediaType: widget.targetMediaType,
                               ),
                       ),
-                      if (onOpenPreviewResult != null)
+                      if (widget.onOpenPreviewResult != null)
                         Positioned(
-                          right: compact ? 8 : 10,
-                          bottom: compact ? 8 : 10,
+                          right: widget.compact ? 8 : 10,
+                          bottom: widget.compact ? 8 : 10,
                           child: const _PreviewActionBadge(label: '点击全屏查看'),
                         ),
                     ],
@@ -1441,43 +2419,85 @@ class _WorkspacePreviewPanel extends StatelessWidget {
               ),
             ),
           ),
-          SizedBox(height: compact ? 10 : 12),
+          SizedBox(height: widget.compact ? 12 : 14),
+          Row(
+            children: [
+              Text(
+                '预览帧',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                _frameSliderLabel(currentFrame, videoFrameTotal),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+          Slider(
+            value: sliderValue,
+            min: 0,
+            max: sliderMaxFrame.toDouble(),
+            divisions: _showVideoSlider ? sliderMaxFrame : 1,
+            label: '$currentFrame',
+            onChanged: !_canScrubVideo || widget.onPreviewFrameSelected == null
+                ? null
+                : (nextValue) {
+                    setState(() {
+                      _sliderFrameValue = nextValue;
+                    });
+                  },
+            onChangeEnd:
+                !_canScrubVideo || widget.onPreviewFrameSelected == null
+                ? null
+                : (nextValue) async {
+                    final nextFrame = nextValue.round();
+                    setState(() {
+                      _sliderFrameValue = nextFrame.toDouble();
+                    });
+                    await widget.onPreviewFrameSelected!(nextFrame);
+                    if (!mounted) {
+                      return;
+                    }
+                    setState(() {
+                      _sliderFrameValue = null;
+                    });
+                  },
+          ),
+          SizedBox(height: widget.compact ? 10 : 12),
+          _buildFaceSelectorControls(theme),
+          SizedBox(height: widget.compact ? 10 : 12),
           Text(
-            previewMessage,
+            widget.previewMessage,
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
               height: 1.35,
             ),
           ),
           if (previewResult != null) ...[
-            SizedBox(height: compact ? 10 : 12),
+            SizedBox(height: widget.compact ? 10 : 12),
             Wrap(
-              spacing: compact ? 8 : 10,
-              runSpacing: compact ? 8 : 10,
+              spacing: widget.compact ? 8 : 10,
+              runSpacing: widget.compact ? 8 : 10,
               children: [
                 _PreviewMetaChip(
-                  label: '${previewResult!.width}x${previewResult!.height}',
+                  label: '${previewResult.width}x${previewResult.height}',
                 ),
-                _PreviewMetaChip(label: previewResult!.previewModeLabel),
-                _PreviewMetaChip(label: previewResult!.previewResolution),
-                if (previewResult!.targetMediaType == 'video')
-                  _PreviewMetaChip(label: '帧 ${previewResult!.frameNumber}'),
-                _PreviewMetaChip(label: previewResult!.orientationLabel),
+                _PreviewMetaChip(label: previewResult.previewModeLabel),
+                _PreviewMetaChip(label: previewResult.previewResolution),
+                if (previewResult.targetMediaType == 'video')
+                  _PreviewMetaChip(
+                    label: previewResult.videoFrameTotal == null
+                        ? '帧 ${previewResult.frameNumber}'
+                        : '帧 ${previewResult.frameNumber} / ${previewResult.videoFrameTotal! - 1}',
+                  ),
+                _PreviewMetaChip(label: previewResult.orientationLabel),
               ],
             ),
           ],
-          SizedBox(height: compact ? 12 : 14),
-          FilledButton.icon(
-            onPressed:
-                bridgeOnline && canPreview && !previewBusy && onPreview != null
-                ? () => onPreview!()
-                : null,
-            icon: Icon(Icons.preview_outlined, size: compact ? 18 : 20),
-            label: Text(previewResult == null ? '生成预览' : '重新生成预览'),
-            style: FilledButton.styleFrom(
-              minimumSize: Size(0, compact ? 38 : 42),
-            ),
-          ),
         ],
       ),
     );
@@ -1524,6 +2544,131 @@ class _PreviewActionBadge extends StatelessWidget {
         child: Text(
           label,
           style: theme.textTheme.labelMedium?.copyWith(color: Colors.white),
+        ),
+      ),
+    );
+  }
+}
+
+class _FaceSelectorEmptyState extends StatelessWidget {
+  const _FaceSelectorEmptyState({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface.withValues(alpha: 0.38),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
+        ),
+      ),
+      child: Text(
+        message,
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+}
+
+class _FaceChoiceTile extends StatelessWidget {
+  const _FaceChoiceTile({
+    required this.face,
+    required this.compact,
+    required this.selected,
+    required this.enabled,
+    required this.onSelected,
+  });
+
+  final _PreviewFaceChoice face;
+  final bool compact;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final size = compact ? 58.0 : 66.0;
+    final borderColor = selected
+        ? theme.colorScheme.primary
+        : theme.colorScheme.outlineVariant.withValues(alpha: 0.42);
+    final backgroundColor = selected
+        ? theme.colorScheme.primaryContainer.withValues(alpha: 0.26)
+        : theme.colorScheme.surface.withValues(alpha: 0.42);
+
+    return Tooltip(
+      message: '人脸 #${face.index}',
+      child: InkWell(
+        onTap: enabled ? onSelected : null,
+        borderRadius: BorderRadius.circular(14),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          width: compact ? 76 : 86,
+          padding: const EdgeInsets.all(7),
+          decoration: BoxDecoration(
+            color: backgroundColor,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: borderColor, width: selected ? 2 : 1),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Stack(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: SizedBox(
+                      width: size,
+                      height: size,
+                      child: face.imageBytes.isEmpty
+                          ? Icon(
+                              Icons.face_retouching_natural_rounded,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            )
+                          : Image.memory(
+                              face.imageBytes,
+                              fit: BoxFit.cover,
+                              gaplessPlayback: true,
+                            ),
+                    ),
+                  ),
+                  if (selected)
+                    Positioned(
+                      right: 3,
+                      top: 3,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.primary,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.check_rounded,
+                          size: 14,
+                          color: theme.colorScheme.onPrimary,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 5),
+              Text(
+                '#${face.index}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1610,709 +2755,11 @@ class _WorkspaceSubmitPanel extends StatelessWidget {
   }
 }
 
-class _WorkspaceOptionsPanel extends StatefulWidget {
-  const _WorkspaceOptionsPanel({
-    this.compact = false,
-    required this.busy,
-    required this.draft,
-    required this.schema,
-    required this.state,
-    required this.onUpdateOptions,
-    required this.onResetOptions,
-  });
-
-  final bool compact;
-  final bool busy;
-  final _WorkspaceDraft draft;
-  final _WorkspaceOptionsSchema? schema;
-  final _WorkspaceOptionsState state;
-  final Future<void> Function(Map<String, dynamic> payload) onUpdateOptions;
-  final Future<void> Function() onResetOptions;
-
-  @override
-  State<_WorkspaceOptionsPanel> createState() => _WorkspaceOptionsPanelState();
-}
-
-class _WorkspaceOptionsPanelState extends State<_WorkspaceOptionsPanel> {
-  static const List<String> _orderedFieldKeys = <String>[
-    'processors',
-    'face_swapper_model',
-    'face_swapper_pixel_boost',
-    'face_swapper_weight',
-    'face_enhancer_model',
-    'face_enhancer_blend',
-    'face_enhancer_weight',
-    'frame_enhancer_model',
-    'frame_enhancer_blend',
-    'output_image_quality',
-    'output_image_scale',
-    'output_video_encoder',
-    'output_video_preset',
-    'output_video_quality',
-    'output_video_scale',
-    'output_video_fps',
-    'preview_mode',
-    'preview_resolution',
-    'preview_frame_number',
-  ];
-
-  final Map<String, double> _numericDrafts = <String, double>{};
-  late final Map<String, TextEditingController> _textControllers;
-
-  @override
-  void initState() {
-    super.initState();
-    _textControllers = <String, TextEditingController>{
-      'output_video_fps': TextEditingController(),
-      'preview_frame_number': TextEditingController(),
-    };
-    _syncWithState();
-  }
-
-  @override
-  void didUpdateWidget(covariant _WorkspaceOptionsPanel oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _syncWithState();
-  }
-
-  @override
-  void dispose() {
-    for (final controller in _textControllers.values) {
-      controller.dispose();
-    }
-    super.dispose();
-  }
-
-  void _syncWithState() {
-    final schema = widget.schema;
-    if (schema == null) {
-      return;
-    }
-
-    for (final field in schema.fields.values) {
-      final value = widget.state.options[field.key];
-      if (field.usesTextInput) {
-        final controller = _textControllers[field.key];
-        if (controller != null) {
-          final nextText = field.formatEditableValue(value);
-          if (controller.text != nextText) {
-            controller.text = nextText;
-          }
-        }
-        continue;
-      }
-      if (field.isNumeric) {
-        _numericDrafts[field.key] = field.asDouble(value);
-      }
-    }
-  }
-
-  Future<void> _applyTextFieldValue(_WorkspaceOptionField field) async {
-    final controller = _textControllers[field.key];
-    if (controller == null) {
-      return;
-    }
-    final parsedValue = field.parseEditableValue(controller.text);
-    if (parsedValue == null) {
-      _syncWithState();
-      setState(() {});
-      return;
-    }
-    await widget.onUpdateOptions(<String, dynamic>{field.key: parsedValue});
-  }
-
-  bool _isFieldVisible(_WorkspaceOptionField field) {
-    final targetMediaType =
-        widget.state.targetMediaType ?? widget.draft.targetMediaType;
-    if (!field.supportsTargetMediaType(targetMediaType)) {
-      return false;
-    }
-
-    final processors = widget.state.stringListValue('processors');
-    if (field.key.startsWith('face_swapper_') &&
-        !processors.contains('face_swapper')) {
-      return false;
-    }
-    if (field.key.startsWith('face_enhancer_') &&
-        !processors.contains('face_enhancer')) {
-      return false;
-    }
-    if (field.key.startsWith('frame_enhancer_') &&
-        !processors.contains('frame_enhancer')) {
-      return false;
-    }
-    return true;
-  }
-
-  List<_WorkspaceOptionField> _visibleFields() {
-    final schema = widget.schema;
-    if (schema == null) {
-      return const <_WorkspaceOptionField>[];
-    }
-
-    final ordered = <_WorkspaceOptionField>[];
-    final usedKeys = <String>{};
-    for (final key in _orderedFieldKeys) {
-      final field = schema.fields[key];
-      if (field != null && _isFieldVisible(field)) {
-        ordered.add(field);
-        usedKeys.add(key);
-      }
-    }
-    for (final field in schema.fields.values) {
-      if (!usedKeys.contains(field.key) && _isFieldVisible(field)) {
-        ordered.add(field);
-      }
-    }
-    return ordered;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final compact = widget.compact;
-    final sectionSpacing = compact ? 12.0 : 14.0;
-    final fields = _visibleFields();
-
-    return Container(
-      padding: EdgeInsets.all(compact ? 14 : 18),
-      decoration: BoxDecoration(
-        color: theme.cardTheme.color,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.35),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '常用参数',
-                  style:
-                      (compact
-                              ? theme.textTheme.titleSmall
-                              : theme.textTheme.titleMedium)
-                          ?.copyWith(fontWeight: FontWeight.w800),
-                ),
-              ),
-              FilledButton.tonalIcon(
-                onPressed: widget.busy ? null : () => widget.onResetOptions(),
-                icon: Icon(Icons.restart_alt_rounded, size: compact ? 18 : 20),
-                label: const Text('重置默认'),
-                style: FilledButton.styleFrom(
-                  minimumSize: Size(0, compact ? 36 : 40),
-                ),
-              ),
-            ],
-          ),
-          SizedBox(height: compact ? 8 : 10),
-          Text(
-            '直接写入工作台参数草稿，后续预览与入队都会使用这里的当前值。',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-              height: 1.35,
-            ),
-          ),
-          SizedBox(height: compact ? 12 : 14),
-          if (widget.schema == null || widget.state.options.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 24),
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const SizedBox(
-                      width: 26,
-                      height: 26,
-                      child: CircularProgressIndicator(strokeWidth: 2.4),
-                    ),
-                    const SizedBox(height: 12),
-                    Text('正在加载参数面板', style: theme.textTheme.bodyMedium),
-                  ],
-                ),
-              ),
-            )
-          else
-            ..._buildSections(context, fields, sectionSpacing),
-        ],
-      ),
-    );
-  }
-
-  List<Widget> _buildSections(
-    BuildContext context,
-    List<_WorkspaceOptionField> fields,
-    double sectionSpacing,
-  ) {
-    final grouped = <String, List<_WorkspaceOptionField>>{};
-    for (final field in fields) {
-      grouped
-          .putIfAbsent(field.section, () => <_WorkspaceOptionField>[])
-          .add(field);
-    }
-
-    final widgets = <Widget>[];
-    final orderedSections = <String>[
-      'processors',
-      'enhancers',
-      'output',
-      'preview',
-    ];
-
-    for (final section in orderedSections) {
-      final sectionFields = grouped[section];
-      if (sectionFields == null || sectionFields.isEmpty) {
-        continue;
-      }
-      widgets.add(_WorkspaceSectionTitle(title: _sectionLabel(section)));
-      widgets.add(SizedBox(height: widget.compact ? 8 : 10));
-      widgets.addAll(
-        sectionFields.map(
-          (field) => Padding(
-            padding: EdgeInsets.only(bottom: sectionSpacing),
-            child: _buildField(context, field),
-          ),
-        ),
-      );
-    }
-    return widgets;
-  }
-
-  String _sectionLabel(String section) {
-    return switch (section) {
-      'processors' => '处理器与模型',
-      'enhancers' => '增强参数',
-      'output' => '输出参数',
-      'preview' => '预览参数',
-      _ => section,
-    };
-  }
-
-  Widget _buildField(BuildContext context, _WorkspaceOptionField field) {
-    final theme = Theme.of(context);
-    final value = widget.state.options[field.key];
-
-    if (field.type == 'multi_select') {
-      final selectedValues = widget.state.stringListValue(field.key);
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            field.label,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: field.choices.map((choice) {
-              final selected = selectedValues.contains(choice);
-              return FilterChip(
-                selected: selected,
-                label: Text(choice),
-                onSelected: widget.busy
-                    ? null
-                    : (nextSelected) {
-                        final nextValues = List<String>.from(selectedValues);
-                        if (nextSelected) {
-                          if (!nextValues.contains(choice)) {
-                            nextValues.add(choice);
-                          }
-                        } else {
-                          nextValues.remove(choice);
-                        }
-                        widget.onUpdateOptions(<String, dynamic>{
-                          field.key: nextValues,
-                        });
-                      },
-              );
-            }).toList(),
-          ),
-        ],
-      );
-    }
-
-    if (field.type == 'select') {
-      final currentValue = value == null ? null : '$value';
-      return DropdownButtonFormField<String>(
-        initialValue: field.choices.contains(currentValue)
-            ? currentValue
-            : null,
-        items: field.choices
-            .map(
-              (choice) => DropdownMenuItem<String>(
-                value: choice,
-                child: Text(choice, overflow: TextOverflow.ellipsis),
-              ),
-            )
-            .toList(),
-        onChanged: widget.busy
-            ? null
-            : (nextValue) {
-                if (nextValue == null) {
-                  return;
-                }
-                widget.onUpdateOptions(<String, dynamic>{field.key: nextValue});
-              },
-        decoration: InputDecoration(
-          labelText: field.label,
-          helperText: field.dependsOn == null
-              ? null
-              : '受 ${field.dependsOn} 影响',
-        ),
-      );
-    }
-
-    if (field.usesTextInput) {
-      final controller = _textControllers[field.key]!;
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            field.label,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: controller,
-                  enabled: !widget.busy,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  decoration: InputDecoration(
-                    hintText: field.key == 'preview_frame_number'
-                        ? '输入预览帧号'
-                        : '输入输出 FPS',
-                    helperText: field.minimum == null || field.maximum == null
-                        ? null
-                        : '范围 ${field.minimum} - ${field.maximum}',
-                  ),
-                  onSubmitted: (_) => _applyTextFieldValue(field),
-                ),
-              ),
-              const SizedBox(width: 10),
-              FilledButton.tonalIcon(
-                onPressed: widget.busy
-                    ? null
-                    : () => _applyTextFieldValue(field),
-                icon: const Icon(Icons.check_rounded),
-                label: const Text('应用'),
-                style: FilledButton.styleFrom(
-                  minimumSize: Size(0, widget.compact ? 38 : 40),
-                ),
-              ),
-            ],
-          ),
-        ],
-      );
-    }
-
-    final currentValue = _numericDrafts[field.key] ?? field.asDouble(value);
-    final divisions = field.divisions;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                field.label,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            Text(
-              field.formatValue(field.castSliderValue(currentValue)),
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ),
-        Slider(
-          value: currentValue.clamp(field.minimum ?? 0.0, field.maximum ?? 1.0),
-          min: field.minimum ?? 0.0,
-          max: field.maximum ?? 1.0,
-          divisions: divisions,
-          label: field.formatValue(field.castSliderValue(currentValue)),
-          onChanged: widget.busy
-              ? null
-              : (nextValue) {
-                  setState(() {
-                    _numericDrafts[field.key] = nextValue;
-                  });
-                },
-          onChangeEnd: widget.busy
-              ? null
-              : (nextValue) {
-                  final normalizedValue = field.castSliderValue(nextValue);
-                  widget.onUpdateOptions(<String, dynamic>{
-                    field.key: normalizedValue,
-                  });
-                },
-        ),
-      ],
-    );
-  }
-}
-
-class _WorkspaceSectionTitle extends StatelessWidget {
-  const _WorkspaceSectionTitle({required this.title});
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Text(
-      title,
-      style: theme.textTheme.labelLarge?.copyWith(
-        color: theme.colorScheme.onSurfaceVariant,
-        letterSpacing: 0.4,
-        fontWeight: FontWeight.w700,
-      ),
-    );
-  }
-}
-
-class _WorkspaceOptionsSchema {
-  const _WorkspaceOptionsSchema({
-    required this.version,
-    required this.targetMediaType,
-    required this.fields,
-  });
-
-  factory _WorkspaceOptionsSchema.fromJson(Map<String, dynamic> json) {
-    final rawFields =
-        (json['fields'] as Map<String, dynamic>? ?? const <String, dynamic>{})
-            .cast<String, dynamic>();
-    return _WorkspaceOptionsSchema(
-      version: (json['version'] as num?)?.toInt() ?? 1,
-      targetMediaType: json['target_media_type'] as String?,
-      fields: rawFields.map(
-        (key, value) => MapEntry(
-          key,
-          _WorkspaceOptionField.fromJson(key, value as Map<String, dynamic>),
-        ),
-      ),
-    );
-  }
-
-  final int version;
-  final String? targetMediaType;
-  final Map<String, _WorkspaceOptionField> fields;
-}
-
-class _WorkspaceOptionsState {
-  const _WorkspaceOptionsState({
-    required this.version,
-    required this.targetMediaType,
-    required this.options,
-  });
-
-  const _WorkspaceOptionsState.empty()
-    : version = 1,
-      targetMediaType = null,
-      options = const <String, dynamic>{};
-
-  factory _WorkspaceOptionsState.fromJson(Map<String, dynamic> json) {
-    final rawOptions =
-        (json['options'] as Map<String, dynamic>? ?? const <String, dynamic>{})
-            .cast<String, dynamic>();
-    final normalizedOptions = <String, dynamic>{};
-    for (final entry in rawOptions.entries) {
-      if (entry.value is List<dynamic>) {
-        normalizedOptions[entry.key] = (entry.value as List<dynamic>)
-            .map((item) => '$item')
-            .toList();
-      } else {
-        normalizedOptions[entry.key] = entry.value;
-      }
-    }
-    return _WorkspaceOptionsState(
-      version: (json['version'] as num?)?.toInt() ?? 1,
-      targetMediaType: json['target_media_type'] as String?,
-      options: normalizedOptions,
-    );
-  }
-
-  final int version;
-  final String? targetMediaType;
-  final Map<String, dynamic> options;
-
-  List<String> stringListValue(String key) {
-    final rawValue = options[key];
-    if (rawValue is List<String>) {
-      return rawValue;
-    }
-    if (rawValue is List<dynamic>) {
-      return rawValue.map((item) => '$item').toList();
-    }
-    return const <String>[];
-  }
-}
-
-class _WorkspaceOptionField {
-  const _WorkspaceOptionField({
-    required this.key,
-    required this.type,
-    required this.section,
-    required this.label,
-    required this.choices,
-    required this.visibleFor,
-    this.dependsOn,
-    this.minimum,
-    this.maximum,
-    this.step,
-  });
-
-  factory _WorkspaceOptionField.fromJson(
-    String key,
-    Map<String, dynamic> json,
-  ) {
-    return _WorkspaceOptionField(
-      key: key,
-      type: '${json['type'] ?? 'select'}',
-      section: '${json['section'] ?? 'misc'}',
-      label: '${json['label'] ?? key}',
-      choices: (json['choices'] as List<dynamic>? ?? const <dynamic>[])
-          .map((item) => '$item')
-          .toList(),
-      visibleFor:
-          (json['visible_for'] as List<dynamic>? ?? const <dynamic>['all'])
-              .map((item) => '$item')
-              .toList(),
-      dependsOn: json['depends_on'] as String?,
-      minimum: (json['minimum'] as num?)?.toDouble(),
-      maximum: (json['maximum'] as num?)?.toDouble(),
-      step: (json['step'] as num?)?.toDouble(),
-    );
-  }
-
-  final String key;
-  final String type;
-  final String section;
-  final String label;
-  final List<String> choices;
-  final List<String> visibleFor;
-  final String? dependsOn;
-  final double? minimum;
-  final double? maximum;
-  final double? step;
-
-  bool get isNumeric => type == 'int' || type == 'float';
-
-  bool get usesTextInput =>
-      key == 'output_video_fps' || key == 'preview_frame_number';
-
-  bool supportsTargetMediaType(String? targetMediaType) {
-    if (visibleFor.contains('all')) {
-      return true;
-    }
-    if (targetMediaType == null) {
-      return false;
-    }
-    return visibleFor.contains(targetMediaType);
-  }
-
-  double asDouble(dynamic value) {
-    if (value is num) {
-      return value.toDouble();
-    }
-    final parsed = double.tryParse('$value');
-    return parsed ?? minimum ?? 0;
-  }
-
-  int? get divisions {
-    if (minimum == null || maximum == null || step == null || step == 0) {
-      return null;
-    }
-    final total = ((maximum! - minimum!) / step!).round();
-    if (total <= 0 || total > 240) {
-      return null;
-    }
-    return total;
-  }
-
-  dynamic castSliderValue(double value) {
-    if (type == 'int') {
-      return value.round();
-    }
-    final digits = step != null && step! < 1 ? 2 : 0;
-    return double.parse(value.toStringAsFixed(digits));
-  }
-
-  String formatValue(dynamic value) {
-    if (value == null) {
-      return '--';
-    }
-    if (value is int) {
-      return '$value';
-    }
-    if (value is double) {
-      if ((value - value.round()).abs() < 0.0001) {
-        return value.toStringAsFixed(0);
-      }
-      return value.toStringAsFixed(2);
-    }
-    return '$value';
-  }
-
-  String formatEditableValue(dynamic value) {
-    if (value == null) {
-      return '';
-    }
-    return '$value';
-  }
-
-  dynamic parseEditableValue(String rawValue) {
-    final trimmed = rawValue.trim();
-    if (trimmed.isEmpty) {
-      return null;
-    }
-    if (type == 'int') {
-      final parsed = int.tryParse(trimmed);
-      if (parsed == null) {
-        return null;
-      }
-      if (minimum != null && parsed < minimum!) {
-        return minimum!.round();
-      }
-      if (maximum != null && parsed > maximum!) {
-        return maximum!.round();
-      }
-      return parsed;
-    }
-
-    final parsed = double.tryParse(trimmed);
-    if (parsed == null) {
-      return null;
-    }
-    var normalized = parsed;
-    if (minimum != null && normalized < minimum!) {
-      normalized = minimum!;
-    }
-    if (maximum != null && normalized > maximum!) {
-      normalized = maximum!;
-    }
-    return double.parse(normalized.toStringAsFixed(2));
-  }
-}
-
 class _WorkspacePreviewResult {
   const _WorkspacePreviewResult({
     required this.imageBytes,
+    required this.beforeImageBytes,
+    required this.afterImageBytes,
     required this.mimeType,
     required this.width,
     required this.height,
@@ -2321,11 +2768,17 @@ class _WorkspacePreviewResult {
     required this.previewMode,
     required this.previewResolution,
     required this.frameNumber,
+    required this.videoFrameTotal,
+    required this.faceChoices,
   });
 
   factory _WorkspacePreviewResult.fromJson(Map<String, dynamic> json) {
+    final rawFaceChoices =
+        json['face_choices'] as List<dynamic>? ?? const <dynamic>[];
     return _WorkspacePreviewResult(
-      imageBytes: base64Decode('${json['image_base64'] ?? ''}'),
+      imageBytes: _decodeImageBytes(json['image_base64']),
+      beforeImageBytes: _decodeImageBytes(json['before_image_base64']),
+      afterImageBytes: _decodeImageBytes(json['after_image_base64']),
       mimeType: '${json['mime_type'] ?? 'image/png'}',
       width: (json['width'] as num?)?.toInt() ?? 0,
       height: (json['height'] as num?)?.toInt() ?? 0,
@@ -2334,10 +2787,28 @@ class _WorkspacePreviewResult {
       previewMode: '${json['preview_mode'] ?? 'default'}',
       previewResolution: '${json['preview_resolution'] ?? '1024x1024'}',
       frameNumber: (json['frame_number'] as num?)?.toInt() ?? 0,
+      videoFrameTotal: (json['video_frame_total'] as num?)?.toInt(),
+      faceChoices: [
+        for (final item in rawFaceChoices)
+          if (item is Map<String, dynamic>)
+            _PreviewFaceChoice.fromJson(item)
+          else if (item is Map)
+            _PreviewFaceChoice.fromJson(item.cast<String, dynamic>()),
+      ],
     );
   }
 
+  static Uint8List _decodeImageBytes(dynamic value) {
+    final rawValue = '$value';
+    if (value == null || rawValue.isEmpty || rawValue == 'null') {
+      return Uint8List(0);
+    }
+    return base64Decode(rawValue);
+  }
+
   final Uint8List imageBytes;
+  final Uint8List beforeImageBytes;
+  final Uint8List afterImageBytes;
   final String mimeType;
   final int width;
   final int height;
@@ -2346,6 +2817,11 @@ class _WorkspacePreviewResult {
   final String previewMode;
   final String previewResolution;
   final int frameNumber;
+  final int? videoFrameTotal;
+  final List<_PreviewFaceChoice> faceChoices;
+
+  bool get canCompare =>
+      beforeImageBytes.isNotEmpty && afterImageBytes.isNotEmpty;
 
   String get previewModeLabel {
     return switch (previewMode) {
@@ -2364,6 +2840,36 @@ class _WorkspacePreviewResult {
   }
 }
 
+class _PreviewFaceChoice {
+  const _PreviewFaceChoice({
+    required this.index,
+    required this.imageBytes,
+    required this.boundingBox,
+    required this.selected,
+  });
+
+  factory _PreviewFaceChoice.fromJson(Map<String, dynamic> json) {
+    final rawBoundingBox =
+        json['bounding_box'] as List<dynamic>? ?? const <dynamic>[];
+    return _PreviewFaceChoice(
+      index: (json['index'] as num?)?.toInt() ?? 0,
+      imageBytes: _WorkspacePreviewResult._decodeImageBytes(
+        json['image_base64'],
+      ),
+      boundingBox: [
+        for (final item in rawBoundingBox)
+          item is num ? item.toDouble() : double.tryParse('$item') ?? 0,
+      ],
+      selected: json['selected'] == true,
+    );
+  }
+
+  final int index;
+  final Uint8List imageBytes;
+  final List<double> boundingBox;
+  final bool selected;
+}
+
 class _QueueBoard extends StatefulWidget {
   const _QueueBoard();
 
@@ -2377,6 +2883,9 @@ class _QueueBoardState extends State<_QueueBoard>
   Timer? _pollTimer;
 
   bool _requestInFlight = false;
+  bool _queueRunInFlight = false;
+  bool _clearCompletedInFlight = false;
+  bool _queueTaskActionInFlight = false;
   bool _bridgeOnline = false;
   List<_QueueTask> _queueTasks = <_QueueTask>[];
   _QueueRunnerState _queueRunnerState = const _QueueRunnerState();
@@ -2397,6 +2906,16 @@ class _QueueBoardState extends State<_QueueBoard>
     super.dispose();
   }
 
+  void _showMessage(String message) {
+    if (!mounted) {
+      return;
+    }
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
   Future<void> _refresh() async {
     if (_requestInFlight) {
       return;
@@ -2412,10 +2931,12 @@ class _QueueBoardState extends State<_QueueBoard>
 
       setState(() {
         _bridgeOnline = '${status['state'] ?? ''}' != 'bridge_offline';
-        _queueTasks = (queue['tasks'] as List<dynamic>? ?? const <dynamic>[])
-            .cast<Map<String, dynamic>>()
-            .map(_QueueTask.fromJson)
-            .toList();
+        _queueTasks =
+            (queue['tasks'] as List<dynamic>? ?? const <dynamic>[])
+                .cast<Map<String, dynamic>>()
+                .map(_QueueTask.fromJson)
+                .toList()
+              ..sort(_compareQueueTasksByNewest);
         _queueRunnerState = _QueueRunnerState.fromJson(
           (queue['runner'] as Map<String, dynamic>? ??
               const <String, dynamic>{}),
@@ -2433,23 +2954,226 @@ class _QueueBoardState extends State<_QueueBoard>
     }
   }
 
+  int _compareQueueTasksByNewest(_QueueTask a, _QueueTask b) {
+    final timestampCompare = b.sortTimestamp.compareTo(a.sortTimestamp);
+    if (timestampCompare != 0) {
+      return timestampCompare;
+    }
+    return b.jobId.compareTo(a.jobId);
+  }
+
   Future<void> _runQueue() async {
+    if (_queueRunInFlight || _queueRunnerState.active) {
+      return;
+    }
+    setState(() {
+      _queueRunInFlight = true;
+    });
     try {
-      await _client.runQueue();
-    } catch (_) {
+      final result = await _client.runQueue();
+      final runner = result['runner'] as Map<String, dynamic>?;
+      if (runner != null && runner['active'] == true) {
+        _showMessage('队列已开始执行。');
+      }
+    } catch (error) {
+      _showMessage('执行队列失败：$error');
     } finally {
       await Future<void>.delayed(const Duration(milliseconds: 350));
       await _refresh();
+      if (mounted) {
+        setState(() {
+          _queueRunInFlight = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _clearCompletedQueueTasks() async {
+    if (_clearCompletedInFlight) {
+      return;
+    }
+    setState(() {
+      _clearCompletedInFlight = true;
+    });
+    try {
+      final result = await _client.clearCompletedQueueTasks();
+      final removedCount = (result['removed_count'] as num?)?.toInt() ?? 0;
+      _showMessage(
+        removedCount == 0
+            ? '没有需要清理的已完成任务。'
+            : '已清理 $removedCount 个已完成任务记录，作品文件已保留。',
+      );
+    } catch (error) {
+      _showMessage('清理已完成任务失败：$error');
+    } finally {
+      await _refresh();
+      if (mounted) {
+        setState(() {
+          _clearCompletedInFlight = false;
+        });
+      }
     }
   }
 
   Future<void> _deleteQueueTask(String jobId) async {
+    if (_queueTaskActionInFlight) {
+      return;
+    }
+    final confirmed = await _confirmWorkspaceAction(
+      context,
+      title: '删除队列任务',
+      message: '确定删除队列任务 $jobId 吗？此操作不会删除已经生成的作品文件。',
+      confirmLabel: '删除',
+      destructive: true,
+    );
+    if (!mounted || !confirmed) {
+      return;
+    }
+
+    setState(() {
+      _queueTaskActionInFlight = true;
+    });
     try {
-      await _client.deleteQueueTask(jobId);
-    } catch (_) {
+      final result = await _client.deleteQueueTask(jobId);
+      if (result['ok'] == false) {
+        _showMessage('${result['message'] ?? '删除任务失败。'}');
+      } else {
+        _showMessage('已删除任务：$jobId');
+      }
+    } catch (error) {
+      _showMessage('删除任务失败：$error');
     } finally {
       await _refresh();
+      if (mounted) {
+        setState(() {
+          _queueTaskActionInFlight = false;
+        });
+      }
     }
+  }
+
+  Future<void> _cancelQueueTask(_QueueTask task) async {
+    if (_queueTaskActionInFlight || task.isCancelling) {
+      return;
+    }
+    final confirmed = await _confirmWorkspaceAction(
+      context,
+      title: task.isActive ? '取消运行中任务' : '取消队列任务',
+      message: task.isActive
+          ? '确定取消正在生成的任务 ${task.jobId} 吗？已生成的作品文件会保留。'
+          : '确定取消队列任务 ${task.jobId} 吗？此操作会将任务从生成队列移除。',
+      confirmLabel: '取消任务',
+      destructive: true,
+    );
+    if (!mounted || !confirmed) {
+      return;
+    }
+
+    setState(() {
+      _queueTaskActionInFlight = true;
+    });
+    try {
+      final result = await _client.cancelQueueTask(task.jobId);
+      if (result['ok'] == false) {
+        _showMessage('${result['message'] ?? '取消任务失败。'}');
+      } else {
+        _showMessage('${result['message'] ?? '已取消任务：${task.jobId}'}');
+      }
+    } catch (error) {
+      _showMessage('取消任务失败：$error');
+    } finally {
+      await _refresh();
+      if (mounted) {
+        setState(() {
+          _queueTaskActionInFlight = false;
+        });
+      }
+    }
+  }
+
+  Future<String?> _prepareVideoPlaybackPath(String path) async {
+    try {
+      final result = await _client.prepareVideoPlayback(path);
+      if (result['ok'] != true) {
+        _showMessage('${result['message'] ?? '视频播放准备失败。'}');
+        return null;
+      }
+      final playbackPath = '${result['playback_path'] ?? path}';
+      return playbackPath.isEmpty || playbackPath == 'null'
+          ? path
+          : playbackPath;
+    } catch (error) {
+      _showMessage('视频播放准备失败：$error');
+      return null;
+    }
+  }
+
+  Future<void> _openQueueTaskOutput(_QueueTask task) async {
+    final outputPath = task.outputPath;
+    if (!task.canOpenOutput || outputPath == null) {
+      _showMessage('当前任务还没有可打开的生成作品。');
+      return;
+    }
+    if (!await File(outputPath).exists()) {
+      _showMessage('生成作品文件不存在：$outputPath');
+      return;
+    }
+
+    final targetPath = task.targetPath;
+    final canCompareWithTarget =
+        targetPath != null &&
+        task.targetMediaType == task.outputMediaType &&
+        await File(targetPath).exists();
+
+    if (!mounted) {
+      return;
+    }
+
+    if (task.outputMediaType == 'video') {
+      final playbackPath = await _prepareVideoPlaybackPath(outputPath);
+      if (!mounted || playbackPath == null) {
+        return;
+      }
+      if (canCompareWithTarget) {
+        final targetPlaybackPath = await _prepareVideoPlaybackPath(targetPath);
+        if (!mounted || targetPlaybackPath == null) {
+          return;
+        }
+        await showStudioVideoComparisonViewer(
+          context,
+          beforeFilePath: targetPlaybackPath,
+          afterFilePath: playbackPath,
+          title: task.jobId,
+        );
+        return;
+      }
+      await showStudioVideoViewer(
+        context,
+        filePath: playbackPath,
+        title: task.jobId,
+      );
+      return;
+    }
+
+    if (task.outputMediaType == 'image') {
+      if (canCompareWithTarget) {
+        await showStudioImageComparisonViewer(
+          context,
+          beforeFilePath: targetPath,
+          afterFilePath: outputPath,
+          title: task.jobId,
+        );
+        return;
+      }
+      await showStudioImageViewer(
+        context,
+        filePath: outputPath,
+        title: task.jobId,
+      );
+      return;
+    }
+
+    _showMessage('当前输出类型暂不支持全屏预览。');
   }
 
   @override
@@ -2457,6 +3181,9 @@ class _QueueBoardState extends State<_QueueBoard>
     super.build(context);
     final theme = Theme.of(context);
     final runner = _queueRunnerState;
+    final hasCompletedTasks = _queueTasks.any(
+      (task) => task.status == 'completed',
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2471,15 +3198,34 @@ class _QueueBoardState extends State<_QueueBoard>
                 ),
               ),
             ),
-            FilledButton.icon(
-              onPressed:
-                  _bridgeOnline &&
-                      _queueTasks.any((task) => task.status == 'queued') &&
-                      !runner.active
-                  ? _runQueue
-                  : null,
-              icon: const Icon(Icons.rocket_launch_rounded),
-              label: const Text('执行生成'),
+            const SizedBox(width: 12),
+            Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              alignment: WrapAlignment.end,
+              children: [
+                OutlinedButton.icon(
+                  onPressed:
+                      _bridgeOnline &&
+                          hasCompletedTasks &&
+                          !_clearCompletedInFlight
+                      ? _clearCompletedQueueTasks
+                      : null,
+                  icon: const Icon(Icons.cleaning_services_rounded),
+                  label: const Text('清理已完成任务'),
+                ),
+                FilledButton.icon(
+                  onPressed:
+                      _bridgeOnline &&
+                          _queueTasks.any((task) => task.status == 'queued') &&
+                          !runner.active &&
+                          !_queueRunInFlight
+                      ? _runQueue
+                      : null,
+                  icon: const Icon(Icons.rocket_launch_rounded),
+                  label: const Text('执行生成'),
+                ),
+              ],
             ),
           ],
         ),
@@ -2487,24 +3233,50 @@ class _QueueBoardState extends State<_QueueBoard>
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _QueueSummary(
-                  title: '执行器',
-                  value: runner.active ? '运行中' : '待命',
-                  detail: runner.currentJobId ?? '暂无运行中的任务',
+                Row(
+                  children: [
+                    _QueueSummary(
+                      title: '执行器',
+                      value: runner.active ? '运行中' : '待命',
+                      detail: runner.currentJobId ?? '暂无运行中的任务',
+                    ),
+                    const SizedBox(width: 12),
+                    _QueueSummary(
+                      title: '完成进度',
+                      value: '${runner.progressPercent.round()}%',
+                      detail: runner.lastError ?? '执行生成时将逐条刷新状态',
+                    ),
+                    const SizedBox(width: 12),
+                    _QueueSummary(
+                      title: '任务总数',
+                      value: '${_queueTasks.length}',
+                      detail: '包含 queued / completed / failed',
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 12),
-                _QueueSummary(
-                  title: '完成进度',
-                  value: '${runner.completedJobs}/${runner.totalJobs}',
-                  detail: runner.lastError ?? '执行生成时将逐条刷新状态',
+                const SizedBox(height: 14),
+                TweenAnimationBuilder<double>(
+                  tween: Tween<double>(
+                    begin: 0,
+                    end: (runner.progressPercent / 100).clamp(0.0, 1.0),
+                  ),
+                  duration: const Duration(milliseconds: 450),
+                  curve: Curves.easeOutCubic,
+                  builder: (context, value, _) {
+                    return LinearProgressIndicator(value: value);
+                  },
                 ),
-                const SizedBox(width: 12),
-                _QueueSummary(
-                  title: '任务总数',
-                  value: '${_queueTasks.length}',
-                  detail: '包含 queued / completed / failed',
+                const SizedBox(height: 8),
+                Text(
+                  runner.totalJobs == 0
+                      ? '队列待命'
+                      : '已处理 ${runner.processedJobs}/${runner.totalJobs} · ${runner.progressPercent.toStringAsFixed(1)}%',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),
@@ -2529,8 +3301,13 @@ class _QueueBoardState extends State<_QueueBoard>
                     final task = _queueTasks[index];
                     return _QueueTaskCard(
                       task: task,
-                      onDelete: task.isActive
+                      onOpen: task.canOpenOutput
+                          ? () => _openQueueTaskOutput(task)
+                          : null,
+                      onAction: _queueTaskActionInFlight || task.isCancelling
                           ? null
+                          : task.usesCancelAction
+                          ? () => _cancelQueueTask(task)
                           : () => _deleteQueueTask(task.jobId),
                     );
                   },
@@ -2606,8 +3383,8 @@ class _QueueSummary extends StatelessWidget {
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: theme.brightness == Brightness.dark
-              ? const Color(0x161AC6E4)
-              : const Color(0x120F9FB8),
+              ? const Color(0x24F6AA75)
+              : const Color(0x14303030),
           borderRadius: BorderRadius.circular(18),
         ),
         child: Column(
@@ -2626,98 +3403,150 @@ class _QueueSummary extends StatelessWidget {
 }
 
 class _QueueTaskCard extends StatelessWidget {
-  const _QueueTaskCard({required this.task, required this.onDelete});
+  const _QueueTaskCard({
+    required this.task,
+    required this.onOpen,
+    required this.onAction,
+  });
 
   final _QueueTask task;
-  final VoidCallback? onDelete;
+  final VoidCallback? onOpen;
+  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final usesCancelAction = task.usesCancelAction;
+    final actionColor = usesCancelAction
+        ? theme.colorScheme.error
+        : theme.colorScheme.onSurfaceVariant;
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            _QueueMediaPreview(
-              label: 'SOURCE',
-              filePath: task.primarySourcePath,
-              mediaType: task.sourceMediaType,
-              thumbnailPath: task.sourceThumbnail,
-            ),
-            const SizedBox(width: 12),
-            _QueueMediaPreview(
-              label: 'TARGET',
-              filePath: task.targetPath,
-              mediaType: task.targetMediaType,
-              thumbnailPath: task.targetThumbnail,
-              showVideoOverlays: false,
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          task.jobId,
-                          style: theme.textTheme.titleMedium,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onOpen,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _QueueMediaPreview(
+                label: 'SOURCE',
+                filePath: task.primarySourcePath,
+                mediaType: task.sourceMediaType,
+                thumbnailPath: task.sourceThumbnail,
+              ),
+              const SizedBox(width: 12),
+              _QueueMediaPreview(
+                label: 'TARGET',
+                filePath: task.targetPath,
+                mediaType: task.targetMediaType,
+                thumbnailPath: task.targetThumbnail,
+                showVideoOverlays: false,
+              ),
+              if (task.canOpenOutput) ...[
+                const SizedBox(width: 12),
+                _QueueMediaPreview(
+                  label: 'OUTPUT',
+                  filePath: task.outputPath,
+                  mediaType: task.outputMediaType,
+                  thumbnailPath: task.outputThumbnail,
+                  showVideoOverlays: false,
+                ),
+              ],
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            task.jobId,
+                            style: theme.textTheme.titleMedium,
+                          ),
                         ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _statusColor(
+                              task.status,
+                            ).withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(task.status.toUpperCase()),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '步骤 ${task.completedSteps}/${task.stepTotal} · 源 ${task.sourcePaths.length} 个文件 · ${task.progressPercent.toStringAsFixed(1)}%',
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '${task.progressPhaseLabel}：${task.progressDetail}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 6,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '目标：${task.targetPath ?? '未设置'}',
+                      style: theme.textTheme.bodySmall,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '输出：${task.outputPath ?? '未设置'}',
+                      style: theme.textTheme.bodySmall,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (task.isActive ||
+                        task.status == 'completed' ||
+                        task.status == 'failed') ...[
+                      const SizedBox(height: 10),
+                      TweenAnimationBuilder<double>(
+                        tween: Tween<double>(
+                          begin: 0,
+                          end: (task.progressPercent / 100).clamp(0.0, 1.0),
                         ),
-                        decoration: BoxDecoration(
-                          color: _statusColor(
-                            task.status,
-                          ).withValues(alpha: 0.14),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(task.status.toUpperCase()),
+                        duration: const Duration(milliseconds: 450),
+                        curve: Curves.easeOutCubic,
+                        builder: (context, value, _) {
+                          return LinearProgressIndicator(value: value);
+                        },
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '步骤 ${task.completedSteps}/${task.stepTotal} · 源 ${task.sourcePaths.length} 个文件',
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '目标：${task.targetPath ?? '未设置'}',
-                    style: theme.textTheme.bodySmall,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '输出：${task.outputPath ?? '未设置'}',
-                    style: theme.textTheme.bodySmall,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  if (task.isActive) ...[
-                    const SizedBox(height: 10),
-                    LinearProgressIndicator(
-                      value: task.stepTotal == 0
-                          ? 0
-                          : task.completedSteps / task.stepTotal,
-                    ),
                   ],
-                ],
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
-            IconButton(
-              onPressed: onDelete,
-              tooltip: '删除任务',
-              icon: const Icon(Icons.delete_outline_rounded),
-            ),
-          ],
+              const SizedBox(width: 12),
+              TextButton.icon(
+                onPressed: onAction,
+                style: TextButton.styleFrom(
+                  foregroundColor: actionColor,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
+                ),
+                icon: Icon(
+                  usesCancelAction
+                      ? Icons.cancel_outlined
+                      : Icons.delete_outline_rounded,
+                ),
+                label: Text(task.actionLabel),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -2767,8 +3596,8 @@ class _QueueMediaPreview extends StatelessWidget {
               height: 92,
               width: 120,
               color: theme.brightness == Brightness.dark
-                  ? const Color(0xFF0A1420)
-                  : const Color(0xFFEAF2F8),
+                  ? const Color(0xFF20201E)
+                  : const Color(0xFFF5F5F5),
               child: isVideo
                   ? StudioInlineVideoPlayer(
                       filePath: filePath!,
@@ -2812,6 +3641,14 @@ class _QueueTask {
     required this.targetThumbnail,
     required this.targetMediaType,
     required this.outputPath,
+    required this.outputThumbnail,
+    required this.outputMediaType,
+    required this.createdAt,
+    required this.updatedAt,
+    required this.canOpenOutput,
+    required this.progressPercent,
+    required this.progressPhase,
+    required this.progressDetail,
     required this.stepTotal,
     required this.completedSteps,
     required this.isActive,
@@ -2838,6 +3675,18 @@ class _QueueTask {
           json['target_media_type'] as String? ??
           _mediaTypeFromPath(json['target_path'] as String?),
       outputPath: json['output_path'] as String?,
+      outputThumbnail: json['output_thumbnail'] as String?,
+      outputMediaType:
+          json['output_media_type'] as String? ??
+          _mediaTypeFromPath(json['output_path'] as String?),
+      createdAt: json['created_at'] as String?,
+      updatedAt: json['updated_at'] as String?,
+      canOpenOutput: json['can_open_output'] == true,
+      progressPercent: ((json['progress_percent'] as num?)?.toDouble() ?? 0)
+          .clamp(0.0, 100.0)
+          .toDouble(),
+      progressPhase: '${json['progress_phase'] ?? 'queued'}',
+      progressDetail: '${json['progress_detail'] ?? '等待执行。'}',
       stepTotal: (json['step_total'] as num?)?.toInt() ?? 0,
       completedSteps: (json['completed_steps'] as num?)?.toInt() ?? 0,
       isActive: json['is_active'] == true,
@@ -2853,12 +3702,48 @@ class _QueueTask {
   final String? targetThumbnail;
   final String? targetMediaType;
   final String? outputPath;
+  final String? outputThumbnail;
+  final String? outputMediaType;
+  final String? createdAt;
+  final String? updatedAt;
+  final bool canOpenOutput;
+  final double progressPercent;
+  final String progressPhase;
+  final String progressDetail;
   final int stepTotal;
   final int completedSteps;
   final bool isActive;
 
   String? get primarySourcePath =>
       sourcePaths.isEmpty ? null : sourcePaths.first;
+
+  bool get usesCancelAction => status == 'drafted' || status == 'queued';
+
+  bool get isCancelling => usesCancelAction && progressDetail.contains('取消');
+
+  String get actionLabel {
+    if (isCancelling) {
+      return '取消中';
+    }
+    return usesCancelAction ? '取消任务' : '删除任务';
+  }
+
+  int get sortTimestamp =>
+      (DateTime.tryParse(createdAt ?? '') ?? DateTime.tryParse(updatedAt ?? ''))
+          ?.millisecondsSinceEpoch ??
+      0;
+
+  String get progressPhaseLabel {
+    return switch (progressPhase) {
+      'extracting' => '提取帧',
+      'processing' => '处理帧',
+      'merging' => '合成视频',
+      'completed' => '已完成',
+      'failed' => '失败',
+      'running' => '生成中',
+      _ => '等待中',
+    };
+  }
 
   static String? _mediaTypeFromPath(String? path) {
     if (path == null) {
@@ -2902,6 +3787,8 @@ class _QueueRunnerState {
     this.currentJobId,
     this.totalJobs = 0,
     this.completedJobs = 0,
+    this.processedJobs = 0,
+    this.progressPercent = 0,
     this.lastError,
   });
 
@@ -2911,6 +3798,13 @@ class _QueueRunnerState {
       currentJobId: json['current_job_id'] as String?,
       totalJobs: (json['total_jobs'] as num?)?.toInt() ?? 0,
       completedJobs: (json['completed_jobs'] as num?)?.toInt() ?? 0,
+      processedJobs:
+          (json['processed_jobs'] as num?)?.toInt() ??
+          (json['completed_jobs'] as num?)?.toInt() ??
+          0,
+      progressPercent: ((json['progress_percent'] as num?)?.toDouble() ?? 0)
+          .clamp(0.0, 100.0)
+          .toDouble(),
       lastError: json['last_error'] as String?,
     );
   }
@@ -2919,6 +3813,8 @@ class _QueueRunnerState {
   final String? currentJobId;
   final int totalJobs;
   final int completedJobs;
+  final int processedJobs;
+  final double progressPercent;
   final String? lastError;
 }
 

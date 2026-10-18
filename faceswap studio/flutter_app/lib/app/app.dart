@@ -12,12 +12,18 @@ class FaceSwapStudioApp extends StatefulWidget {
 
 class _FaceSwapStudioAppState extends State<FaceSwapStudioApp> {
   final BridgeClient _client = BridgeClient();
-  ThemeMode _themeMode = ThemeMode.dark;
+  ThemeMode _themeMode = ThemeMode.light;
+  bool _sidebarExpanded = false;
 
   @override
   void initState() {
     super.initState();
     _loadSettings();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        await _client.confirmStartup();
+      } catch (_) {}
+    });
   }
 
   Future<void> _loadSettings() async {
@@ -27,14 +33,18 @@ class _FaceSwapStudioAppState extends State<FaceSwapStudioApp> {
         return;
       }
       setState(() {
-        _themeMode = '${settings['theme'] ?? 'dark'}' == 'light' ? ThemeMode.light : ThemeMode.dark;
+        _themeMode = '${settings['theme'] ?? 'light'}' == 'light'
+            ? ThemeMode.light
+            : ThemeMode.dark;
+        _sidebarExpanded = settings['sidebar_expanded'] == true;
       });
-    } catch (_) {
-    }
+    } catch (_) {}
   }
 
   void _toggleTheme() {
-    final nextTheme = _themeMode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
+    final nextTheme = _themeMode == ThemeMode.dark
+        ? ThemeMode.light
+        : ThemeMode.dark;
     setState(() {
       _themeMode = nextTheme;
     });
@@ -46,14 +56,29 @@ class _FaceSwapStudioAppState extends State<FaceSwapStudioApp> {
       await _client.updateSettings({
         'theme': mode == ThemeMode.dark ? 'dark' : 'light',
       });
-    } catch (_) {
+    } catch (_) {}
+  }
+
+  void _setSidebarExpanded(bool expanded) {
+    if (_sidebarExpanded == expanded) {
+      return;
     }
+    setState(() {
+      _sidebarExpanded = expanded;
+    });
+    _persistSidebarExpanded(expanded);
+  }
+
+  Future<void> _persistSidebarExpanded(bool expanded) async {
+    try {
+      await _client.updateSettings({'sidebar_expanded': expanded});
+    } catch (_) {}
   }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Facefusion Studion',
+      title: 'FaceSwap Studio',
       debugShowCheckedModeBanner: false,
       themeMode: _themeMode,
       theme: StudioTheme.light(),
@@ -61,6 +86,8 @@ class _FaceSwapStudioAppState extends State<FaceSwapStudioApp> {
       home: StudioShell(
         themeMode: _themeMode,
         onToggleTheme: _toggleTheme,
+        sidebarExpanded: _sidebarExpanded,
+        onSidebarExpandedChanged: _setSidebarExpanded,
       ),
     );
   }

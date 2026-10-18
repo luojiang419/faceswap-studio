@@ -1,6 +1,10 @@
 #include "flutter_window.h"
 
+#include <flutter/standard_method_codec.h>
+
 #include <optional>
+#include <string>
+#include <variant>
 
 #include "flutter/generated_plugin_registrant.h"
 
@@ -25,6 +29,47 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  window_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+      flutter_controller_->engine()->messenger(), "faceswap_studio/window",
+      &flutter::StandardMethodCodec::GetInstance());
+  window_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+                 result) {
+        if (call.method_name() == "exitForUpdate") {
+          result->Success();
+          SetCloseToTray(false);
+          PostMessage(GetHandle(), WM_CLOSE, 0, 0);
+          return;
+        }
+        if (call.method_name() != "setCloseBehavior") {
+          result->NotImplemented();
+          return;
+        }
+
+        const auto* arguments =
+            std::get_if<flutter::EncodableMap>(call.arguments());
+        if (!arguments) {
+          result->Error("bad_args", "Expected a map argument.");
+          return;
+        }
+
+        const auto behavior_it =
+            arguments->find(flutter::EncodableValue("close_behavior"));
+        if (behavior_it == arguments->end()) {
+          result->Error("bad_args", "Missing close_behavior.");
+          return;
+        }
+
+        const auto* behavior = std::get_if<std::string>(&behavior_it->second);
+        if (!behavior) {
+          result->Error("bad_args", "close_behavior must be a string.");
+          return;
+        }
+
+        SetCloseToTray(*behavior != "exit");
+        result->Success();
+      });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -40,6 +85,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  window_channel_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
