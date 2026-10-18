@@ -10,6 +10,7 @@ import facefusion.choices
 from facefusion import curl_builder, logger, process_manager, state_manager, translator
 from facefusion.filesystem import get_file_name, get_file_size, is_file, remove_file
 from facefusion.hash_helper import validate_hash
+from facefusion.modelscope_assets import asset_for_url, download_asset, get_asset
 from facefusion.types import Command, DownloadProvider, DownloadSet
 
 
@@ -20,6 +21,18 @@ def open_curl(commands : List[Command]) -> subprocess.Popen[bytes]:
 
 def conditional_download(download_directory_path : str, urls : List[str]) -> None:
 	for url in urls:
+		asset = asset_for_url(url)
+		if asset:
+			target = os.path.join(download_directory_path, asset['id'].split('/')[-1])
+			partial_size = min(get_file_size(target + '.part'), asset['size'])
+			try:
+				with tqdm(total = asset['size'], initial = partial_size, desc = translator.get('downloading'), unit = 'B', unit_scale = True, unit_divisor = 1024, ascii = ' =', disable = state_manager.get_item('log_level') in [ 'warn', 'error' ]) as progress:
+					progress.set_postfix(download_provider = 'modelscope', file_name = os.path.basename(target))
+					download_asset(asset, target, progress = lambda done, total: progress.update(done - progress.n))
+			except (OSError, ValueError) as error:
+				logger.error('模型下载失败：' + str(error), __name__)
+				return
+			continue
 		download_file_name = os.path.basename(urlparse(url).path)
 		download_file_path = os.path.join(download_directory_path, download_file_name)
 		initial_size = get_file_size(download_file_path)
@@ -45,6 +58,9 @@ def conditional_download(download_directory_path : str, urls : List[str]) -> Non
 
 @lru_cache(maxsize = 64)
 def get_static_download_size(url : str) -> int:
+	asset = asset_for_url(url)
+	if asset:
+		return asset['size']
 	commands = curl_builder.chain(
 		curl_builder.ping(url),
 		curl_builder.set_timeout(5)
@@ -75,6 +91,14 @@ def ping_static_url(url : str) -> bool:
 
 
 def conditional_download_hashes(hash_set : DownloadSet) -> bool:
+	for value in hash_set.values():
+		asset = asset_for_url(value.get('url'))
+		if asset:
+			try:
+				download_asset(asset, value['path'])
+			except (OSError, ValueError) as error:
+				logger.error('模型校验文件下载失败：' + str(error), __name__)
+				return False
 	hash_paths = [ hash_set.get(hash_key).get('path') for hash_key in hash_set.keys() ]
 
 	process_manager.check()
@@ -158,6 +182,10 @@ def validate_source_paths(source_paths : List[str]) -> Tuple[List[str], List[str
 
 
 def resolve_download_url(base_name : str, file_name : str) -> Optional[str]:
+	if os.environ.get('FACESWAP_STUDIO_PREFER_MODELSCOPE') == '1':
+		asset = get_asset(base_name, file_name)
+		if asset:
+			return asset['url']
 	download_providers = state_manager.get_item('download_providers')
 
 	for download_provider in download_providers:
@@ -169,6 +197,9 @@ def resolve_download_url(base_name : str, file_name : str) -> Optional[str]:
 
 
 def resolve_download_url_by_provider(download_provider : DownloadProvider, base_name : str, file_name : str) -> Optional[str]:
+	if download_provider == 'modelscope':
+		asset = get_asset(base_name, file_name)
+		return asset['url'] if asset else None
 	download_provider_value = facefusion.choices.download_provider_set.get(download_provider)
 
 	for download_provider_url in download_provider_value.get('urls'):

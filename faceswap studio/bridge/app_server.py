@@ -601,6 +601,10 @@ class FaceFusionRuntime:
         return self._models_dir / str(model["file"])
 
     def _core_model_url(self, model: dict[str, Any]) -> str:
+        from facefusion.modelscope_assets import get_asset
+        asset = get_asset(model['base'], model['file'])
+        if asset:
+            return asset['url']
         mode = self._normalize_model_download_mode(self._settings.get("model_download_mode"))
         if mode == MODEL_DOWNLOAD_MODE_DOMESTIC:
             base_url = DOMESTIC_HUGGINGFACE_MIRROR
@@ -799,6 +803,21 @@ class FaceFusionRuntime:
                     file_index=index,
                     message=f"正在下载 {model['label']} ({model['file']})",
                 )
+
+                from facefusion.modelscope_assets import asset_for_url, download_asset
+                asset = asset_for_url(url)
+                if asset:
+                    def report_model_progress(done, total):
+                        downloaded = completed_bytes + done
+                        self._set_model_bootstrap_state(
+                            downloaded_bytes=downloaded, total_bytes=total_missing_bytes,
+                            percent=round(min(downloaded / max(total_missing_bytes, 1) * 100, 99.9), 2),
+                            speed_bps=downloaded / max(time.monotonic() - started_at, 0.001),
+                        )
+                    download_asset(asset, target_path, progress=report_model_progress, opener=opener)
+                    completed_bytes += asset['size']
+                    self._append_log(f"[bridge] Downloaded and verified ModelScope model: {model['file']}")
+                    continue
 
                 file_bytes = 0
                 last_tick = time.monotonic()
@@ -4532,6 +4551,7 @@ class FaceFusionRuntime:
         elif shutil.which("ffmpeg", path=env["PATH"]):
             env["FACEFUSION_FFMPEG_PATH"] = shutil.which("ffmpeg", path=env["PATH"]) or ""
         env["FACEFUSION_CURL_PATH"] = r"C:\Windows\System32\curl.exe"
+        env["FACESWAP_STUDIO_PREFER_MODELSCOPE"] = "1"
         env["FACEFUSION_UI_HOST"] = self.webui_bind_host
         env["FACEFUSION_UI_PORT"] = str(self._settings["facefusion_port"])
         self._apply_model_download_env(env)

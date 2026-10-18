@@ -274,7 +274,7 @@ ExecutionDevice = TypedDict('ExecutionDevice',
 	'utilization' : ExecutionDeviceUtilization
 })
 
-DownloadProvider = Literal['github', 'huggingface']
+DownloadProvider = Literal['modelscope', 'github', 'huggingface']
 DownloadProviderValue = TypedDict('DownloadProviderValue',
 {
 	'urls' : List[str],

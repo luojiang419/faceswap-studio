@@ -11,7 +11,7 @@ import facefusion.jobs.job_manager
 import facefusion.jobs.job_store
 from facefusion import config, content_analyser, face_classifier, face_detector, face_landmarker, face_masker, face_recognizer, inference_manager, logger, state_manager, translator, video_manager
 from facefusion.common_helper import create_int_metavar, get_middle
-from facefusion.download import conditional_download_hashes, conditional_download_sources, resolve_download_url_by_provider
+from facefusion.download import conditional_download_hashes, conditional_download_sources, resolve_download_url
 from facefusion.face_creator import scale_face
 from facefusion.face_helper import paste_back, warp_face_by_face_landmark_5
 from facefusion.face_masker import create_area_mask, create_box_mask, create_occlusion_mask, create_region_mask
@@ -210,7 +210,7 @@ def create_static_model_set(download_scope : DownloadScope) -> ModelSet:
 			{
 				'deep_swapper':
 				{
-					'url': resolve_download_url_by_provider('huggingface', 'deepfacelive-models-' + model_scope, model_name + '.hash'),
+					'url': resolve_download_url('deepfacelive-models-' + model_scope, model_name + '.hash'),
 					'path': resolve_relative_path('../.assets/models/' + model_scope + '/' + model_name + '.hash')
 				}
 			},
@@ -218,7 +218,7 @@ def create_static_model_set(download_scope : DownloadScope) -> ModelSet:
 			{
 				'deep_swapper':
 				{
-					'url': resolve_download_url_by_provider('huggingface', 'deepfacelive-models-' + model_scope, model_name + '.dfm'),
+					'url': resolve_download_url('deepfacelive-models-' + model_scope, model_name + '.dfm'),
 					'path': resolve_relative_path('../.assets/models/' + model_scope + '/' + model_name + '.dfm')
 				}
 			},

@@ -16,10 +16,12 @@ def validate_hash(validate_path : str) -> bool:
 		with open(hash_path) as hash_file:
 			hash_content = hash_file.read()
 
+		checksum = 0
 		with open(validate_path, 'rb') as validate_file:
-			validate_content = validate_file.read()
+			while chunk := validate_file.read(1024 * 1024):
+				checksum = zlib.crc32(chunk, checksum)
 
-		return create_hash(validate_content) == hash_content
+		return format(checksum & 0xffffffff, '08x') == hash_content
 	return False
 
 

@@ -490,6 +490,11 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                   const Divider(height: 28),
                   Text('模型下载方式', style: theme.textTheme.titleMedium),
+                  const SizedBox(height: 6),
+                  Text(
+                    '全部内置模型均可按需从魔搭获取，已安装模型会校验复用。',
+                    style: theme.textTheme.bodySmall,
+                  ),
                   const SizedBox(height: 10),
                   SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
@@ -499,7 +504,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         ButtonSegment<String>(
                           value: _domesticMirrorMode,
                           icon: Icon(Icons.cloud_download_outlined),
-                          label: Text('国内镜像源'),
+                          label: Text('魔搭直连'),
                         ),
                         ButtonSegment<String>(
                           value: _systemProxyMode,

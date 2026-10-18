@@ -122,6 +122,11 @@ execution_provider_set : ExecutionProviderSet =\
 execution_providers : List[ExecutionProvider] = list(get_args(ExecutionProvider))
 download_provider_set : DownloadProviderSet =\
 {
+	'modelscope':
+	{
+		'urls': [ 'https://modelscope.cn' ],
+		'path': '/api/v1/models/jiangjiang419/facefusion-workbench-updates/repo?Revision=master&FilePath=models/facefusion-3.9.0-v1/{base_name}/{file_name}'
+	},
 	'github':
 	{
 		'urls':
