@@ -183,9 +183,62 @@ def verify_anonymous(asset, local=None, full=False):
     return {'anonymousRangeVerified': True, 'samples': samples}
 
 
+def audit(directory):
+    """只有源码、计划、逐项证明和最终清单完全一致，才允许发布清单。"""
+    plan = json.loads((directory / 'plan.json').read_text('utf-8'))
+    publication = json.loads((directory / 'publication.json').read_text('utf-8'))
+    if publication.get('complete') is not True or publication.get('missing') or publication.get('failures'):
+        raise ValueError('镜像尚未全部完成，禁止发布完整清单')
+    actual = inventory()
+    if actual['models'] != plan['models']:
+        raise ValueError('当前源码模型选项已变化，需要重新生成计划')
+    planned = {a['id']: a for a in plan['assets']}
+    if len(planned) != len(plan['assets']) or set(planned) != {a['id'] for a in actual['assets']}:
+        raise ValueError('当前源码与计划的资产集合不同')
+    for item in actual['assets']:
+        asset = planned[item['id']]
+        if any(asset.get(key) != value for key, value in item.items()):
+            raise ValueError('当前源码资产路径或用途变化：' + item['id'])
+        proof_path = directory / 'proofs' / (hashlib.sha256(asset['id'].encode()).hexdigest() + '.json')
+        proof = json.loads(proof_path.read_text('utf-8'))
+        if proof.get('verified') is not True or any(proof.get(key) != asset[key] for key in ('id', 'sha256', 'size', 'url')):
+            raise ValueError('资产证明缺失或不匹配：' + asset['id'])
+        mode = 'anonymousFullSha256Verified' if asset['kind'] == 'hashes' else 'anonymousRangeVerified'
+        if proof.get(mode) is not True:
+            raise ValueError('资产缺少匿名回读证明：' + asset['id'])
+    total = sum(a['size'] for a in plan['assets'])
+    if any(publication.get(key) != value for key, value in {
+        'repository': plan['repository'], 'assetCount': len(planned),
+        'modelCount': len(actual['models']), 'bytes': total,
+    }.items()) or total != plan['total_bytes']:
+        raise ValueError('最终发布报告与完整计划不一致')
+    catalog = {key: plan[key] for key in ('protocol', 'product', 'models', 'assets', 'repository', 'upstream', 'total_bytes')}
+    path = ROOT / 'facefusion/model_catalog.json'
+    if json.loads(path.read_text('utf-8')) != catalog:
+        raise ValueError('应用模型清单与已验证计划不一致')
+    report = {'complete': True, 'modelCount': len(actual['models']), 'assetCount': len(planned),
+              'bytes': total, 'catalogSha256': file_sha256(path), 'sourceInventoryMatches': True,
+              'allProofsMatch': True}
+    save(directory / 'audit.json', report)
+    return report
+
+
+def publish_catalog(directory):
+    from scripts.build_lightweight import publish_asset
+    report = audit(directory)
+    plan = json.loads((directory / 'plan.json').read_text('utf-8'))
+    config = json.loads((ROOT / 'update-config.json').read_text('utf-8'))
+    if config['repository'] != plan['repository']:
+        raise ValueError('模型镜像与应用发布仓库不一致')
+    proof = publish_asset(ROOT / 'facefusion/model_catalog.json', plan['prefix'] + '/catalog.json')
+    save(directory / 'catalog-publication.json', {**report, **proof})
+    return proof
+
+
 def publish(directory, workers=4, proxy=None):
     from modelscope.hub.api import HubApi
     from modelscope.utils.repo_utils import CommitOperationAdd, UploadInfo
+    from requests.exceptions import RequestException
     plan = json.loads((directory / 'plan.json').read_text('utf-8'))
     repo = plan['repository']
     api = HubApi()
@@ -255,7 +308,16 @@ def publish(directory, workers=4, proxy=None):
                     raise ValueError('上游CRC与权重不一致：' + asset['id'])
                 with lock:
                     print('UPLOAD ' + asset['id'], flush=True)
-                transfer = thread_api._upload_blob(repo_id=repo, repo_type='model', sha256=asset['sha256'], size=asset['size'], data=str(local), disable_tqdm=True)
+                for attempt in range(3):
+                    try:
+                        transfer = thread_api._upload_blob(repo_id=repo, repo_type='model', sha256=asset['sha256'], size=asset['size'], data=str(local), disable_tqdm=True)
+                        break
+                    except (RequestException, OSError):
+                        if attempt == 2:
+                            raise
+                        with lock:
+                            print('RETRY UPLOAD ' + asset['id'], flush=True)
+                        time.sleep(2 ** attempt)
                 operation = CommitOperationAdd(asset['remote_path'], local, file_hash_info={'file_size': asset['size'], 'file_hash': asset['sha256']})
                 operation._upload_mode = 'lfs'
                 operation._is_uploaded = True
@@ -310,13 +372,17 @@ def publish(directory, workers=4, proxy=None):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=['prepare', 'publish'])
+    parser.add_argument('mode', choices=['prepare', 'publish', 'audit', 'publish-catalog'])
     parser.add_argument('--directory', type=Path, default=ROOT / 'build/modelscope-all-models')
     parser.add_argument('--proxy', help='仅供维护者读取上游；客户端魔搭下载不使用此设置')
     parser.add_argument('--workers', type=int, default=4)
     args = parser.parse_args()
     if args.mode == 'prepare':
         prepare(args.directory.resolve(), args.proxy)
+    elif args.mode == 'audit':
+        print(json.dumps(audit(args.directory.resolve()), ensure_ascii=False, indent=2))
+    elif args.mode == 'publish-catalog':
+        print(json.dumps(publish_catalog(args.directory.resolve()), ensure_ascii=False, indent=2))
     else:
         if not 1 <= args.workers <= 5:
             parser.error('并发缓存上限为5个权重')

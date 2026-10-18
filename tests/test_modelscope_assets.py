@@ -178,3 +178,31 @@ def test_full_inventory_matches_actual_builtin_functions(monkeypatch):
         assert actual == {a['id'] for a in scanned['assets']}
     finally:
         for module in modules: module.create_static_model_set.cache_clear()
+
+
+@pytest.mark.skipif(not Path(ms.__file__).with_name('model_catalog.json').exists(), reason='完整镜像清单尚未生成')
+def test_published_catalog_routes_every_builtin_asset_to_modelscope(monkeypatch):
+    monkeypatch.setenv('FACESWAP_STUDIO_PREFER_MODELSCOPE', '1')
+    monkeypatch.setattr(download.state_manager, 'get_item', lambda key: ['modelscope'] if key == 'download_providers' else None)
+    ms.catalog.cache_clear(); ms._urls.cache_clear()
+    scanned = inventory()
+    expected = ms.catalog()
+    assert set(expected) == {a['id'] for a in scanned['assets']}
+    modules = {}
+    routed = set()
+    try:
+        for option in scanned['models']:
+            path = option['module']
+            if path not in modules:
+                module = importlib.import_module(path.removesuffix('.py').replace('/', '.'))
+                module.create_static_model_set.cache_clear()
+                modules[path] = module
+            model = modules[path].create_static_model_set('full')[option['name']]
+            actual_urls = {a['url'] for kind in ('hashes', 'sources') for a in model.get(kind, {}).values() if a.get('url')}
+            assert actual_urls == {expected[key]['url'] for key in option['assets']}
+            routed.update(actual_urls)
+        assert routed == {a['url'] for a in expected.values()}
+    finally:
+        for module in modules.values():
+            module.create_static_model_set.cache_clear()
+        ms.catalog.cache_clear(); ms._urls.cache_clear()

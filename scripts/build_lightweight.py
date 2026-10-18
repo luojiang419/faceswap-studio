@@ -7,6 +7,7 @@ import gzip
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -46,6 +47,51 @@ def payload(output):
                 print(f'打包 {index}/{len(files)}', flush=True)
     write_json(output.with_suffix('.files.json'), records)
     return records
+
+
+def refresh_payload(output, baseline):
+    """保留旧运行包，用7z增量替换应用文件，避免重新压缩全部依赖。"""
+    from updater.transaction import safe_path
+    baseline = baseline.resolve(strict=True)
+    records = read_json(baseline.with_suffix('.files.json'))
+    if output.exists() or output.with_suffix('.files.json').exists():
+        raise ValueError('拒绝覆盖已有运行包：' + str(output))
+    by_name = {item['name']: item for item in records}
+    with zipfile.ZipFile(baseline) as archive:
+        entries = {item.filename: item for item in archive.infolist() if not item.is_dir()}
+        if len(entries) != len(records) or any(entries.get('FaceSwapStudio/' + item['name']) is None or
+                entries['FaceSwapStudio/' + item['name']].file_size != item['size'] for item in records):
+            raise ValueError('旧运行包与文件记录不一致')
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if shutil.disk_usage(output.parent).free < baseline.stat().st_size * 2 + 512 * 1024**2:
+        raise OSError('运行包增量更新需要两倍压缩包大小和512MiB临时空间')
+    executable = shutil.which('7z')
+    if not executable:
+        raise ValueError('增量更新运行包需要7z')
+    stage = ROOT / 'build/lightweight-overlay' / output.stem
+    overlays = dict((name, file) for file, name in sources())
+    overlays['facefusion.ini'] = ROOT / 'facefusion.ini'
+    for name, file in overlays.items():
+        if name != 'facefusion.ini':
+            safe_path(name)
+        target = stage / 'FaceSwapStudio' / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(file, target)
+        by_name[name] = {'name': name, 'size': file.stat().st_size, 'sha256': sha256(file)}
+    with baseline.open('rb') as source, output.open('xb') as destination:
+        shutil.copyfileobj(source, destination, 4 * 1024**2)
+    subprocess.run([executable, 'u', '-tzip', '-mx=1', '-y', str(output), 'FaceSwapStudio'],
+                   cwd=stage, check=True, stdout=subprocess.DEVNULL)
+    records = sorted(by_name.values(), key=lambda item: item['name'])
+    with zipfile.ZipFile(output) as archive:
+        entries = {item.filename: item for item in archive.infolist() if not item.is_dir()}
+        if len(entries) != len(records) or any(entries['FaceSwapStudio/' + item['name']].file_size != item['size'] for item in records):
+            raise ValueError('新运行包文件集合不一致')
+        for name in overlays:
+            if hashlib.sha256(archive.read('FaceSwapStudio/' + name)).hexdigest() != by_name[name]['sha256']:
+                raise ValueError('运行包增量文件内容不一致：' + name)
+    write_json(output.with_suffix('.files.json'), records)
+    return output
 
 
 def compile_installer(manifest, output, demo=False):
@@ -132,12 +178,14 @@ def verify_remote_asset(url, size, expected):
         raise ValueError('匿名完整回读 SHA-256 不一致')
 
 
-def build(directory, existing=None):
+def build(directory, existing=None, refresh_from=None):
     config = read_json(ROOT / 'update-config.json')
     version = (ROOT / 'VERSION').read_text('utf-8-sig').strip()
     release = config['releaseId']
     directory.mkdir(parents=True, exist_ok=True)
     package = existing or directory / f'FaceSwap-Studio-{version}-{release}-Runtime.zip'
+    if refresh_from:
+        refresh_payload(package, refresh_from)
     records = read_json(package.with_suffix('.files.json')) if package.exists() else payload(package)
     prefix = f'bootstrap/{version}/{release}'
     manifest = {'protocol': 1, 'componentProtocol': 0, 'releaseId': release, 'appVersion': version, 'appReleaseId': release,
@@ -160,10 +208,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=ROOT / 'dist/modelscope/installer')
     parser.add_argument('--payload', type=Path)
+    parser.add_argument('--refresh-from', type=Path, help='从已验证运行包复制并增量更新；保留旧产物')
     parser.add_argument('--publish', action='store_true')
     args = parser.parse_args()
+    if args.refresh_from and (args.publish or args.payload):
+        parser.error('--refresh-from仅用于构建，不能与--payload或--publish合用')
     if not args.publish:
-        build(args.output.resolve(), args.payload)
+        build(args.output.resolve(), args.payload, args.refresh_from)
     else:
         plan = read_json(args.output / 'publication-plan.json')
         proof = {name: publish_asset(Path(plan[name]), plan['prefix'] + '/' + Path(plan[name]).name) for name in ('payload', 'installer', 'distribution')}
