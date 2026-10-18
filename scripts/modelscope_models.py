@@ -235,7 +235,7 @@ def publish_catalog(directory):
     return proof
 
 
-def publish(directory, workers=4, proxy=None):
+def publish(directory, workers=4, proxy=None, upstream_endpoint='https://huggingface.co'):
     from modelscope.hub.api import HubApi
     from modelscope.utils.repo_utils import CommitOperationAdd, UploadInfo
     from requests.exceptions import RequestException
@@ -298,7 +298,8 @@ def publish(directory, workers=4, proxy=None):
                     opener = build_opener(ProxyHandler({'http': proxy, 'https': proxy} if proxy else {}))
                     with lock:
                         print('DOWNLOAD ' + asset['id'] + f' {asset["size"] / 1024**2:.1f}MiB', flush=True)
-                    download_file(asset['upstream_url'], generated, size=asset['size'], sha256=asset['sha256'], opener=opener)
+                    upstream_url = asset['upstream_url'].replace('https://huggingface.co/', upstream_endpoint.rstrip('/') + '/', 1)
+                    download_file(upstream_url, generated, size=asset['size'], sha256=asset['sha256'], opener=opener)
                     local = generated
                 checksum = 0
                 with local.open('rb') as stream:
@@ -384,6 +385,8 @@ if __name__ == '__main__':
     parser.add_argument('mode', choices=['prepare', 'publish', 'audit', 'publish-catalog'])
     parser.add_argument('--directory', type=Path, default=ROOT / 'build/modelscope-all-models')
     parser.add_argument('--proxy', help='仅供维护者读取上游；客户端魔搭下载不使用此设置')
+    parser.add_argument('--upstream-endpoint', choices=['https://huggingface.co', 'https://hf-mirror.com'], default='https://huggingface.co',
+                        help='维护者传输端点；仍校验计划中原始提交对应的SHA-256与CRC')
     parser.add_argument('--workers', type=int, default=4)
     args = parser.parse_args()
     if args.mode == 'prepare':
@@ -395,4 +398,4 @@ if __name__ == '__main__':
     else:
         if not 1 <= args.workers <= 5:
             parser.error('并发缓存上限为5个权重')
-        publish(args.directory.resolve(), args.workers, args.proxy)
+        publish(args.directory.resolve(), args.workers, args.proxy, args.upstream_endpoint)

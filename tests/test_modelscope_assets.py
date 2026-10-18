@@ -75,11 +75,11 @@ def test_valid_local_file_does_not_contact_server(server, tmp_path):
 
 def test_large_file_uses_bounded_ranges_and_preserves_full_sha(server, tmp_path):
     url, _, calls, mode = server
-    payload = b'large-model-payload' * (1024 * 1024)
+    payload = b'large-model-payload' * (4 * 1024 * 1024)
     mode['payload'] = payload
     target = tmp_path / 'large-model.dfm'
     ms.download_file(url, target, size=len(payload), sha256=hashlib.sha256(payload).hexdigest(), allow_http=True)
-    assert calls == [0, 16 * 1024**2]
+    assert calls == [0, 64 * 1024**2]
     assert target.read_bytes() == payload
 
 
