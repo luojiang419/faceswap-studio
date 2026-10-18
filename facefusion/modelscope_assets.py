@@ -83,7 +83,9 @@ def download_file(url: str, destination: Path, *, size: int, sha256: str,
 	while offset < size:
 		before = offset
 		try:
-			request = Request(url, headers={'Range': f'bytes={offset}-', 'Accept-Encoding': 'identity', 'User-Agent': 'FaceFusion-ModelScope/1.0'})
+			# 有界分段避免代理/CDN长期占住整个大文件连接。
+			end = min(size - 1, offset + 16 * 1024**2 - 1)
+			request = Request(url, headers={'Range': f'bytes={offset}-{end}', 'Accept-Encoding': 'identity', 'User-Agent': 'FaceFusion-ModelScope/1.0'})
 			with opener.open(request, timeout=60) as response:
 				if response.status == 206:
 					match = re.fullmatch(r'bytes (\d+)-(\d+)/(\d+)', response.headers.get('Content-Range', ''))
@@ -94,7 +96,8 @@ def download_file(url: str, destination: Path, *, size: int, sha256: str,
 				else:
 					raise ValueError('模型服务器响应状态无效')
 				with partial.open('ab' if offset else 'wb') as stream:
-					while chunk := response.read(512 * 1024):
+					read = getattr(response, 'read1', response.read)
+					while chunk := read(512 * 1024):
 						if offset + len(chunk) > size:
 							raise ValueError('模型文件超过清单声明大小')
 						stream.write(chunk)

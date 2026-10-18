@@ -331,7 +331,16 @@ def publish(directory, workers=4, proxy=None):
                                 raise
                             time.sleep(min(8, 0.5 * 2**attempt))
                 reused = reused or transfer.get('is_reused', False)
-            result = verify_anonymous(asset, local=local)
+            for attempt in range(3):
+                try:
+                    result = verify_anonymous(asset, local=local)
+                    break
+                except (OSError, ValueError):
+                    if attempt == 2:
+                        raise
+                    with lock:
+                        print('RETRY VERIFY ' + asset['id'], flush=True)
+                    time.sleep(2 ** attempt)
             proof = {'id': asset['id'], 'sha256': asset['sha256'], 'size': asset['size'], 'url': asset['url'],
                      'verified': True, 'globallyReused': reused, 'verifiedAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), **result}
             save(proof_path, proof)

@@ -23,12 +23,15 @@ def server():
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self, *args): pass
         def do_GET(self):
-            content = f'{zlib.crc32(payload):08x}'.encode() if self.path.endswith('.hash') else payload
-            offset = int(self.headers['Range'][6:-1]) if self.headers.get('Range') else 0
+            data = mode.get('payload', payload)
+            content = f'{zlib.crc32(data):08x}'.encode() if self.path.endswith('.hash') else data
+            start, _, requested_end = self.headers.get('Range', 'bytes=0-')[6:].partition('-')
+            offset = int(start)
             calls.append(offset)
             if mode['value'] == 'ignore': offset = 0
             end = min(len(content)-1, offset + 8191) if mode['value'] == 'segments' else len(content)-1
-            partial = (offset > 0 or mode['value'] == 'segments') and mode['value'] != 'ignore'
+            if requested_end and mode['value'] != 'ignore': end = min(end, int(requested_end))
+            partial = (offset > 0 or end < len(content)-1 or mode['value'] == 'segments') and mode['value'] != 'ignore'
             self.send_response(206 if partial else 200)
             self.send_header('Content-Length', str(end-offset+1))
             if partial:
@@ -68,6 +71,16 @@ def test_valid_local_file_does_not_contact_server(server, tmp_path):
     target = tmp_path / 'cached.onnx'; target.write_bytes(payload)
     ms.download_file(url, target, size=len(payload), sha256=hashlib.sha256(payload).hexdigest(), allow_http=True)
     assert calls == []
+
+
+def test_large_file_uses_bounded_ranges_and_preserves_full_sha(server, tmp_path):
+    url, _, calls, mode = server
+    payload = b'large-model-payload' * (1024 * 1024)
+    mode['payload'] = payload
+    target = tmp_path / 'large-model.dfm'
+    ms.download_file(url, target, size=len(payload), sha256=hashlib.sha256(payload).hexdigest(), allow_http=True)
+    assert calls == [0, 16 * 1024**2]
+    assert target.read_bytes() == payload
 
 
 def test_hash_mismatch_preserves_old_file_and_rejects_partial(server, tmp_path):
