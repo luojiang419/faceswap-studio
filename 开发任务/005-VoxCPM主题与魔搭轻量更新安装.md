@@ -2,11 +2,11 @@
 
 [CODEX_LONG_TASK_CONTINUE_V3]
 
-状态：全部功能、发布与实测完成，正在记录本地Git提交。
+状态：全部完成；正式资源已发布，源码已本地提交。
 下一步：用户运行正式轻量安装器；后续发布使用同一签名密钥和不可变资源路径。
 TODO：无功能遗留。
 最近验证：76项Python测试、10项原生下载测试、26项原生安装集成测试、2项Flutter渲染测试通过；Flutter分析、Windows/Web构建、PowerShell语法及FaceFusion CLI通过。
-Branch：feat/modelscope-theme-installer；起点253bad8；实现提交随本轮交付记录。
+Branch：feat/modelscope-theme-installer；起点253bad8；实现提交4752474；本文件随交付记录提交。
 GitHub：2026-10-18已检查，本轮只本地commit，不自动push。
 阻塞：无。原Windows截图helper超时，改用实际Flutter控件渲染验证，未虚构桌面截图。
 
