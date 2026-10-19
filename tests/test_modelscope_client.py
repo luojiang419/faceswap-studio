@@ -224,6 +224,45 @@ def test_independent_update_refuses_active_queue_before_sending_exit(tmp_path, m
         offer.close_studio(tmp_path, 'http://127.0.0.1:52741')
 
 
+def test_integration_runs_only_after_verified_update_commit(source, monkeypatch):
+    from updater import startup
+    from updater.transaction import write_json
+    service, manifest, envelope, *_ = source
+    session = service.cache / manifest['releaseId']; session.mkdir(parents=True)
+    (service.root / '.faceswap-install.json').write_text('{}', 'utf-8')
+    config = service.config; config['releaseId'] = manifest['releaseId']
+    write_json(service.root / 'update-config.json', config)
+    write_json(session / 'envelope.json', envelope)
+    write_json(session / 'status.json', {'status': 'installing'})
+    started = []
+    monkeypatch.setattr(startup.subprocess, 'run', lambda *a, **k: started.append(a))
+    with pytest.raises(ValueError, match='尚未确认完成'):
+        startup.finalize_installation(service.root, session)
+    assert not started
+    write_json(session / 'status.json', {'status': 'complete'})
+    startup.finalize_installation(service.root, session)
+    assert started[0][0][1] == '--finalize-installation'
+    write_json(session / 'integration-result.json', {'ok': True})
+    startup.finalize_installation(service.root, session)
+    assert len(started) == 1
+
+
+def test_next_launch_recovers_interrupted_integration_without_reinstall(source, monkeypatch):
+    from updater import startup
+    from updater.transaction import write_json
+    service, manifest, *_ = source
+    config = service.config; config['releaseId'] = manifest['releaseId']
+    write_json(service.root / 'update-config.json', config)
+    (service.root / '.faceswap-install.json').write_text('{}', 'utf-8')
+    session = service.cache / manifest['releaseId']
+    write_json(session / 'status.json', {'status': 'complete'})
+    completed = []
+    monkeypatch.setattr(startup, 'finalize_installation', lambda *a: completed.append(a))
+    monkeypatch.setattr(startup.subprocess, 'Popen', lambda *a, **k: pytest.fail('完成后的恢复不应再次安装更新'))
+    assert not startup.resume_update(service.root)
+    assert completed == [(service.root.resolve(), session)]
+
+
 def test_publication_verifier_resumes_anonymous_truncated_stream(source):
     from scripts.build_lightweight import verify_remote_asset
     _, manifest, _, _, payload, requests, _ = source

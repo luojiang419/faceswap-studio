@@ -338,9 +338,16 @@ namespace FaceSwapBootstrap {
                     progress.Report(new Status {text="正在进行修复后完整复检"});
                     var after=Inspect(root,manifest,token,progress,probe);
                     if(!after.Healthy) throw new IOException("修复后仍有问题："+String.Join("；",after.issues.Take(5)));
-                    var state=Installer.ReadState(root); state.version=manifest.appVersion; state.releaseId=manifest.appReleaseId??manifest.releaseId; Installer.SaveState(state);
-                    Installer.RefreshBrand(root);
-                    var result=new MaintenanceResult{status="repaired",message="修复完成，开始创作吧。",root=root,session=work,repaired=true,issues=before.issues.ToArray()};
+                    string marker=Safe(root,Installer.Marker),markerBackup=Safe(Path.Combine(work,"backup"),Installer.Marker);
+                    Directory.CreateDirectory(Path.GetDirectoryName(markerBackup));File.Copy(marker,markerBackup);
+                    changes.Add(new RepairChange{name=Installer.Marker,existed=true});Write(Path.Combine(work,"journal.json"),changes);
+                    var state=Installer.ReadState(root); state.version=manifest.appVersion; state.releaseId=manifest.appReleaseId??manifest.releaseId;
+                    state.files=(state.files??new string[0]).Concat(manifest.files.Select(file=>file.name)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+                    Installer.SaveState(state);
+                    string message="修复完成，开始创作吧。";
+                    try {Installer.RefreshBrand(root);}
+                    catch(Exception integration) {Write(Path.Combine(work,"integration-warning.json"),new{message=integration.ToString()});message="程序已更新，部分快捷方式未能整理，请查看修复日志。";}
+                    var result=new MaintenanceResult{status="repaired",message=message,root=root,session=work,repaired=true,issues=before.issues.ToArray()};
                     Write(Path.Combine(work,"result.json"),result); return result;
                 } catch(Exception error) {
                     try { Rollback(root,work,changes); Write(Path.Combine(work,"result.json"),new {status="error",message=error.Message,rolledBack=true}); }

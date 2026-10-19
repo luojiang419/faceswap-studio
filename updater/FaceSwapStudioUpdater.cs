@@ -61,6 +61,10 @@ internal sealed class UpdateWindow : StudioUpdateSurface {
     }
     [STAThread] static int Main(string[] args) {
         Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
+        if(args.Length==3 && args[0]=="--finalize-installation") {
+            try {InstallationIntegration.Refresh(args[1],args[2]);return 0;}
+            catch(Exception error) {File.AppendAllText(Path.Combine(args[2],"integration-error.log"),error+Environment.NewLine);return 1;}
+        }
         if(args.Length==3 && (args[0]=="--offer" || args[0]=="--install-offer")) {
             try {
                 string directory=Path.GetFullPath(args[1]);

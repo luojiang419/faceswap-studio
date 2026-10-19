@@ -8,6 +8,24 @@ import sys
 from updater.transaction import alive, read_json, write_json, run
 
 
+def finalize_installation(root, session):
+    """事务确认完成后迁移受管理的入口；旧更新事务也可经新启动器完成此步骤。"""
+    from updater.service import verify_envelope
+    root, session = Path(root).resolve(strict=True), Path(session).resolve(strict=True)
+    if not (root / '.faceswap-install.json').is_file():
+        return
+    config = read_json(root / 'update-config.json')
+    manifest = verify_envelope(read_json(session / 'envelope.json'), config['publicKey'])
+    if session != (root / 'faceswap studio/data/cache/updates' / manifest['releaseId']).resolve():
+        raise ValueError('安装入口迁移会话不匹配')
+    if config['releaseId'] != manifest['releaseId'] or read_json(session / 'status.json').get('status') != 'complete':
+        raise ValueError('更新尚未确认完成，不能迁移入口')
+    if (session / 'integration-result.json').exists():
+        return
+    subprocess.run([str(root / 'FaceSwapStudioUpdater.exe'), '--finalize-installation', str(root), str(session)],
+                   check=True, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+
+
 def resume_update(root):
     root = Path(root).resolve()
     cache = root / 'faceswap studio/data/cache/updates'
@@ -57,6 +75,15 @@ def resume_update(root):
                          creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         scheduled.unlink()
         return True
+    if not os.environ.get('FACESWAP_STUDIO_UPDATE_SESSION') and (root / '.faceswap-install.json').is_file() and (root / 'update-config.json').is_file():
+        session = cache / read_json(root / 'update-config.json')['releaseId']
+        if (session / 'status.json').is_file() and not (session / 'integration-result.json').exists():
+            if read_json(session / 'status.json').get('status') == 'complete':
+                try:
+                    finalize_installation(root, session)
+                except Exception as error:
+                    with (cache / 'integration-pending.log').open('a', encoding='utf-8') as log:
+                        log.write(str(error) + '\n')
     return False
 
 

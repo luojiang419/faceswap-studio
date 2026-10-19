@@ -620,6 +620,8 @@ def monitor_update_health(repo_root: Path, stop: threading.Event) -> None:
             (repo_root / 'faceswap studio/data/cache/updates').resolve()):
         return
     expected_pid = int(os.environ.get('FACESWAP_STUDIO_WRAPPER_PID', os.getpid()))
+    integration_done = False
+    integration_attempts = 0
     while not stop.wait(0.5):
         try:
             receipt = read_json(target.with_name('frontend-ready.json'))
@@ -639,6 +641,15 @@ def monitor_update_health(repo_root: Path, stop: threading.Event) -> None:
             receipt['modelsReady'] = bootstrap.get('ready') is True
             receipt['checkedAt'] = time.time()
             write_json(target, receipt)
+            if not integration_done and integration_attempts < 3 and (Path(session) / 'status.json').exists():
+                if read_json(Path(session) / 'status.json').get('status') == 'complete':
+                    try:
+                        from updater.startup import finalize_installation
+                        finalize_installation(repo_root, Path(session))
+                        integration_done = True
+                    except Exception as error:
+                        integration_attempts += 1
+                        write_launcher_log(repo_root / 'faceswap studio', f'Update integration finalization failed: {error}')
         except (OSError, ValueError):
             continue
 

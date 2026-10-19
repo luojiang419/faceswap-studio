@@ -76,6 +76,14 @@ public static class MaintenanceTests {
                 f.Run(true);Check(f.Get("update-config.json").Contains("false"),"自动更新偏好丢失");Check(f.Run().status=="healthy","配置未修复");
                 f.Put("update-config.json","broken-json");f.Run(true);Check(f.Run().status=="healthy","破损 JSON 未恢复");
             });
+            test("旧安装更新后登记新文件归属并保存原身份备份",f=>{
+                var original=Installer.ReadState(f.root);string id=original.id;
+                Check(original.files.Length==0,"夹具应模拟缺少新归属记录的旧安装");
+                f.Put("app.exe","evil-app");Check(f.Run(true).repaired,"更新未完成");
+                var updated=Installer.ReadState(f.root);
+                Check(updated.id==id&&updated.files.Contains("app.exe")&&updated.files.Contains(".assets/models/model.onnx"),"更新未登记新文件或覆盖身份");
+                Check(File.Exists(Path.Combine(f.work,"backup",Installer.Marker)),"没有原安装身份备份");
+            });
             test("拒绝校验错误的运行包，原程序不改变",f=>{
                 f.Put("app.exe","evil-app");File.AppendAllText(f.package,"tamper");Reject(()=>f.Run(true),"校验失败");Check(f.Get("app.exe")=="evil-app","坏包覆盖了程序");
             });

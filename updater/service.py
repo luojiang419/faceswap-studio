@@ -42,6 +42,11 @@ def verify_envelope(envelope, public_key):
     permitted_url(package['url'])
     if not isinstance(package['size'], int) or not 0 < package['size'] <= 2 * 1024**3 or not re.fullmatch('[a-f0-9]{64}', package['sha256']):
         raise ValueError('更新包元数据无效')
+    installer = manifest.get('installer')
+    if installer:
+        permitted_url(installer['url'])
+        if not isinstance(installer['size'], int) or not 0 < installer['size'] <= 16 * 1024**2 or not re.fullmatch('[a-f0-9]{64}', installer['sha256']):
+            raise ValueError('安装维护入口元数据无效')
     if not manifest['files'] or len(manifest['files']) > 20000:
         raise ValueError('更新文件清单无效')
     names = set()

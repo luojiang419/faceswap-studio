@@ -53,6 +53,7 @@ $compilerArgs = @(
     "/r:System.Web.Extensions.dll",
     $sourcePath,
     (Join-Path $repoRoot "updater\StudioUpdateSurface.cs"),
+    (Join-Path $repoRoot "updater\InstallationIntegration.cs"),
     $brandSource
 )
 

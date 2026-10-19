@@ -285,6 +285,7 @@ namespace FaceSwapBootstrap {
             using (var key = Registry.CurrentUser.OpenSubKey(state.registryKey ?? UninstallKey, true)) {
                 if (key != null && Convert.ToString(key.GetValue("InstallId")) == state.id && SamePath(Convert.ToString(key.GetValue("InstallLocation")), root)) {
                     key.SetValue("DisplayName", "易容 Studio"); key.SetValue("Publisher", "易容 Studio");
+                    key.SetValue("DisplayVersion",state.version);
                 }
             }
         }
