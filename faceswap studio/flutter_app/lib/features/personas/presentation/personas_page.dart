@@ -50,7 +50,6 @@ class _PersonasPageState extends State<PersonasPage> {
 
   bool _loading = true;
   bool _requestInFlight = false;
-  String _root = '';
   List<_PersonaItem> _items = <_PersonaItem>[];
 
   @override
@@ -159,7 +158,6 @@ class _PersonasPageState extends State<PersonasPage> {
         return;
       }
       setState(() {
-        _root = '${result['root'] ?? ''}';
         _items = (result['items'] as List<dynamic>? ?? const <dynamic>[])
             .cast<Map<String, dynamic>>()
             .map(_PersonaItem.fromJson)
@@ -319,20 +317,9 @@ class _PersonasPageState extends State<PersonasPage> {
                   child: Row(
                     children: [
                       Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('人物形象', style: theme.textTheme.headlineMedium),
-                            const SizedBox(height: 8),
-                            Text(
-                              _root.isEmpty ? '人物形象库' : _root,
-                              style: theme.textTheme.bodyLarge?.copyWith(
-                                color: scheme.onSurfaceVariant,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
+                        child: Text(
+                          '人物形象',
+                          style: theme.textTheme.headlineMedium,
                         ),
                       ),
                       const SizedBox(width: 12),
