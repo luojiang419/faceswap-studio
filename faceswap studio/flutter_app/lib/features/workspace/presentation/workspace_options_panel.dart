@@ -1,3 +1,4 @@
+import 'package:faceswap_studio/app/theme/studio_depth.dart';
 import 'package:flutter/material.dart';
 
 typedef WorkspaceOptionsUpdater =
@@ -72,18 +73,8 @@ class _WorkspaceFloatingOptionsOverlayState
         decoration: BoxDecoration(
           color: theme.cardTheme.color,
           borderRadius: BorderRadius.circular(_expanded ? 22 : 18),
-          border: Border.all(
-            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.42),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(
-                alpha: theme.brightness == Brightness.dark ? 0.32 : 0.14,
-              ),
-              blurRadius: 24,
-              offset: const Offset(0, 10),
-            ),
-          ],
+          border: Border.all(color: StudioDepth.borderColor(context)),
+          boxShadow: StudioDepth.shadows(context, floating: true),
         ),
         clipBehavior: Clip.antiAlias,
         child: _expanded
@@ -427,9 +418,7 @@ class _WorkspaceOptionsPanelState extends State<WorkspaceOptionsPanel> {
       decoration: BoxDecoration(
         color: theme.cardTheme.color,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.35),
-        ),
+        border: Border.all(color: StudioDepth.borderColor(context)),
       ),
       child: DefaultTabController(
         length: 2,

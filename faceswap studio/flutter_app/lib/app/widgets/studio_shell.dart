@@ -1,3 +1,4 @@
+import 'package:faceswap_studio/app/theme/studio_depth.dart';
 import 'package:faceswap_studio/features/about/presentation/about_page.dart';
 import 'package:faceswap_studio/features/home/presentation/home_page.dart';
 import 'package:faceswap_studio/features/personas/presentation/personas_page.dart';
@@ -107,6 +108,7 @@ class _StudioShellState extends State<StudioShell> {
                   const SizedBox(height: 30),
                   Expanded(
                     child: ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(3, 4, 8, 12),
                       itemCount: labels.length,
                       separatorBuilder: (_, index) => const SizedBox(height: 9),
                       itemBuilder: (context, index) {
@@ -115,22 +117,31 @@ class _StudioShellState extends State<StudioShell> {
                             ? scheme.onSurface
                             : scheme.onSurfaceVariant;
                         return Material(
+                          elevation: selected ? 4 : 1.5,
+                          shadowColor: Colors.black.withValues(
+                            alpha: theme.brightness == Brightness.dark
+                                ? 0.4
+                                : 0.16,
+                          ),
+                          surfaceTintColor: Colors.transparent,
                           color: selected
                               ? scheme.surfaceContainerHighest
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(10),
+                              : scheme.surface,
+                          borderRadius: BorderRadius.circular(12),
                           child: InkWell(
-                            borderRadius: BorderRadius.circular(10),
+                            borderRadius: BorderRadius.circular(12),
                             onTap: () => setState(
                               () => _section = StudioSection.values[index],
                             ),
                             child: Container(
                               constraints: const BoxConstraints(minHeight: 65),
                               decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(10),
-                                border: selected
-                                    ? Border.all(color: scheme.outlineVariant)
-                                    : null,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: selected
+                                      ? scheme.primary.withValues(alpha: 0.16)
+                                      : StudioDepth.borderColor(context),
+                                ),
                               ),
                               padding: const EdgeInsets.symmetric(
                                 vertical: 12,

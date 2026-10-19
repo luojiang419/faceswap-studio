@@ -252,7 +252,10 @@ void main() {
 
   testWidgets('首页顶部承接操作入口且在线离线均无 Bridge 状态框', (tester) async {
     await show(tester, const HomePage());
-    expect(find.text('Bridge 在线'), findsNothing);
+    expect(
+      find.textContaining(RegExp(r'^(Bridge|FaceFusion) (在线|离线)$')),
+      findsNothing,
+    );
     expect(find.text('Bridge'), findsNothing);
     expect(find.text('浏览器打开'), findsOneWidget);
     final reload = find

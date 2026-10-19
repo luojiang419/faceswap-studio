@@ -168,7 +168,13 @@ class _Response extends Stream<List<int>> implements HttpClientResponse {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+class _StudioVisualBinding extends AutomatedTestWidgetsFlutterBinding {
+  @override
+  bool get disableShadows => false;
+}
+
 void main() {
+  _StudioVisualBinding();
   final sizes = [
     const Size(1100, 613),
     const Size(1366, 768),
@@ -298,8 +304,13 @@ void main() {
           reason: '$size $title',
         );
       }
-      final preview = find.widgetWithText(OutlinedButton, '生成预览');
-      expect(tester.widget<OutlinedButton>(preview).onPressed, isNotNull);
+      final preview = find
+          .ancestor(
+            of: find.text('生成预览'),
+            matching: find.byWidgetPredicate((w) => w is FilledButton),
+          )
+          .first;
+      expect(tester.widget<FilledButton>(preview).onPressed, isNotNull);
       final previewRect = tester.getRect(preview);
       final runRect = tester.getRect(
         find
@@ -336,7 +347,14 @@ void main() {
       expect(find.text('正在预览'), findsOneWidget);
       expect(
         tester
-            .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '正在预览'))
+            .widget<FilledButton>(
+              find
+                  .ancestor(
+                    of: find.text('正在预览'),
+                    matching: find.byWidgetPredicate((w) => w is FilledButton),
+                  )
+                  .first,
+            )
             .onPressed,
         isNull,
       );
@@ -374,7 +392,14 @@ void main() {
     await tester.pump();
     expect(
       tester
-          .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '生成预览'))
+          .widget<FilledButton>(
+            find
+                .ancestor(
+                  of: find.text('生成预览'),
+                  matching: find.byWidgetPredicate((w) => w is FilledButton),
+                )
+                .first,
+          )
           .onPressed,
       isNull,
     );

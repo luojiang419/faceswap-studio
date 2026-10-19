@@ -1,3 +1,4 @@
+import 'package:faceswap_studio/app/theme/studio_depth.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -864,6 +865,8 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
             constraints.maxWidth <= 1180 || constraints.maxHeight <= 640;
 
         return Card(
+          elevation: 2,
+          shadowColor: Colors.black.withValues(alpha: 0.12),
           child: Padding(
             padding: EdgeInsets.all(compactHeader ? 10 : 18),
             child: Column(
@@ -1311,9 +1314,8 @@ class _WorkspaceDraftCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: theme.cardTheme.color,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.35),
-        ),
+        boxShadow: StudioDepth.shadows(context),
+        border: Border.all(color: StudioDepth.borderColor(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2057,9 +2059,7 @@ class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
           alpha: theme.brightness == Brightness.dark ? 0.22 : 0.46,
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.35),
-        ),
+        border: Border.all(color: StudioDepth.borderColor(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2137,9 +2137,8 @@ class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
         decoration: BoxDecoration(
           color: theme.cardTheme.color,
           borderRadius: BorderRadius.circular(22),
-          border: Border.all(
-            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.35),
-          ),
+          boxShadow: StudioDepth.shadows(context),
+          border: Border.all(color: StudioDepth.borderColor(context)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -2474,7 +2473,7 @@ class _FaceChoiceTile extends StatelessWidget {
     final size = compact ? 58.0 : 66.0;
     final borderColor = selected
         ? theme.colorScheme.primary
-        : theme.colorScheme.outlineVariant.withValues(alpha: 0.42);
+        : StudioDepth.borderColor(context);
     final backgroundColor = selected
         ? theme.colorScheme.primaryContainer.withValues(alpha: 0.26)
         : theme.colorScheme.surface.withValues(alpha: 0.42);
@@ -2607,7 +2606,7 @@ class _WorkspaceSubmitPanel extends StatelessWidget {
           ),
           SizedBox(
             width: secondaryWidth,
-            child: OutlinedButton.icon(
+            child: FilledButton.icon(
               onPressed:
                   bridgeOnline && draft.canSubmit && !busy && !previewBusy
                   ? onPreviewWorkspace
@@ -2628,10 +2627,7 @@ class _WorkspaceSubmitPanel extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-              style: OutlinedButton.styleFrom(
-                minimumSize: Size(0, buttonHeight),
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-              ),
+              style: FilledButton.styleFrom(minimumSize: Size(0, buttonHeight)),
             ),
           ),
           SizedBox(

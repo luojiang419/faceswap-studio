@@ -1,3 +1,4 @@
+import 'package:faceswap_studio/shared/widgets/studio_video_controls.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
@@ -13,12 +14,6 @@ enum StudioComparisonMode { wipe, split, single }
 enum _StudioPanButtons { primary, middleOrSecondary }
 
 typedef _StudioComparisonChildBuilder = Widget Function();
-
-String _formatViewerDuration(Duration duration) {
-  final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
-  final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
-  return '$minutes:$seconds';
-}
 
 bool _mediaKitReady = false;
 
@@ -588,13 +583,31 @@ Future<void> showStudioVideoViewer(
   BuildContext context, {
   required String filePath,
   String? title,
+}) => _showStudioVideoFullscreen(context, filePath: filePath, title: title);
+
+Future<void> _showStudioVideoFullscreen(
+  BuildContext context, {
+  required String filePath,
+  String? title,
+  Player? player,
+  VideoController? controller,
 }) async {
-  await showDialog<void>(
-    context: context,
-    barrierColor: Colors.black87,
-    builder: (context) =>
-        _StudioVideoViewerDialog(filePath: filePath, title: title),
-  );
+  await defaultEnterNativeFullscreen();
+  try {
+    if (!context.mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (context) => _StudioVideoViewerDialog(
+        filePath: filePath,
+        title: title,
+        sharedPlayer: player,
+        sharedController: controller,
+      ),
+    );
+  } finally {
+    await defaultExitNativeFullscreen();
+  }
 }
 
 Future<void> showStudioVideoComparisonViewer(
@@ -603,13 +616,61 @@ Future<void> showStudioVideoComparisonViewer(
   required String afterFilePath,
   String? title,
 }) async {
-  await showDialog<void>(
-    context: context,
-    barrierColor: Colors.black87,
-    builder: (context) => _StudioVideoComparisonViewerDialog(
-      beforeFilePath: beforeFilePath,
-      afterFilePath: afterFilePath,
-      title: title,
+  await defaultEnterNativeFullscreen();
+  try {
+    if (!context.mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (context) => _StudioVideoComparisonViewerDialog(
+        beforeFilePath: beforeFilePath,
+        afterFilePath: afterFilePath,
+        title: title,
+      ),
+    );
+  } finally {
+    await defaultExitNativeFullscreen();
+  }
+}
+
+class _StudioPlayerTransport extends StatelessWidget {
+  const _StudioPlayerTransport({
+    required this.player,
+    required this.onTogglePlayback,
+    required this.onSeek,
+    this.onFullscreen,
+    this.fullscreen = false,
+    this.enabled = true,
+  });
+
+  final Player? player;
+  final VoidCallback onTogglePlayback;
+  final Future<void> Function(Duration) onSeek;
+  final VoidCallback? onFullscreen;
+  final bool fullscreen;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) => StreamBuilder<Duration>(
+    stream: player?.stream.duration,
+    initialData: player?.state.duration ?? Duration.zero,
+    builder: (context, duration) => StreamBuilder<Duration>(
+      stream: player?.stream.position,
+      initialData: player?.state.position ?? Duration.zero,
+      builder: (context, position) => StreamBuilder<bool>(
+        stream: player?.stream.playing,
+        initialData: player?.state.playing ?? false,
+        builder: (context, playing) => StudioVideoControls(
+          duration: duration.data ?? Duration.zero,
+          position: position.data ?? Duration.zero,
+          playing: playing.data == true,
+          enabled: enabled && player != null,
+          onTogglePlayback: onTogglePlayback,
+          onSeek: onSeek,
+          onFullscreen: onFullscreen,
+          fullscreen: fullscreen,
+        ),
+      ),
     ),
   );
 }
@@ -643,7 +704,8 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
   bool _opening = false;
   bool _failed = false;
   bool _playWhenReady = false;
-  bool _hoveringControls = false;
+  final FocusNode _focusNode = FocusNode();
+  bool _fullscreenOpen = false;
   int _openGeneration = 0;
 
   @override
@@ -676,6 +738,7 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
   @override
   void dispose() {
     _disposePlayer();
+    _focusNode.dispose();
     super.dispose();
   }
 
@@ -705,13 +768,15 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
       _playWhenReady = playAfterOpen;
     });
 
-    _ensureMediaKitReady();
-    final player = Player();
-    final controller = VideoController(player);
+    Player? player;
+    VideoController? controller;
     try {
+      _ensureMediaKitReady();
+      player = Player();
+      controller = VideoController(player);
       await player.open(Media(widget.filePath), play: false);
     } catch (_) {
-      await player.dispose();
+      await player?.dispose();
       if (!mounted || generation != _openGeneration) {
         return null;
       }
@@ -751,28 +816,47 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
       return;
     }
 
-    final player = _player ?? await _preparePlayer(playAfterOpen: true);
-    if (player == null) {
+    if (_player == null) {
+      await _preparePlayer(playAfterOpen: true);
       return;
     }
+    final player = _player!;
     if (player.state.playing) {
       await player.pause();
     } else {
       await player.play();
     }
-    _setHoveringControls(false);
   }
 
-  void _setHoveringControls(bool hovering) {
-    if (!mounted) {
+  Future<void> _seek(Duration value) async {
+    final player = _player;
+    if (player == null) return;
+    await player.seek(clampStudioVideoPosition(value, player.state.duration));
+  }
+
+  Future<void> _openFullscreen() async {
+    if (_fullscreenOpen || _opening) return;
+    _focusNode.requestFocus();
+    final player = _player ?? await _preparePlayer(playAfterOpen: false);
+    if (!mounted) return;
+    if (player == null || _controller == null) {
+      widget.onOpenFullscreen?.call();
       return;
     }
-    if (_hoveringControls == hovering) {
-      return;
+    setState(() => _fullscreenOpen = true);
+    try {
+      await _showStudioVideoFullscreen(
+        context,
+        filePath: widget.filePath,
+        player: player,
+        controller: _controller,
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _fullscreenOpen = false);
+        _focusNode.requestFocus();
+      }
     }
-    setState(() {
-      _hoveringControls = hovering;
-    });
   }
 
   @override
@@ -780,46 +864,44 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
     final theme = Theme.of(context);
     final player = _player;
     final controller = _controller;
-
-    return MouseRegion(
-      onEnter: (_) => _setHoveringControls(true),
-      onHover: (_) => _setHoveringControls(true),
-      onExit: (_) => _setHoveringControls(false),
+    return StudioVideoHotkeys(
+      focusNode: _focusNode,
+      onTogglePlayback: _togglePlayback,
+      onSeekRelative: (delta) =>
+          _seek((_player?.state.position ?? Duration.zero) + delta),
+      onFullscreen: _openFullscreen,
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (player != null && controller != null)
-            Video(
-              controller: controller,
-              fit: widget.fit,
-              controls: NoVideoControls,
-            )
-          else if (widget.thumbnailPath != null)
-            Image.file(
-              File(widget.thumbnailPath!),
-              fit: widget.fit,
-              errorBuilder: (_, _, _) => _InlineVideoPlaceholder(
-                icon: Icons.movie_creation_outlined,
-                color: theme.colorScheme.primary,
-              ),
-            )
-          else
-            _InlineVideoPlaceholder(
-              icon: Icons.movie_creation_outlined,
-              color: theme.colorScheme.primary,
-            ),
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.black.withValues(alpha: 0.08),
-                    Colors.black.withValues(alpha: 0.36),
-                  ],
-                ),
-              ),
+          GestureDetector(
+            key: const ValueKey('studio-video-surface'),
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              _focusNode.requestFocus();
+              _togglePlayback();
+            },
+            onDoubleTap: _openFullscreen,
+            child: ColoredBox(
+              color: Colors.black,
+              child: player != null && controller != null && !_fullscreenOpen
+                  ? Video(
+                      controller: controller,
+                      fit: widget.fit,
+                      controls: NoVideoControls,
+                    )
+                  : widget.thumbnailPath != null
+                  ? Image.file(
+                      File(widget.thumbnailPath!),
+                      fit: widget.fit,
+                      errorBuilder: (_, _, _) => _InlineVideoPlaceholder(
+                        icon: Icons.movie_creation_outlined,
+                        color: theme.colorScheme.primary,
+                      ),
+                    )
+                  : _InlineVideoPlaceholder(
+                      icon: Icons.movie_creation_outlined,
+                      color: theme.colorScheme.primary,
+                    ),
             ),
           ),
           if (_failed)
@@ -837,50 +919,36 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
                 height: 28,
                 child: CircularProgressIndicator(strokeWidth: 2.4),
               ),
-            )
-          else if (_hoveringControls)
-            Center(
-              child: StreamBuilder<bool>(
-                stream: player?.stream.playing,
-                initialData: player?.state.playing ?? false,
-                builder: (context, snapshot) {
-                  final playing = snapshot.data == true;
-                  return IconButton.filled(
-                    onPressed: _togglePlayback,
-                    iconSize: 34,
-                    tooltip: playing ? '暂停' : '播放',
-                    icon: Icon(
-                      playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                    ),
-                  );
-                },
-              ),
             ),
           if (widget.showVideoBadge)
-            Positioned(
+            const Positioned(
               left: 8,
-              bottom: 8,
-              child: _InlineVideoBadge(
-                icon: Icons.movie_creation_outlined,
-                label: '视频',
-                color: Colors.white,
-              ),
-            ),
-          if (widget.showFullscreenButton && widget.onOpenFullscreen != null)
-            Positioned(
-              right: 8,
-              bottom: 8,
-              child: IconButton.filledTonal(
-                onPressed: widget.onOpenFullscreen,
-                iconSize: 20,
-                tooltip: '全屏播放',
-                icon: const Icon(Icons.fullscreen_rounded),
-                style: IconButton.styleFrom(
-                  backgroundColor: Colors.black.withValues(alpha: 0.68),
-                  foregroundColor: Colors.white,
+              top: 8,
+              child: IgnorePointer(
+                child: _InlineVideoBadge(
+                  icon: Icons.movie_creation_outlined,
+                  label: '视频',
+                  color: Colors.white,
                 ),
               ),
             ),
+          Positioned(
+            left: 6,
+            right: 6,
+            bottom: 6,
+            child: _StudioPlayerTransport(
+              player: player,
+              enabled: !_opening && !_failed,
+              onTogglePlayback: () {
+                _focusNode.requestFocus();
+                _togglePlayback();
+              },
+              onSeek: _seek,
+              onFullscreen: widget.showFullscreenButton
+                  ? _openFullscreen
+                  : null,
+            ),
+          ),
         ],
       ),
     );
@@ -1214,23 +1282,17 @@ class _NextViewerItemIntent extends Intent {
   const _NextViewerItemIntent();
 }
 
-class _TogglePlaybackIntent extends Intent {
-  const _TogglePlaybackIntent();
-}
-
 class _ViewerKeyboardScope extends StatelessWidget {
   const _ViewerKeyboardScope({
     required this.onDismiss,
     required this.child,
     this.onPreviousItem,
     this.onNextItem,
-    this.onTogglePlayback,
   });
 
   final VoidCallback onDismiss;
   final VoidCallback? onPreviousItem;
   final VoidCallback? onNextItem;
-  final VoidCallback? onTogglePlayback;
   final Widget child;
 
   @override
@@ -1245,9 +1307,6 @@ class _ViewerKeyboardScope extends StatelessWidget {
         if (onNextItem != null)
           const SingleActivator(LogicalKeyboardKey.arrowRight):
               const _NextViewerItemIntent(),
-        if (onTogglePlayback != null)
-          const SingleActivator(LogicalKeyboardKey.space):
-              const _TogglePlaybackIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
@@ -1269,13 +1328,6 @@ class _ViewerKeyboardScope extends StatelessWidget {
             _NextViewerItemIntent: CallbackAction<_NextViewerItemIntent>(
               onInvoke: (_) {
                 onNextItem!();
-                return null;
-              },
-            ),
-          if (onTogglePlayback != null)
-            _TogglePlaybackIntent: CallbackAction<_TogglePlaybackIntent>(
-              onInvoke: (_) {
-                onTogglePlayback!();
                 return null;
               },
             ),
@@ -1553,10 +1605,17 @@ class _StudioImageComparisonViewerDialogState
 }
 
 class _StudioVideoViewerDialog extends StatefulWidget {
-  const _StudioVideoViewerDialog({required this.filePath, this.title});
+  const _StudioVideoViewerDialog({
+    required this.filePath,
+    this.title,
+    this.sharedPlayer,
+    this.sharedController,
+  });
 
   final String filePath;
   final String? title;
+  final Player? sharedPlayer;
+  final VideoController? sharedController;
 
   @override
   State<_StudioVideoViewerDialog> createState() =>
@@ -1566,189 +1625,105 @@ class _StudioVideoViewerDialog extends StatefulWidget {
 class _StudioVideoViewerDialogState extends State<_StudioVideoViewerDialog> {
   late final Player _player;
   late final VideoController _controller;
-  Duration? _dragPosition;
+  bool _failed = false;
 
   @override
   void initState() {
     super.initState();
     _ensureMediaKitReady();
-    _player = Player();
-    _controller = VideoController(_player);
-    _player.open(Media(widget.filePath));
+    _player = widget.sharedPlayer ?? Player();
+    _controller = widget.sharedController ?? VideoController(_player);
+    if (widget.sharedPlayer == null) _openVideo();
+  }
+
+  Future<void> _openVideo() async {
+    try {
+      await _player.open(Media(widget.filePath));
+    } catch (_) {
+      if (mounted) setState(() => _failed = true);
+    }
   }
 
   @override
   void dispose() {
-    _player.dispose();
+    if (widget.sharedPlayer == null) _player.dispose();
     super.dispose();
   }
 
-  Future<void> _togglePlayback() async {
-    if (_player.state.playing) {
-      await _player.pause();
-    } else {
-      await _player.play();
-    }
-  }
+  Future<void> _seek(Duration value) =>
+      _player.seek(clampStudioVideoPosition(value, _player.state.duration));
 
-  Future<void> _seek(Duration position) async {
-    await _player.seek(position < Duration.zero ? Duration.zero : position);
-  }
-
-  Widget _buildControls() {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.72),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            StreamBuilder<bool>(
-              stream: _player.stream.playing,
-              initialData: _player.state.playing,
-              builder: (context, snapshot) {
-                final playing = snapshot.data == true;
-                return IconButton.filledTonal(
-                  onPressed: _togglePlayback,
-                  tooltip: playing ? '暂停' : '播放',
-                  icon: Icon(
-                    playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                  ),
-                );
-              },
-            ),
-            const SizedBox(width: 10),
-            SizedBox(
-              width: 360,
-              child: StreamBuilder<Duration>(
-                stream: _player.stream.duration,
-                initialData: _player.state.duration,
-                builder: (context, durationSnapshot) {
-                  final duration = durationSnapshot.data ?? Duration.zero;
-                  return StreamBuilder<Duration>(
-                    stream: _player.stream.position,
-                    initialData: _player.state.position,
-                    builder: (context, positionSnapshot) {
-                      final position =
-                          _dragPosition ??
-                          positionSnapshot.data ??
-                          Duration.zero;
-                      final maxMilliseconds = duration.inMilliseconds;
-                      final value = position.inMilliseconds
-                          .clamp(0, maxMilliseconds)
-                          .toDouble();
-                      return Slider(
-                        value: maxMilliseconds <= 0 ? 0.0 : value,
-                        min: 0,
-                        max: maxMilliseconds <= 0
-                            ? 1.0
-                            : maxMilliseconds.toDouble(),
-                        onChanged: maxMilliseconds <= 0
-                            ? null
-                            : (nextValue) {
-                                setState(() {
-                                  _dragPosition = Duration(
-                                    milliseconds: nextValue.round(),
-                                  );
-                                });
-                              },
-                        onChangeEnd: maxMilliseconds <= 0
-                            ? null
-                            : (nextValue) async {
-                                final nextPosition = Duration(
-                                  milliseconds: nextValue.round(),
-                                );
-                                await _seek(nextPosition);
-                                if (!mounted) {
-                                  return;
-                                }
-                                setState(() {
-                                  _dragPosition = null;
-                                });
-                              },
-                      );
-                    },
-                  );
-                },
-              ),
-            ),
-            const SizedBox(width: 10),
-            StreamBuilder<Duration>(
-              stream: _player.stream.position,
-              initialData: _player.state.position,
-              builder: (context, snapshot) {
-                final position =
-                    _dragPosition ?? snapshot.data ?? Duration.zero;
-                return Text(
-                  _formatViewerDuration(position),
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                  ),
-                );
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  void _dismiss() => Navigator.of(context).pop();
 
   @override
-  Widget build(BuildContext context) {
-    return Dialog.fullscreen(
-      backgroundColor: Colors.black,
-      child: _ViewerKeyboardScope(
-        onDismiss: () => Navigator.of(context).pop(),
-        onTogglePlayback: () {
-          _togglePlayback();
-        },
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(24, 78, 24, 112),
-                child: _StudioZoomPanViewport(
-                  child: Video(
-                    controller: _controller,
-                    fit: BoxFit.contain,
-                    controls: NoVideoControls,
-                  ),
+  Widget build(BuildContext context) => Dialog.fullscreen(
+    backgroundColor: Colors.black,
+    child: StudioVideoHotkeys(
+      autofocus: true,
+      onDismiss: _dismiss,
+      onTogglePlayback: () => _player.playOrPause(),
+      onSeekRelative: (delta) => _seek(_player.state.position + delta),
+      onFullscreen: _dismiss,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onDoubleTap: _dismiss,
+              child: _failed
+                  ? const Center(
+                      child: Text(
+                        '视频播放失败，请检查文件是否可用。',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                    )
+                  : Video(
+                      controller: _controller,
+                      fit: BoxFit.contain,
+                      controls: NoVideoControls,
+                    ),
+            ),
+          ),
+          Positioned(
+            top: 20,
+            left: 20,
+            right: 68,
+            child: _ViewerHintLabel(
+              label:
+                  '${widget.title ?? '视频播放'} · Space 播放/暂停 · ←/→ 5 秒 · Esc 退出',
+            ),
+          ),
+          Positioned(
+            bottom: 20,
+            left: 20,
+            right: 20,
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 760),
+                child: _StudioPlayerTransport(
+                  player: _player,
+                  enabled: !_failed,
+                  onTogglePlayback: () => _player.playOrPause(),
+                  onSeek: _seek,
+                  fullscreen: true,
+                  onFullscreen: _dismiss,
                 ),
               ),
             ),
-            Positioned(
-              top: 24,
-              left: 24,
-              child: _ViewerHintLabel(
-                label: widget.title == null
-                    ? '视频全屏播放 · Space 播放/暂停 · Esc 退出'
-                    : '${widget.title} · Space 播放/暂停 · Esc 退出',
-              ),
+          ),
+          Positioned(
+            top: 16,
+            right: 16,
+            child: IconButton.filledTonal(
+              tooltip: '退出全屏（Esc）',
+              onPressed: _dismiss,
+              icon: const Icon(Icons.close_rounded),
             ),
-            Positioned(
-              bottom: 24,
-              left: 24,
-              right: 24,
-              child: Center(child: _buildControls()),
-            ),
-            Positioned(
-              top: 24,
-              right: 24,
-              child: IconButton.filledTonal(
-                onPressed: () => Navigator.of(context).pop(),
-                icon: const Icon(Icons.close_rounded),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
-    );
-  }
+    ),
+  );
 }
 
 class _StudioVideoComparisonViewerDialog extends StatefulWidget {
@@ -1783,7 +1758,6 @@ class _StudioVideoComparisonViewerDialogState
   bool _opening = true;
   bool _failed = false;
   bool _syncing = false;
-  Duration? _dragPosition;
 
   @override
   void initState() {
@@ -1960,145 +1934,55 @@ class _StudioVideoComparisonViewerDialogState
     );
   }
 
-  Widget _buildControls() {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.72),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            StreamBuilder<bool>(
-              stream: _afterPlayer.stream.playing,
-              initialData: _afterPlayer.state.playing,
-              builder: (context, snapshot) {
-                final playing = snapshot.data == true;
-                return IconButton.filledTonal(
-                  onPressed: _failed || _opening ? null : _togglePlayback,
-                  tooltip: playing ? '暂停' : '播放',
-                  icon: Icon(
-                    playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                  ),
-                );
-              },
-            ),
-            const SizedBox(width: 10),
-            SizedBox(
-              width: 360,
-              child: StreamBuilder<Duration>(
-                stream: _afterPlayer.stream.duration,
-                initialData: _afterPlayer.state.duration,
-                builder: (context, durationSnapshot) {
-                  final duration = durationSnapshot.data ?? Duration.zero;
-                  return StreamBuilder<Duration>(
-                    stream: _afterPlayer.stream.position,
-                    initialData: _afterPlayer.state.position,
-                    builder: (context, positionSnapshot) {
-                      final position =
-                          _dragPosition ??
-                          positionSnapshot.data ??
-                          Duration.zero;
-                      final maxMilliseconds = duration.inMilliseconds;
-                      final value = position.inMilliseconds
-                          .clamp(0, maxMilliseconds)
-                          .toDouble();
-                      return Slider(
-                        value: maxMilliseconds <= 0 ? 0.0 : value,
-                        min: 0,
-                        max: maxMilliseconds <= 0
-                            ? 1.0
-                            : maxMilliseconds.toDouble(),
-                        onChanged: _failed || _opening || maxMilliseconds <= 0
-                            ? null
-                            : (nextValue) {
-                                setState(() {
-                                  _dragPosition = Duration(
-                                    milliseconds: nextValue.round(),
-                                  );
-                                });
-                              },
-                        onChangeEnd: _failed || _opening || maxMilliseconds <= 0
-                            ? null
-                            : (nextValue) async {
-                                final nextPosition = Duration(
-                                  milliseconds: nextValue.round(),
-                                );
-                                await _seek(nextPosition);
-                                if (!mounted) {
-                                  return;
-                                }
-                                setState(() {
-                                  _dragPosition = null;
-                                });
-                              },
-                      );
-                    },
-                  );
-                },
-              ),
-            ),
-            const SizedBox(width: 10),
-            StreamBuilder<Duration>(
-              stream: _afterPlayer.stream.position,
-              initialData: _afterPlayer.state.position,
-              builder: (context, snapshot) {
-                final position =
-                    _dragPosition ?? snapshot.data ?? Duration.zero;
-                return Text(
-                  _formatDuration(position),
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                  ),
-                );
-              },
-            ),
-            const SizedBox(width: 16),
-            _ComparisonModeButtons(
-              mode: _mode,
-              onChanged: (mode) {
-                setState(() {
-                  _mode = mode;
-                });
-              },
-              compact: true,
-            ),
-          ],
+  Widget _buildControls() => ConstrainedBox(
+    constraints: const BoxConstraints(maxWidth: 760),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _ComparisonModeButtons(
+          mode: _mode,
+          compact: true,
+          onChanged: (mode) => setState(() => _mode = mode),
         ),
-      ),
-    );
-  }
-
-  String _formatDuration(Duration duration) {
-    return _formatViewerDuration(duration);
-  }
+        const SizedBox(height: 8),
+        _StudioPlayerTransport(
+          player: _afterPlayer,
+          enabled: !_failed && !_opening,
+          onTogglePlayback: _togglePlayback,
+          onSeek: _seek,
+          fullscreen: true,
+          onFullscreen: () => Navigator.of(context).pop(),
+        ),
+      ],
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
     return Dialog.fullscreen(
       backgroundColor: Colors.black,
-      child: _ViewerKeyboardScope(
+      child: StudioVideoHotkeys(
+        autofocus: true,
+        onSeekRelative: (delta) => _seek(_afterPlayer.state.position + delta),
+        onFullscreen: () => Navigator.of(context).pop(),
         onDismiss: () => Navigator.of(context).pop(),
         onTogglePlayback: _togglePlayback,
         child: Stack(
           children: [
             Positioned.fill(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(24, 78, 24, 112),
+                padding: const EdgeInsets.fromLTRB(24, 78, 24, 156),
                 child: _buildVideoComparison(),
               ),
             ),
             Positioned(
               top: 24,
               left: 24,
+              right: 76,
               child: _ViewerHintLabel(
                 label: widget.title == null
-                    ? '视频对比 · Space 播放/暂停 · Esc 退出'
-                    : '${widget.title} · Space 播放/暂停 · Esc 退出',
+                    ? '视频对比 · Space 播放/暂停 · ←/→ 5 秒 · Esc 退出'
+                    : '${widget.title} · Space 播放/暂停 · ←/→ 5 秒 · Esc 退出',
               ),
             ),
             Positioned(

@@ -1,3 +1,4 @@
+import 'package:faceswap_studio/app/theme/studio_depth.dart';
 import 'dart:async';
 
 import 'package:faceswap_studio/shared/services/bridge_client.dart';
@@ -565,7 +566,6 @@ class _HomeDashboard extends StatelessWidget {
     final overview = _HomeOverviewCard(
       compact: true,
       bridgeOnline: bridgeOnline,
-      serviceLabel: serviceLabel,
       webuiUrl: webuiUrl,
       facefusionPid: facefusionPid,
       busy: busy,
@@ -657,26 +657,12 @@ class _DashboardSurface extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final dark = theme.brightness == Brightness.dark;
     return Container(
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.65),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: dark ? 0.18 : 0.035),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-          ),
-          BoxShadow(
-            color: Colors.black.withValues(alpha: dark ? 0.10 : 0.02),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        border: Border.all(color: StudioDepth.borderColor(context)),
+        boxShadow: StudioDepth.shadows(context),
       ),
       child: child,
     );
@@ -687,7 +673,6 @@ class _HomeOverviewCard extends StatelessWidget {
   const _HomeOverviewCard({
     this.compact = false,
     required this.bridgeOnline,
-    required this.serviceLabel,
     required this.webuiUrl,
     required this.facefusionPid,
     required this.busy,
@@ -697,7 +682,6 @@ class _HomeOverviewCard extends StatelessWidget {
 
   final bool compact;
   final bool bridgeOnline;
-  final String serviceLabel;
   final String webuiUrl;
   final int? facefusionPid;
   final bool busy;
@@ -753,11 +737,6 @@ class _HomeOverviewCard extends StatelessWidget {
                     Padding(
                       padding: const EdgeInsets.only(right: 8),
                       child: Text('首页', style: theme.textTheme.titleLarge),
-                    ),
-                    _StatusPill(
-                      compact: true,
-                      active: serviceLabel == '在线' || serviceLabel == '启动中',
-                      label: 'FaceFusion $serviceLabel',
                     ),
                     FilledButton.tonalIcon(
                       onPressed: bridgeOnline && !busy ? onReload : null,
@@ -905,9 +884,8 @@ class _MetricCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: theme.cardTheme.color,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.35),
-          ),
+          boxShadow: StudioDepth.shadows(context, subtle: true),
+          border: Border.all(color: StudioDepth.borderColor(context)),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -1059,9 +1037,8 @@ class _SummaryMiniCard extends StatelessWidget {
             ? const Color(0xFF282724)
             : const Color(0xFFF7F7F7),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.22),
-        ),
+        boxShadow: StudioDepth.shadows(context, subtle: true),
+        border: Border.all(color: StudioDepth.borderColor(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1101,53 +1078,6 @@ class _SummaryMiniCard extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _StatusPill extends StatelessWidget {
-  const _StatusPill({
-    this.compact = false,
-    required this.active,
-    required this.label,
-  });
-
-  final bool compact;
-  final bool active;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: compact ? 10 : 12,
-        vertical: compact ? 6 : 8,
-      ),
-      decoration: BoxDecoration(
-        color:
-            (active
-                    ? theme.colorScheme.primary
-                    : theme.colorScheme.surfaceContainerHighest)
-                .withValues(alpha: active ? 0.16 : 0.7),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: active
-              ? theme.colorScheme.primary.withValues(alpha: 0.28)
-              : theme.colorScheme.outlineVariant,
-        ),
-      ),
-      child: Text(
-        label,
-        style:
-            (compact ? theme.textTheme.labelMedium : theme.textTheme.labelLarge)
-                ?.copyWith(
-                  color: active
-                      ? theme.colorScheme.primary
-                      : theme.colorScheme.onSurfaceVariant,
-                ),
       ),
     );
   }
