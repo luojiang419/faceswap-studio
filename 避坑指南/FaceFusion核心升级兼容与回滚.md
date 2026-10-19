@@ -66,3 +66,22 @@ Bridge 自有兼容逻辑应放在 `faceswap studio/bridge/`，避免写回上�
 解决：在 Bridge `_build_env` 同步设置 Gradio 实际读取的 `GRADIO_SERVER_NAME` 和 `GRADIO_SERVER_PORT`，并设 `GRADIO_NUM_PORTS=1`。端口冲突时明确失败，避免启动到未知地址。不要修改上游核心或终止占用端口的其他应用。
 
 验证：带继承错误 Gradio 环境变量的回归通过；Bridge 52749 / WebUI 17861 实际启动 ready、HTTP 200，配置含 AlphaFace / HRFFA；原有 7860 应用保持运行。详情见 `开发任务/007-FaceFusion核心升级3.9.1.md`。
+
+## 2026-10-19：部署强杀前端导致 launcher 弹出 -1
+
+表现：launcher 记录前端已运行 1109.6 秒，随后退出 `4294967295`（`0xFFFFFFFF`）；wrapper 报 `ExitCode=-1`。同一时刻部署操作执行 `Stop-Process`，并在覆盖 `icudtl.dat` 时遇到映射文件仍占用。
+
+根因：强制终止属于异常退出；启动器按非零退出码报错。只结束前端、未等启动器和服务清理就覆盖构建目录，还可能产生新旧 DLL/资源混用。这次记录不能当作核心导入失败，也不能把所有 -1 改成成功来掩盖真正的崩溃。
+
+修复和后续流程：
+
+- 使用 `scripts/deploy_flutter_app.py --source <完整 Release 目录>`；该脚本先准备完整临时目录，调用现有托盘退出命令（兼容关闭按钮最小化到托盘），等待本目录运行进程及其子进程结束，再通过目录切换部署。失败恢复原目录，超时不强杀、不覆盖。`build_flutter_app.ps1` 已接入。
+- 只需退出时使用 `.venv-win/Scripts/python.exe scripts/deploy_flutter_app.py`。不要手动 `Stop-Process` 后直接覆盖 `current`，也不要用 `taskkill` 测试正常退出。
+- 每次启动在独立 Python 进程中预检 Bridge 顶层导入、两个 worker、全部处理器、关键函数参数与核心完整性；不创建用户数据目录、不加载推理模型。此检查不等同于所有模型推理测试。
+- 签名更新在覆盖前对 stage 预检；失败重新打开旧版。更新健康握手分为桌面首帧和核心就绪，绑定根目录、版本、发布序号、wrapper PID 与随机 token，要求近期心跳并稳定存活 5 秒。缺模型时允许进入下载引导，但导入兼容性必须通过。
+- 计划更新等待 wrapper 退出，避免 Python 结束但原生启动器尚未释放。更新子进程失败由更新器报告并回滚，wrapper 不再用模态弹窗阻塞；普通启动错误仍显示真实退出码。
+- 魔搭更新 `release_modelscope.py` 的构建与发布（含 `--snapshot`）都会解压实际 ZIP 进行完整文件检查和独立兼容性预检。构建时重新编译原生启动器，避免只改 C# 未更新 EXE。
+- 新版更新器会拒绝缺少 `updater/preflight.py` 的旧格式更新包，需要用新发布脚本重建。客户端安装环境不同导致预检不通过时保留旧版，不能仅依赖开发机验收。
+- `.github/workflows/update-lifecycle.yml` 在后续 push/PR 执行 Windows 更新生命周期回归；完整核心兼容性仍由本机/发布入口和客户端执行。
+
+验证记录和限制见 `开发任务/009-更新退出与启动验收修复.md`。

@@ -79,14 +79,9 @@ finally {
 }
 
 $builtAppRoot = Join-Path $flutterProject "build\windows\x64\runner\Release"
-$resolvedDeploymentRoot = [System.IO.Path]::GetFullPath($deploymentRoot)
-$resolvedWindowsAppRoot = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "faceswap studio\runtime\windows_app"))
-if (-not $resolvedDeploymentRoot.StartsWith($resolvedWindowsAppRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-    throw "Refusing to clean unexpected deployment path: $resolvedDeploymentRoot"
+$pythonExe = Join-Path $repoRoot ".venv-win\Scripts\python.exe"
+& $pythonExe (Join-Path $PSScriptRoot "deploy_flutter_app.py") --root $repoRoot --source $builtAppRoot
+if ($LASTEXITCODE -ne 0) {
+    throw "Frontend deployment cancelled; the previous deployment was preserved."
 }
-if (Test-Path -LiteralPath $deploymentRoot) {
-    Remove-Item -LiteralPath $deploymentRoot -Recurse -Force
-}
-Ensure-Directory -Path $deploymentRoot | Out-Null
-Copy-Item -Path (Join-Path $builtAppRoot "*") -Destination $deploymentRoot -Recurse -Force
 Write-Host "Flutter desktop app deployed to $deploymentRoot"

@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import urllib.parse
 import urllib.request
 import zipfile
@@ -19,6 +20,28 @@ ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT
 sys.path.insert(0, str(ROOT))
 from updater.transaction import safe_path, sha256, write_json, read_json
+from updater.preflight import run_preflight
+
+
+def validate_package(package):
+    """验证 ZIP 中的实际代码，不以开发目录通过代替发布包通过。"""
+    with tempfile.TemporaryDirectory(prefix='faceswap-release-') as directory:
+        stage = Path(directory)
+        with zipfile.ZipFile(package) as archive:
+            for entry in archive.infolist():
+                target = stage / safe_path(entry.filename)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(archive.read(entry))
+        required = ('VERSION', 'update-config.json', 'launch_faceswap_studio.py', '启动FaceSwap Studio.exe',
+                    'FaceSwapStudioUpdater.exe', 'updater/preflight.py',
+                    'faceswap studio/runtime/windows_app/current/faceswap_studio.exe',
+                    'faceswap studio/runtime/windows_app/current/flutter_windows.dll',
+                    'faceswap studio/runtime/windows_app/current/data/app.so',
+                    'faceswap studio/runtime/windows_app/current/data/icudtl.dat')
+        for name in required:
+            if not (stage / name).is_file() or not (stage / name).stat().st_size:
+                raise ValueError('更新包缺少必要文件：' + name)
+        return run_preflight(stage)
 
 
 def file_url(repo, relative):
@@ -56,6 +79,9 @@ def sources():
 
 
 def build(notes, min_version):
+    run_preflight(ROOT)
+    subprocess.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+                    str(ROOT / 'scripts/build_launcher.ps1')], cwd=ROOT, check=True)
     key, config = keys()
     release_id = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     config["releaseId"] = release_id
@@ -73,6 +99,8 @@ def build(notes, min_version):
             safe_path(relative)
             archive.write(file, relative)
             records.append({"path": relative, "size": file.stat().st_size, "sha256": sha256(file)})
+    validation = validate_package(package)
+    write_json(output / 'preflight.json', validation)
     release_path = f"releases/{version}/{release_id}/{package.name}"
     manifest = {"protocol": 1, "product": "faceswap-studio", "platform": "win32-x64", "version": version, "releaseId": release_id,
                 "minVersion": min_version, "publishedAt": datetime.now(timezone.utc).isoformat(), "notes": notes,
@@ -104,6 +132,8 @@ def publish(output):
     package = output / manifest["package"]["name"]
     if package.stat().st_size != manifest["package"]["size"] or sha256(package) != manifest["package"]["sha256"]:
         raise ValueError("待发布包校验失败")
+    # 校验签名和哈希后、连接远端前验包，包括复用 --snapshot 的发布。
+    validate_package(package)
     repo = config["repository"]
     api = HubApi()
     try:

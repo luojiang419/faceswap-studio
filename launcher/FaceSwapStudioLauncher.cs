@@ -32,7 +32,8 @@ internal static class FaceSwapStudioLauncher
             {
                 ShowError(
                     "FaceSwap Studio",
-                    "Launcher exited with an error. See:\n" + wrapperLogPath
+                    "FaceSwap Studio 异常退出（退出码 0x" + exitCode.ToString("X8") + "）。\n" +
+                    "请查看 launcher.log、bridge.log 和以下日志：\n" + wrapperLogPath
                 );
             }
             return exitCode;
@@ -106,9 +107,12 @@ internal static class FaceSwapStudioLauncher
         using (var process = new Process { StartInfo = startInfo })
         {
             process.Start();
-            string stdout = process.StandardOutput.ReadToEnd();
-            string stderr = process.StandardError.ReadToEnd();
+            // 同时排空两个管道，避免核心导入错误或大量输出撑满 stderr 后互相等待。
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
             process.WaitForExit();
+            string stdout = stdoutTask.Result;
+            string stderr = stderrTask.Result;
 
             if (!string.IsNullOrWhiteSpace(stdout))
             {
@@ -135,6 +139,11 @@ internal static class FaceSwapStudioLauncher
 
     private static void ShowError(string title, string message)
     {
+        // 更新器拥有错误展示与回滚；模态弹窗会使 wrapper 一直存活、锁住更新文件。
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("FACESWAP_STUDIO_UPDATE_SESSION")))
+        {
+            return;
+        }
         MessageBox.Show(
             message,
             title,

@@ -136,6 +136,8 @@ def test_failed_restart_restores_and_reopens_old_version(tmp_path, monkeypatch):
     old = root / "faceswap studio/bridge/app_server.py"
     old.parent.mkdir(parents=True); old.write_bytes(b"working old version")
     monkeypatch.setattr(u, "wait_exit", lambda *args: None)
+    monkeypatch.setattr(u, 'preflight_update', lambda *args: None)
+    u.write_json(session / 'health-challenge.json', {'token': 'test'})
     restarts = []
     class FailedChild:
         pid = 12345
@@ -155,11 +157,15 @@ def test_failed_restart_restores_and_reopens_old_version(tmp_path, monkeypatch):
 def test_success_requires_health_ack(tmp_path, monkeypatch):
     root, session, settings = prepare(tmp_path)
     monkeypatch.setattr(u, "wait_exit", lambda *args: None)
+    monkeypatch.setattr(u, 'preflight_update', lambda *args: None)
+    monkeypatch.setattr(u, 'HEALTH_STABILITY_SECONDS', 0)
+    u.write_json(session / 'health-challenge.json', {'token': 'test'})
     class HealthyChild:
         pid = 12345
         def poll(self): return None
     def restart(root, session, health=True):
-        u.write_json(session / "healthy.json", {"version": "2.0.2"})
+        u.write_json(session / "healthy.json", {'ok': True, 'status': 'ready', 'version': '2.0.2',
+                     'root': str(root.resolve()), 'pid': 12345, 'token': 'test', 'coreState': 'ready', 'checkedAt': u.time.time()})
         return HealthyChild()
     monkeypatch.setattr(u, "restart", restart)
     u.run(session)
@@ -170,6 +176,7 @@ def test_success_requires_health_ack(tmp_path, monkeypatch):
 def test_failed_rollback_keeps_pending_for_recovery(tmp_path, monkeypatch):
     root, session, settings = prepare(tmp_path)
     monkeypatch.setattr(u, "wait_exit", lambda *args: None)
+    monkeypatch.setattr(u, 'preflight_update', lambda *args: None)
     def fail_install(root, session, manifest):
         u.write_json(session / "journal.json", {"status": "installing", "changes": []})
         raise OSError("写入故障")

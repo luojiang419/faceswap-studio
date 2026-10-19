@@ -609,11 +609,52 @@ def write_launcher_log(studio_root: Path, message: str) -> None:
         log_handle.write(f"[{timestamp}] {message}\n")
 
 
+def monitor_update_health(repo_root: Path, stop: threading.Event) -> None:
+    from updater.transaction import read_json, write_json
+    health_file = os.environ.get('FACESWAP_STUDIO_UPDATE_HEALTH_FILE')
+    session = os.environ.get('FACESWAP_STUDIO_UPDATE_SESSION')
+    if not health_file or not session:
+        return
+    target = Path(health_file).resolve()
+    if target != (Path(session) / 'healthy.json').resolve() or not target.is_relative_to(
+            (repo_root / 'faceswap studio/data/cache/updates').resolve()):
+        return
+    expected_pid = int(os.environ.get('FACESWAP_STUDIO_WRAPPER_PID', os.getpid()))
+    while not stop.wait(0.5):
+        try:
+            receipt = read_json(target.with_name('frontend-ready.json'))
+            if (receipt.get('pid') != expected_pid or receipt.get('root') != str(repo_root.resolve()) or
+                    receipt.get('token') != os.environ.get('FACESWAP_STUDIO_UPDATE_TOKEN')):
+                continue
+            bootstrap = get_model_bootstrap_status()
+            status = get_facefusion_status()
+            if not bootstrap or not status:
+                continue
+            if bootstrap.get('ready') is True and status.get('state') != 'ready':
+                target.unlink(missing_ok=True)
+                continue
+            if bootstrap.get('ready') is not True and bootstrap.get('missing_count', 0) <= 0:
+                continue
+            receipt['coreState'] = status.get('state')
+            receipt['modelsReady'] = bootstrap.get('ready') is True
+            receipt['checkedAt'] = time.time()
+            write_json(target, receipt)
+        except (OSError, ValueError):
+            continue
+
+
 def launch_frontend(command: list[str], command_cwd: Path) -> tuple[int, float]:
     started_at = time.monotonic()
     process = subprocess.Popen(command, cwd=command_cwd, shell=False)
 
-    exit_code = process.wait()
+    stop = threading.Event()
+    monitor = threading.Thread(target=monitor_update_health, args=(resolve_repo_root(), stop), daemon=True)
+    monitor.start()
+    try:
+        exit_code = process.wait()
+    finally:
+        stop.set()
+        monitor.join(timeout=10)
     return exit_code, time.monotonic() - started_at
 
 
@@ -712,6 +753,9 @@ def main() -> int:
         write_launcher_log(studio_root, f"Using flutter run fallback in: {flutter_project}")
 
     try:
+        from updater.preflight import run_preflight
+        preflight = run_preflight(repo_root, resolve_runtime_python(repo_root))
+        write_launcher_log(studio_root, f"Core/Bridge/worker preflight passed: {preflight['coreVersion']}.")
         if not os.environ.get("FACESWAP_STUDIO_ISOLATED"):
             cleanup_stale_runtime_processes(repo_root, studio_root)
         bridge_process, bridge_log_handle = start_bridge_if_needed(repo_root, studio_root)

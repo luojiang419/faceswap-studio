@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import secrets
 import shutil
 import stat
 import subprocess
@@ -239,12 +240,44 @@ def preparation_deadline(session, manifest, pid, deadline, limit):
 
 def restart(root, session, health=True):
     env = {k: v for k, v in os.environ.items() if k not in (
-        "ELECTRON_RUN_AS_NODE", "FACESWAP_STUDIO_UPDATE_HEALTH_FILE", "FACESWAP_STUDIO_UPDATE_SESSION")}
+        "ELECTRON_RUN_AS_NODE", "FACESWAP_STUDIO_UPDATE_HEALTH_FILE", "FACESWAP_STUDIO_UPDATE_SESSION",
+        "FACESWAP_STUDIO_UPDATE_TOKEN", "FACESWAP_STUDIO_WRAPPER_PID", "FACESWAP_STUDIO_LAUNCHER_PID")}
     if health:
+        for name in ('healthy.json', 'frontend-ready.json', 'healthy.json.preparing'):
+            (session / name).unlink(missing_ok=True)
+        token = secrets.token_hex(32)
+        write_json(session / 'health-challenge.json', {'token': token})
         env["FACESWAP_STUDIO_UPDATE_HEALTH_FILE"] = str(session / "healthy.json")
         env["FACESWAP_STUDIO_UPDATE_SESSION"] = str(session)
+        env["FACESWAP_STUDIO_UPDATE_TOKEN"] = token
     return subprocess.Popen([str(root / "启动FaceSwap Studio.exe")], cwd=root, env=env,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+HEALTH_STABILITY_SECONDS = 5.0
+
+
+def valid_health(health, root, manifest, pid, token):
+    return bool(token) and (
+        health.get('ok') is True and health.get('status') == 'ready' and
+        health.get('version') == manifest['version'] and
+        health.get('releaseId', '00000000000000') == manifest.get('releaseId', '00000000000000') and
+        health.get('root') == str(root.resolve()) and health.get('pid') == pid and health.get('token') == token and
+        isinstance(health.get('checkedAt'), (int, float)) and 0 <= time.time() - health['checkedAt'] < 10 and
+        (health.get('coreState') == 'ready' or health.get('modelsReady') is False))
+
+
+def preflight_update(root, session, manifest):
+    # 事务脚本被复制到会话独立执行，不能依赖被覆盖中的 updater 包。
+    probe = session / 'stage/updater/preflight.py'
+    if not probe.is_file():
+        raise ValueError('更新包缺少核心兼容性预检，拒绝覆盖当前可用版本')
+    result = subprocess.run([sys.executable, '-B', str(probe), '--root', str(session / 'stage')],
+                            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=120,
+                            cwd=session / 'stage', creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    (session / 'preflight.log').write_text(result.stdout + result.stderr, encoding='utf-8')
+    if result.returncode:
+        raise RuntimeError('新版核心与当前运行环境不兼容，原版本未改动；详见 preflight.log')
 
 
 def run(session: Path, recover=False):
@@ -266,20 +299,30 @@ def run(session: Path, recover=False):
     write_json(pending, {"session": str(session), "pid": os.getpid()})
     write_json(session / "status.json", {"status": "installing", "version": manifest["version"]})
     try:
+        preflight_update(root, session, manifest)
         install(root, session, manifest)
         emit("正在重启并检查本地服务…", 90)
         child = restart(root, session)
+        token = read_json(session / 'health-challenge.json')['token']
         deadline = time.monotonic() + 210
         preparation_limit = time.monotonic() + 24 * 3600
+        healthy_since = None
         try:
             while time.monotonic() < deadline:
+                if child.poll() is not None:
+                    raise RuntimeError("新版软件启动失败")
                 deadline = preparation_deadline(session, manifest, child.pid, deadline, preparation_limit)
                 if (session / "healthy.json").exists():
                     health = read_json(session / "healthy.json")
-                    if health.get("version") == manifest["version"] and health.get("releaseId", "00000000000000") == manifest.get("releaseId", "00000000000000"):
-                        break
-                if child.poll() is not None:
-                    raise RuntimeError("新版软件启动失败")
+                    if valid_health(health, root, manifest, child.pid, token):
+                        if healthy_since is None:
+                            healthy_since = time.monotonic()
+                        if time.monotonic() - healthy_since >= HEALTH_STABILITY_SECONDS:
+                            break
+                    else:
+                        healthy_since = None
+                else:
+                    healthy_since = None
                 time.sleep(0.5)
             else:
                 raise TimeoutError("新版启动检查超时")

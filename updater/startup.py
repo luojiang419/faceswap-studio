@@ -29,7 +29,7 @@ def resume_update(root):
         settings = read_json(session / 'session.json')
         if Path(settings['root']).resolve() != root:
             raise ValueError('计划更新安装目录不匹配')
-        settings['parentPid'] = os.getpid()
+        settings['parentPid'] = int(os.environ.get('FACESWAP_STUDIO_WRAPPER_PID', os.getpid()))
         write_json(session / 'session.json', settings)
         subprocess.Popen([str(session / 'FaceSwapStudioUpdater.exe'), str(session), sys.executable],
                          creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
@@ -44,7 +44,8 @@ def confirm_ready(root):
     receipt = {'ok': True, 'status': 'ready', 'root': str(root),
                'version': (root / 'VERSION').read_text('utf-8-sig').strip(),
                'releaseId': config['releaseId'],
-               'pid': int(os.environ.get('FACESWAP_STUDIO_LAUNCHER_PID', os.getpid()))}
+               'pid': int(os.environ.get('FACESWAP_STUDIO_WRAPPER_PID', os.environ.get('FACESWAP_STUDIO_LAUNCHER_PID', os.getpid()))),
+               'token': os.environ.get('FACESWAP_STUDIO_UPDATE_TOKEN')}
     report = os.environ.get('FACESWAP_STUDIO_INSTALL_REPORT')
     session_id = os.environ.get('FACESWAP_STUDIO_INSTALL_SESSION')
     if report and session_id:
@@ -61,5 +62,6 @@ def confirm_ready(root):
         cache = root / 'faceswap studio/data/cache/updates'
         if target != (Path(session) / 'healthy.json').resolve() or not target.is_relative_to(cache.resolve()):
             raise ValueError('更新健康确认位置不匹配')
-        write_json(target, receipt)
+        # 首帧仅代表桌面出现；launcher 确认核心状态后才写最终 healthy.json。
+        write_json(target.with_name('frontend-ready.json'), receipt)
     return receipt

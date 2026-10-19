@@ -41,4 +41,25 @@ def test_first_frame_ack_contains_version_and_release(tmp_path, monkeypatch):
     monkeypatch.setenv('FACESWAP_STUDIO_UPDATE_HEALTH_FILE', str(session / 'healthy.json'))
     receipt = startup.confirm_ready(tmp_path)
     assert receipt['status'] == 'ready'
-    assert startup.read_json(session / 'healthy.json')['releaseId'] == '20261018000002'
+    assert startup.read_json(session / 'frontend-ready.json')['releaseId'] == '20261018000002'
+    assert not (session / 'healthy.json').exists()
+
+
+def test_scheduled_update_waits_for_wrapper(tmp_path, monkeypatch):
+    session = tmp_path / 'faceswap studio/data/cache/updates/session'
+    write_json(session / 'session.json', {'root': str(tmp_path)})
+    write_json(session.parent / 'scheduled.json', {'session': str(session)})
+    monkeypatch.setenv('FACESWAP_STUDIO_WRAPPER_PID', '12345')
+    monkeypatch.setattr(startup.subprocess, 'Popen', lambda *args, **kwargs: None)
+    assert startup.resume_update(tmp_path)
+    assert startup.read_json(session / 'session.json')['parentPid'] == 12345
+
+
+def test_installer_receipt_path_unchanged(tmp_path, monkeypatch):
+    (tmp_path / 'VERSION').write_text('0.1.3')
+    write_json(tmp_path / 'update-config.json', {'releaseId': '20261018000002'})
+    target = tmp_path / 'data/cache/install/test.json'
+    monkeypatch.setenv('FACESWAP_STUDIO_INSTALL_REPORT', str(target))
+    monkeypatch.setenv('FACESWAP_STUDIO_INSTALL_SESSION', 'test')
+    startup.confirm_ready(tmp_path)
+    assert startup.read_json(target)['session'] == 'test'
