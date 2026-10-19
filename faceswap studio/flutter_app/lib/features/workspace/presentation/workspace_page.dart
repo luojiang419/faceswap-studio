@@ -904,7 +904,10 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
                           end: Alignment.bottomRight,
                           colors: theme.brightness == Brightness.dark
                               ? const [Color(0xFF171716), Color(0xFF20201E)]
-                              : const [Color(0xFFFFFFFF), Color(0xFFFAFAFA)],
+                              : [
+                                  theme.colorScheme.surface,
+                                  theme.colorScheme.surfaceContainerLowest,
+                                ],
                         ),
                         border: Border.all(
                           color: theme.colorScheme.outlineVariant.withValues(
@@ -1346,7 +1349,7 @@ class _WorkspaceDraftCard extends StatelessWidget {
               child: Material(
                 color: theme.brightness == Brightness.dark
                     ? const Color(0xFF20201E)
-                    : const Color(0xFFF5F5F5),
+                    : theme.colorScheme.surfaceContainer,
                 child: InkWell(
                   onTap: mediaType == 'video' ? null : onOpenPreview,
                   child: SizedBox(
@@ -1694,7 +1697,7 @@ class _PersonaChoiceCard extends StatelessWidget {
                 width: double.infinity,
                 color: theme.brightness == Brightness.dark
                     ? const Color(0xFF20201E)
-                    : const Color(0xFFF5F5F5),
+                    : theme.colorScheme.surfaceContainer,
                 child: item.previewPath == null
                     ? Icon(
                         Icons.face_retouching_natural_rounded,
@@ -2168,7 +2171,7 @@ class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
                 child: Material(
                   color: theme.brightness == Brightness.dark
                       ? const Color(0xFF20201E)
-                      : const Color(0xFFF5F5F5),
+                      : theme.colorScheme.surfaceContainer,
                   child: InkWell(
                     onTap: widget.onOpenPreviewResult,
                     child: SizedBox(
@@ -3290,7 +3293,7 @@ class _QueueSummary extends StatelessWidget {
         decoration: BoxDecoration(
           color: theme.brightness == Brightness.dark
               ? const Color(0x24F6AA75)
-              : const Color(0x14303030),
+              : theme.colorScheme.primary.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(18),
         ),
         child: Column(
@@ -3503,7 +3506,7 @@ class _QueueMediaPreview extends StatelessWidget {
               width: 120,
               color: theme.brightness == Brightness.dark
                   ? const Color(0xFF20201E)
-                  : const Color(0xFFF5F5F5),
+                  : theme.colorScheme.surfaceContainer,
               child: isVideo
                   ? StudioInlineVideoPlayer(
                       filePath: filePath!,

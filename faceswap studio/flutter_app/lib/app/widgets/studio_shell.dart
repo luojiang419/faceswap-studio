@@ -114,7 +114,7 @@ class _StudioShellState extends State<StudioShell> {
                       itemBuilder: (context, index) {
                         final selected = _section.index == index;
                         final color = selected
-                            ? scheme.onSurface
+                            ? scheme.onPrimaryContainer
                             : scheme.onSurfaceVariant;
                         return Material(
                           elevation: selected ? 4 : 1.5,
@@ -125,7 +125,7 @@ class _StudioShellState extends State<StudioShell> {
                           ),
                           surfaceTintColor: Colors.transparent,
                           color: selected
-                              ? scheme.surfaceContainerHighest
+                              ? scheme.primaryContainer
                               : scheme.surface,
                           borderRadius: BorderRadius.circular(12),
                           child: InkWell(

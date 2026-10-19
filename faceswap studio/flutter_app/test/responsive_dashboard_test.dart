@@ -270,6 +270,8 @@ void main() {
   }
 
   Future<void> capture(WidgetTester tester, String name) async {
+    // 等待按钮从禁用态切换后的颜色动画，避免把过渡中的灰字当作最终配色。
+    await tester.pump(const Duration(milliseconds: 300));
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 60)),
     );

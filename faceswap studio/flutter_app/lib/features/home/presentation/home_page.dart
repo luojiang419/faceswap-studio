@@ -980,7 +980,7 @@ class _HomeLogCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(18),
                   color: theme.brightness == Brightness.dark
                       ? const Color(0xFF171716)
-                      : const Color(0xFFFFFFFF),
+                      : theme.colorScheme.surfaceContainerLowest,
                 ),
                 child: logs.isEmpty
                     ? Center(
@@ -1035,7 +1035,7 @@ class _SummaryMiniCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: theme.brightness == Brightness.dark
             ? const Color(0xFF282724)
-            : const Color(0xFFF7F7F7),
+            : theme.colorScheme.surfaceContainer,
         borderRadius: BorderRadius.circular(16),
         boxShadow: StudioDepth.shadows(context, subtle: true),
         border: Border.all(color: StudioDepth.borderColor(context)),
