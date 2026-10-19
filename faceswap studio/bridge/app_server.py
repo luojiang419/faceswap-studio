@@ -4559,6 +4559,9 @@ class FaceFusionRuntime:
         env["FACESWAP_STUDIO_PREFER_MODELSCOPE"] = "1"
         env["FACEFUSION_UI_HOST"] = self.webui_bind_host
         env["FACEFUSION_UI_PORT"] = str(self._settings["facefusion_port"])
+        env["GRADIO_SERVER_NAME"] = self.webui_bind_host
+        env["GRADIO_SERVER_PORT"] = str(self._settings["facefusion_port"])
+        env["GRADIO_NUM_PORTS"] = "1"
         self._apply_model_download_env(env)
         return env
 

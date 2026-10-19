@@ -90,6 +90,43 @@ def test_default_workspace_options_use_video_quality_100(tmp_path : Path) -> Non
 	assert defaults['execution_thread_count'] == 14
 
 
+def test_latest_core_models_reach_workspace_and_cli(tmp_path : Path) -> None:
+	runtime = create_runtime(tmp_path)
+	runtime._available_processor_names = lambda : [ 'face_swapper' ]
+	fields = runtime.workspace_options_schema()['fields']
+	assert 'alphaface_256' in fields['face_swapper_model']['choices']
+	assert 'hrffa' in fields['face_landmarker_model']['choices']
+	options = runtime._normalize_workspace_options({
+		'face_swapper_model': 'alphaface_256',
+		'face_swapper_pixel_boost': '1024x1024',
+		'face_landmarker_model': 'hrffa',
+	})
+	args = runtime._workspace_step_option_cli_args(options)
+	for flag, value in [
+		('--face-swapper-model', 'alphaface_256'),
+		('--face-swapper-pixel-boost', '1024x1024'),
+		('--face-landmarker-model', 'hrffa'),
+	]:
+		assert args[args.index(flag) + 1] == value
+	from facefusion.program import create_program
+	parsed = create_program().parse_args(['headless-run', *args])
+	assert parsed.face_swapper_model == 'alphaface_256'
+	assert parsed.face_swapper_pixel_boost == '1024x1024'
+	assert parsed.face_landmarker_model == 'hrffa'
+
+
+def test_webui_env_binds_gradio_to_configured_address(tmp_path : Path, monkeypatch) -> None:
+	runtime = create_runtime(tmp_path)
+	runtime._settings.update({'facefusion_host': '127.0.0.1', 'facefusion_port': 17861})
+	monkeypatch.setenv('GRADIO_SERVER_PORT', '7860')
+	monkeypatch.setenv('GRADIO_SERVER_NAME', '0.0.0.0')
+	monkeypatch.setenv('GRADIO_NUM_PORTS', '100')
+	env = runtime._build_env()
+	assert env['GRADIO_SERVER_NAME'] == '127.0.0.1'
+	assert env['GRADIO_SERVER_PORT'] == '17861'
+	assert env['GRADIO_NUM_PORTS'] == '1'
+
+
 def test_external_model_label_and_domestic_env_allow_system_proxy(tmp_path):
     runtime = create_runtime(tmp_path)
     schema = runtime.workspace_options_schema()

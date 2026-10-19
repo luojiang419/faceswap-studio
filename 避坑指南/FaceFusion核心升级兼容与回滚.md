@@ -56,3 +56,13 @@ Bridge 自有兼容逻辑应放在 `faceswap studio/bridge/`，避免写回上�
 - `faceswap studio/bridge/services/`
 - `launch_faceswap_studio.py`
 - 安装目录核心更新流程
+
+## 2026-10-19：WebUI 启动但 Bridge 一直 starting
+
+表现：CLI 和完整性检查正常，核心进程存活，但 Bridge 90 秒仍未 ready，启动日志没有异常。独立端口验证时尤其容易复现。
+
+根因：上游默认布局直接调用 `gradio.Blocks.launch()`，不会读取 Studio 自定义的 `FACEFUSION_UI_HOST/PORT`。Gradio 使用默认 7860，遇到占用自动选择 7861，而 Bridge 继续探测配置端口。堆栈位于 Gradio 的 `block_thread`，实际服务已经运行。
+
+解决：在 Bridge `_build_env` 同步设置 Gradio 实际读取的 `GRADIO_SERVER_NAME` 和 `GRADIO_SERVER_PORT`，并设 `GRADIO_NUM_PORTS=1`。端口冲突时明确失败，避免启动到未知地址。不要修改上游核心或终止占用端口的其他应用。
+
+验证：带继承错误 Gradio 环境变量的回归通过；Bridge 52749 / WebUI 17861 实际启动 ready、HTTP 200，配置含 AlphaFace / HRFFA；原有 7860 应用保持运行。详情见 `开发任务/007-FaceFusion核心升级3.9.1.md`。

@@ -3,13 +3,13 @@ from facefusion.face_landmarker import collect_model_downloads, create_static_mo
 from facefusion.processors.modules.face_swapper import choices as face_swapper_choices
 
 
-def test_facefusion_390_core_models_are_available() -> None:
+def test_facefusion_391_core_models_are_available() -> None:
 	state_manager.init_item('download_providers', [ 'huggingface' ])
 	state_manager.init_item('face_landmarker_model', 'hrffa')
 
 	model_hashes, model_sources = collect_model_downloads()
 
-	assert metadata.get('version') == '3.9.0'
+	assert metadata.get('version') == '3.9.1'
 	assert 'hrffa' in choices.face_landmarker_models
 	assert 'hrffa' in create_static_model_set('full')
 	assert 'hrffa' in model_hashes

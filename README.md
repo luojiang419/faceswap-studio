@@ -4,6 +4,8 @@ FaceSwap Studio 是基于 FaceFusion 推理引擎、Flutter 桌面前端和 Pyth
 
 ## 核心特点
 
+- 推理核心：已集成 FaceFusion **3.9.1 稳定版**，支持 AlphaFace 256 换脸、最高 1024 像素增强及 HRFFA 人脸关键点；模型选择、预览和队列沿用统一参数链路。该版本更新了 CUDA 内存兼容、CoreML 内容分析性能及处理器音频依赖。
+
 - 桌面一体化：使用 Flutter 构建正式桌面壳层，统一承载首页、工作台、作品管理、设置和关于页面。
 - 启停可视化：首页集中展示 Bridge 状态、FaceFusion 状态、系统资源和运行日志。
 - 原生工作台：支持直接使用 Windows 原生文件选择器准备 `SOURCE` / `TARGET`，减少频繁切浏览器的成本。
