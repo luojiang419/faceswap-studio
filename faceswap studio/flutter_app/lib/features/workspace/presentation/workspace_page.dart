@@ -146,7 +146,7 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
   String _serviceState = 'stopped';
   String _webuiUrl = 'http://127.0.0.1:7860';
   String _workspaceMessage = '选择源文件和目标文件后即可添加到队列或立即生成。';
-  String _previewMessage = '选择源文件、目标文件并调整参数后，即可生成原生预览。';
+  String _previewMessage = '';
   int _pageProgress = 0;
   String? _lastLoadedUrl;
   double _workspaceOptionsPanelWidth = _defaultWorkspaceOptionsPanelWidth;
@@ -2323,14 +2323,16 @@ class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
                         SizedBox(height: widget.compact ? 10 : 12),
                       ],
                       _buildFaceSelectorControls(theme),
-                      SizedBox(height: widget.compact ? 10 : 12),
-                      Text(
-                        widget.previewMessage,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                          height: 1.35,
+                      if (widget.previewMessage.isNotEmpty) ...[
+                        SizedBox(height: widget.compact ? 10 : 12),
+                        Text(
+                          widget.previewMessage,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                            height: 1.35,
+                          ),
                         ),
-                      ),
+                      ],
                       if (previewResult != null) ...[
                         SizedBox(height: widget.compact ? 10 : 12),
                         Wrap(
