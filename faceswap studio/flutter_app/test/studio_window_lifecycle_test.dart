@@ -14,9 +14,13 @@ class _SettingsClient extends BridgeClient {
     'close_behavior_configured': false,
   };
   bool failSave = false;
+  bool failRead = false;
 
   @override
-  Future<Map<String, dynamic>> getSettings() async => Map.of(settings);
+  Future<Map<String, dynamic>> getSettings() async {
+    if (failRead) throw StateError('Bridge unavailable');
+    return Map.of(settings);
+  }
 
   @override
   Future<Map<String, dynamic>> updateSettings(
@@ -150,6 +154,27 @@ void main() {
     await tester.tap(find.byTooltip('取消关闭'));
     await tester.pumpAndSettle();
     await second;
+  });
+
+  windowsTest('服务不可用仍能询问，并允许只执行本次关闭动作', (tester) async {
+    client.failRead = true;
+    client.failSave = true;
+    await launch(tester);
+    final request = closeRequest();
+    await tester.pumpAndSettle();
+    expect(find.byType(StudioCloseDialog), findsOneWidget);
+    await tester.tap(find.text('转入后台'));
+    await tester.pumpAndSettle();
+    await request;
+    expect(
+      nativeCalls.where((call) => call.method == 'applyCloseAction'),
+      isEmpty,
+    );
+    await tester.tap(find.text('仅本次转入后台'));
+    await tester.pumpAndSettle();
+    expect(nativeCalls.last.method, 'applyCloseAction');
+    expect(nativeCalls.last.arguments, {'close_behavior': 'minimize_to_tray'});
+    expect(client.settings['close_behavior_configured'], isFalse);
   });
 
   windowsTest('保存失败保持窗口打开，显示错误且允许再次尝试', (tester) async {

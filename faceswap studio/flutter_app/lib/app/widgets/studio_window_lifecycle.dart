@@ -22,6 +22,10 @@ class _StudioWindowLifecycleState extends State<StudioWindowLifecycle> {
   late final Future<void> _initialization;
   bool _handlingClose = false;
   StudioCloseAction _lastAction = StudioCloseAction.background;
+  Map<String, dynamic> _lastSettings = {
+    'close_behavior': 'ask',
+    'close_behavior_configured': false,
+  };
 
   bool get _supported =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
@@ -47,6 +51,7 @@ class _StudioWindowLifecycleState extends State<StudioWindowLifecycle> {
     var behavior = 'ask';
     try {
       final settings = await _client.getSettings();
+      _lastSettings = settings;
       behavior = _normalize(settings['close_behavior']);
     } catch (_) {}
     if (!mounted) return;
@@ -63,7 +68,13 @@ class _StudioWindowLifecycleState extends State<StudioWindowLifecycle> {
     _handlingClose = true;
     try {
       await _initialization;
-      final settings = await _client.getSettings();
+      var settings = _lastSettings;
+      try {
+        settings = await _client.getSettings();
+        _lastSettings = settings;
+      } catch (_) {
+        // Bridge 异常时仍允许用户看到关闭选项。
+      }
       if (!mounted) return;
       final behavior = _normalize(settings['close_behavior']);
       if (behavior != 'ask') {
@@ -81,7 +92,33 @@ class _StudioWindowLifecycleState extends State<StudioWindowLifecycle> {
           : 'minimize_to_tray';
       final preference = decision.askEveryTime ? 'ask' : action;
       // 先保存；失败时窗口保持打开，避免假称已经记住用户选择。
-      await _client.updateSettings({'close_behavior': preference});
+      try {
+        _lastSettings = await _client.updateSettings({
+          'close_behavior': preference,
+        });
+      } catch (_) {
+        if (!mounted) return;
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          SnackBar(
+            content: const Text('未能完成关闭操作：偏好未保存，可仅执行本次选择。'),
+            action: SnackBarAction(
+              label: action == 'exit' ? '仅本次关闭' : '仅本次转入后台',
+              onPressed: () async {
+                try {
+                  await _applyAction(action);
+                } catch (error) {
+                  if (mounted) {
+                    ScaffoldMessenger.maybeOf(
+                      context,
+                    )?.showSnackBar(SnackBar(content: Text('关闭操作失败：$error')));
+                  }
+                }
+              },
+            ),
+          ),
+        );
+        return;
+      }
       if (!mounted) return;
       _lastAction = decision.action;
       await _channel.invokeMethod<void>('setCloseBehavior', {
