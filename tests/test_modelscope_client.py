@@ -111,6 +111,119 @@ def test_truncated_http_response_is_resumed_automatically(source):
     assert 'bytes=1024-' in requests
 
 
+def prepare_offer(source, monkeypatch):
+    from types import SimpleNamespace
+    from updater import service as module
+    service, manifest, *_ = source
+    (service.root / 'updater').mkdir(exist_ok=True)
+    (service.root / 'updater/offer.py').write_text('# independent worker', 'utf-8')
+    for name in ('__init__.py', 'service.py', 'transaction.py'):
+        (service.root / 'updater' / name).write_text('# snapshot fixture', 'utf-8')
+    (service.root / 'FaceSwapStudioUpdater.exe').write_bytes(b'native updater')
+    launched = []
+    monkeypatch.setattr(module.subprocess, 'run', lambda args, **kwargs: launched.append(args) or SimpleNamespace(stdout='99999999'))
+    monkeypatch.setattr(module, 'alive', lambda pid: False)
+    assert service.check()['state'] == 'update_available'
+    return service, service.cache / manifest['releaseId'], launched
+
+
+def test_startup_offer_opens_native_before_any_download_and_deduplicates(source, monkeypatch):
+    service, session, launched = prepare_offer(source, monkeypatch)
+    assert service.offer(automatic=True)['native_prompt_opened']
+    assert '--offer' in launched[0]
+    assert service.worker is None and not (session / 'package.zip').exists()
+    service.offer(automatic=True)
+    assert len(launched) == 1
+    service.offer(automatic=False)
+    assert len(launched) == 2  # 手动检查允许重新打开已关闭的提示。
+
+
+def test_later_requires_no_download_and_next_launch_starts_native_auto_update(source, monkeypatch):
+    from updater import offer, startup
+    from updater.transaction import read_json
+    service, session, _ = prepare_offer(source, monkeypatch)
+    service.offer()
+    before = list(source[5])
+    offer.execute(session, 'later')
+    assert source[5] == before and service.worker is None
+    assert not (session / 'package.zip').exists()
+    assert read_json(service.cache / 'deferred.json')['session'] == str(session)
+    started = []
+    monkeypatch.setattr(startup.subprocess, 'Popen', lambda args, **kwargs: started.append(args))
+    monkeypatch.setenv('FACESWAP_STUDIO_WRAPPER_PID', '12345')
+    assert startup.resume_update(service.root)
+    assert started[0][1] == '--install-offer' and started[0][2] == str(session)
+    assert read_json(session / 'session.json')['parentPid'] == 12345
+    assert not (service.cache / 'deferred.json').exists()
+
+
+def test_return_to_app_skips_deferred_once_without_losing_choice(source, monkeypatch):
+    from updater import offer, startup
+    service, session, _ = prepare_offer(source, monkeypatch)
+    service.offer(); offer.execute(session, 'later')
+    monkeypatch.setenv('FACESWAP_STUDIO_SKIP_DEFERRED_UPDATE', '1')
+    monkeypatch.setattr(startup.subprocess, 'Popen', lambda *a, **k: pytest.fail('继续使用不得立即再次更新'))
+    assert not startup.resume_update(service.root)
+    assert (service.cache / 'deferred.json').exists()
+    assert 'FACESWAP_STUDIO_SKIP_DEFERRED_UPDATE' not in __import__('os').environ
+
+
+def test_deferred_obsolete_release_is_removed_without_reinstall(source, monkeypatch):
+    from updater import offer, startup
+    from updater.transaction import write_json
+    service, session, _ = prepare_offer(source, monkeypatch)
+    service.offer(); offer.execute(session, 'later')
+    config = service.config; config['releaseId'] = source[1]['releaseId']
+    write_json(service.root / 'update-config.json', config)
+    monkeypatch.setattr(startup.subprocess, 'Popen', lambda *a, **k: pytest.fail('已经更新后不能重复安装'))
+    assert not startup.resume_update(service.root)
+    assert not (service.cache / 'deferred.json').exists()
+
+
+def test_now_downloads_and_verifies_before_closing_or_installing(source, monkeypatch):
+    from updater import offer, transaction
+    service, session, _ = prepare_offer(source, monkeypatch)
+    service.offer()
+    actions = []
+    monkeypatch.setattr(transaction, 'validate', lambda *a: actions.append('verified'))
+    monkeypatch.setattr(offer, 'close_studio', lambda *a: actions.append('close'))
+    monkeypatch.setattr(transaction, 'run', lambda *a: actions.append('install'))
+    offer.execute(session, 'now')
+    assert (session / 'package.zip').read_bytes() == source[4]
+    assert actions == ['verified', 'close', 'install']
+
+
+def test_bad_download_keeps_current_app_running(source, monkeypatch):
+    from updater import offer, transaction
+    service, session, _ = prepare_offer(source, monkeypatch)
+    source[1]['package']['sha256'] = '0' * 64
+    service.envelope = source[6]()
+    service.offer()
+    monkeypatch.setattr(offer, 'close_studio', lambda *a: pytest.fail('坏包不能退出当前软件'))
+    monkeypatch.setattr(transaction, 'run', lambda *a: pytest.fail('坏包不能安装'))
+    with pytest.raises(RuntimeError, match='SHA-256'):
+        offer.execute(session, 'now')
+
+
+def test_offer_launch_failure_allows_retry_without_download(source, monkeypatch):
+    from updater import service as module
+    service, _, _ = prepare_offer(source, monkeypatch)
+    monkeypatch.setattr(module.subprocess, 'run', lambda *a, **k: (_ for _ in ()).throw(OSError('launch denied')))
+    assert not service.offer(automatic=True)['native_prompt_opened']
+    assert service.prompted_release is None and service.worker is None
+
+
+def test_independent_update_refuses_active_queue_before_sending_exit(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from updater import offer
+    import io
+    import psutil
+    monkeypatch.setattr(psutil, 'process_iter', lambda *a: [])
+    monkeypatch.setattr(offer, 'build_opener', lambda *a: SimpleNamespace(open=lambda *a, **k: io.BytesIO(b'{"runner":{"active":true}}')))
+    with pytest.raises(RuntimeError, match='生成任务正在运行'):
+        offer.close_studio(tmp_path, 'http://127.0.0.1:52741')
+
+
 def test_publication_verifier_resumes_anonymous_truncated_stream(source):
     from scripts.build_lightweight import verify_remote_asset
     _, manifest, _, _, payload, requests, _ = source

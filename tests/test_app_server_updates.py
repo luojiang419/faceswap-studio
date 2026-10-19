@@ -63,3 +63,18 @@ def test_apply_blocked_while_generation_runs(tmp_path):
         def apply(self): raise AssertionError("不能在任务执行中升级")
     runtime._signed_update_service = Service()
     assert runtime.apply_update()["state"] == "failed"
+
+
+def test_prompt_route_opens_native_without_downloading(tmp_path, monkeypatch):
+    runtime = create_runtime(tmp_path)
+    calls = []
+    class Service:
+        def offer(self, automatic=False):
+            calls.append(automatic)
+            return {'native_prompt_opened': True}
+        def download(self): raise AssertionError('提示阶段不得下载')
+    runtime._signed_update_service = Service()
+    monkeypatch.setattr(APP_SERVER_MODULE, 'runtime', runtime)
+    response = TestClient(APP_SERVER_MODULE.app).post('/updates/prompt?automatic=true')
+    assert response.status_code == 200 and response.json()['native_prompt_opened']
+    assert calls == [True]

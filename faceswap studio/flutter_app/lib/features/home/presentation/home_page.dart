@@ -159,6 +159,7 @@ class _HomePageState extends State<HomePage> {
           context,
           client: _client,
           autoDownload: true,
+          automatic: true,
         );
         await _refresh();
       } catch (error) {

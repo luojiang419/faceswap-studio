@@ -26,6 +26,8 @@ if (-not (Test-Path -LiteralPath $sourcePath)) {
 
 Ensure-Directory -Path $distDir | Out-Null
 Ensure-Directory -Path $buildDir | Out-Null
+$brandSource = Join-Path $buildDir "InstallerBrand.generated.cs"
+& (Join-Path $PSScriptRoot "export_installer_brand.ps1") -OutputPath $brandSource
 
 if ($Clean) {
     Remove-Item -LiteralPath $outputPath -Force -ErrorAction SilentlyContinue
@@ -34,17 +36,24 @@ if ($Clean) {
 $compilerArgs = @(
     "/nologo",
     "/target:winexe",
+    "/main:UpdateWindow",
     "/platform:x64",
     "/optimize+",
     "/out:$outputPath",
     "/win32icon:$iconPath",
+    "/win32manifest:$(Join-Path $repoRoot 'installer\bootstrap\app.manifest')",
+    "/resource:$(Join-Path $repoRoot 'installer\assets\app-mark.png'),app-mark.png",
     "/r:System.dll",
     "/r:System.Core.dll",
     "/r:System.Windows.Forms.dll",
+    "/r:System.Drawing.dll",
+    "/r:Accessibility.dll",
     "/r:System.IO.Compression.dll",
     "/r:System.IO.Compression.FileSystem.dll",
     "/r:System.Web.Extensions.dll",
-    $sourcePath
+    $sourcePath,
+    (Join-Path $repoRoot "updater\StudioUpdateSurface.cs"),
+    $brandSource
 )
 
 Push-Location $repoRoot

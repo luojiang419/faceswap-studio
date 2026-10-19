@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 from urllib.request import Request, build_opener, ProxyHandler
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-from updater.transaction import read_json, write_json, sha256, version, safe_path
+from updater.transaction import read_json, write_json, sha256, version, safe_path, alive
 
 
 def permitted_url(url):
@@ -61,6 +61,8 @@ class UpdateService:
         self.worker = None
         self.envelope = None
         self.session = None
+        self.prompt_pid = None
+        self.prompted_release = None
         self.state = {'state': 'idle', 'message': '通过魔搭检查软件更新。', 'current_version': self.current_version,
                       'update_available': False, 'delta_available': False, 'percent': 0, 'error': None}
 
@@ -121,6 +123,52 @@ class UpdateService:
             self.worker = threading.Thread(target=self._download, daemon=True)
             self.worker.start()
             return dict(self.state)
+
+    def offer(self, automatic=False):
+        """先打开独立选择窗口，不下载、不关闭当前工作台。"""
+        with self.lock:
+            if not self.envelope or not self.state.get('delta_available'):
+                return self.status()
+            manifest = verify_envelope(self.envelope, self.config['publicKey'])
+            release = manifest['releaseId']
+            if (self.prompt_pid and alive(self.prompt_pid)) or (automatic and self.prompted_release == release):
+                return {**self.status(), 'native_prompt_opened': True}
+            try:
+                session = self.cache / release
+                session.mkdir(parents=True, exist_ok=True)
+                config = self.config
+                write_json(session / 'envelope.json', self.envelope)
+                write_json(session / 'prompt.json', {
+                    'root': str(self.root.resolve()), 'session': str(session.resolve()),
+                    'current_version': self.current_version, 'latest_version': manifest['version'],
+                    'release_id': release, 'notes': manifest.get('notes', ''),
+                    'bridge_url': 'http://127.0.0.1:' + str(int(os.environ.get('FACESWAP_STUDIO_BRIDGE_PORT', '52741'))),
+                })
+                write_json(session / 'session.json', {
+                    'root': str(self.root.resolve()), 'session': str(session.resolve()),
+                    'publicKey': config['publicKey'], 'currentVersion': self.current_version,
+                    'currentReleaseId': config['releaseId'],
+                    'parentPid': int(os.environ.get('FACESWAP_STUDIO_WRAPPER_PID', os.environ.get('FACESWAP_STUDIO_LAUNCHER_PID', os.getpid()))),
+                })
+                for source, name in ((self.root / 'updater/offer.py', 'offer.py'),
+                                     (self.root / 'FaceSwapStudioUpdater.exe', 'FaceSwapStudioUpdater.exe')):
+                    shutil.copy2(source, session / name)
+                # 更新过程不依赖正在被覆盖的安装目录里的执行模块。
+                (session / 'updater').mkdir(exist_ok=True)
+                for name in ('__init__.py', 'service.py', 'transaction.py'):
+                    shutil.copy2(self.root / 'updater' / name, session / 'updater' / name)
+                helper = subprocess.run([
+                    sys.executable, '-c',
+                    'import subprocess,sys; p=subprocess.Popen(sys.argv[1:],creationflags=0x208); print(p.pid)',
+                    str(session / 'FaceSwapStudioUpdater.exe'), '--offer', str(session), sys.executable,
+                ], check=True, capture_output=True, text=True,
+                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+                self.prompt_pid = int(helper.stdout.strip())
+                self.prompted_release = release
+                return {**self.status(), 'native_prompt_opened': True, 'updater_pid': self.prompt_pid}
+            except Exception as error:
+                self.log(f'[update] 独立更新提示启动失败：{error}')
+                return {**self.status(), 'native_prompt_opened': False, 'error': str(error)}
 
     def _download(self):
         try:

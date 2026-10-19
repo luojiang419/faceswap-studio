@@ -11,6 +11,7 @@ from updater.transaction import alive, read_json, write_json, run
 def resume_update(root):
     root = Path(root).resolve()
     cache = root / 'faceswap studio/data/cache/updates'
+    skip_deferred = os.environ.pop('FACESWAP_STUDIO_SKIP_DEFERRED_UPDATE', None) == '1'
     pending = cache / 'pending.json'
     if pending.exists() and not os.environ.get('FACESWAP_STUDIO_UPDATE_SESSION'):
         marker = read_json(pending)
@@ -20,6 +21,27 @@ def resume_update(root):
         if alive(marker['pid']):
             return True
         run(session, recover=True)
+    deferred = cache / 'deferred.json'
+    if deferred.exists() and not skip_deferred and not os.environ.get('FACESWAP_STUDIO_UPDATE_SESSION'):
+        marker = read_json(deferred)
+        session = Path(marker['session']).resolve(strict=True)
+        if not session.is_relative_to(cache.resolve()):
+            raise ValueError('延后更新不属于当前安装')
+        from updater.offer import load_offer
+        offer_root, _, manifest = load_offer(session)
+        if offer_root != root:
+            raise ValueError('延后更新安装目录不匹配')
+        from updater.transaction import version
+        if (version((root / 'VERSION').read_text('utf-8-sig').strip()), read_json(root / 'update-config.json')['releaseId']) >= (version(manifest['version']), manifest['releaseId']):
+            deferred.unlink()
+            return False
+        settings = read_json(session / 'session.json')
+        settings['parentPid'] = int(os.environ.get('FACESWAP_STUDIO_WRAPPER_PID', os.getpid()))
+        write_json(session / 'session.json', settings)
+        subprocess.Popen([str(session / 'FaceSwapStudioUpdater.exe'), '--install-offer', str(session), sys.executable],
+                         creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        deferred.unlink()
+        return True
     scheduled = cache / 'scheduled.json'
     if scheduled.exists():
         marker = read_json(scheduled)

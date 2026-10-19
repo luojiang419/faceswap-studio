@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:faceswap_studio/shared/services/bridge_client.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 Future<void> showStudioUpdateDialog(
@@ -20,6 +21,7 @@ Future<void> startStudioUpdateFlow(
   BuildContext context, {
   required BridgeClient client,
   bool autoDownload = false,
+  bool automatic = false,
   void Function(String message)? showMessage,
 }) async {
   var status = await client.checkUpdates();
@@ -28,6 +30,17 @@ Future<void> startStudioUpdateFlow(
   }
 
   final state = '${status['state'] ?? ''}';
+  if (automatic && status['update_available'] != true) return;
+  if (!kIsWeb &&
+      defaultTargetPlatform == TargetPlatform.windows &&
+      status['update_available'] == true &&
+      status['delta_available'] == true) {
+    final prompt = await client.openUpdatePrompt(automatic: automatic);
+    if (prompt['native_prompt_opened'] != true) {
+      throw BridgeClientException('${prompt['error'] ?? '无法打开独立更新器，请稍后重试。'}');
+    }
+    return;
+  }
   if (autoDownload &&
       status['update_available'] == true &&
       status['delta_available'] == true &&

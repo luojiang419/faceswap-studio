@@ -934,6 +934,9 @@ class FaceFusionRuntime:
     def download_update(self) -> dict[str, Any]:
         return self._signed_updates().download()
 
+    def prompt_update(self, automatic: bool = False) -> dict[str, Any]:
+        return self._signed_updates().offer(automatic=automatic)
+
     def schedule_update(self) -> dict[str, Any]:
         return self._signed_updates().apply(scheduled=True)
 
@@ -6204,6 +6207,11 @@ def updates_check() -> dict[str, Any]:
 @app.post("/updates/download")
 def updates_download() -> dict[str, Any]:
     return runtime.download_update()
+
+
+@app.post("/updates/prompt")
+def updates_prompt(automatic: bool = False) -> dict[str, Any]:
+    return runtime.prompt_update(automatic=automatic)
 
 
 @app.post("/updates/schedule")
