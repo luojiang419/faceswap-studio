@@ -1,0 +1,47 @@
+{
+  "来源": "installer/bootstrap/Program.cs: FaceFusionArtwork",
+  "透明PNG尺寸": [
+    16,
+    20,
+    24,
+    32,
+    40,
+    48,
+    64,
+    96,
+    128,
+    192,
+    256,
+    512,
+    1024
+  ],
+  "ICO尺寸": [
+    16,
+    20,
+    24,
+    32,
+    40,
+    48,
+    64,
+    96,
+    128,
+    256
+  ],
+  "动效帧数": 40,
+  "检查": [
+    "icon-master.png",
+    "png/icon-1024.png",
+    "png/icon-128.png",
+    "png/icon-16.png",
+    "png/icon-192.png",
+    "png/icon-20.png",
+    "png/icon-24.png",
+    "png/icon-256.png",
+    "png/icon-32.png",
+    "png/icon-40.png",
+    "png/icon-48.png",
+    "png/icon-512.png",
+    "png/icon-64.png",
+    "png/icon-96.png"
+  ]
+}
