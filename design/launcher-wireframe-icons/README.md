@@ -21,4 +21,4 @@
 python design/launcher-wireframe-icons/export_icons.py
 ```
 
-本轮交付独立图标包，未覆盖现有程序资源，未重新构建或发布安装包，正式版本不变。
+用户已确认并授权全面应用：`scripts/sync_brand_icons.py` 将本目录资源同步到软件、启动器、安装器与 Web；桌面侧栏及 Web 页头使用统一品牌组件。原生 ICO 保持静态，应用界面支持透明 WebP 动画并遵循系统减少动画偏好。正式版本不变。

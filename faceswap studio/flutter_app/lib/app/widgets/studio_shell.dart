@@ -5,6 +5,7 @@ import 'package:faceswap_studio/features/personas/presentation/personas_page.dar
 import 'package:faceswap_studio/features/settings/presentation/settings_page.dart';
 import 'package:faceswap_studio/features/works/presentation/works_page.dart';
 import 'package:faceswap_studio/features/workspace/presentation/workspace_page.dart';
+import 'package:faceswap_studio/shared/widgets/studio_brand_mark.dart';
 import 'package:flutter/material.dart';
 
 enum StudioSection { home, workspace, personas, works, settings, about }
@@ -79,19 +80,7 @@ class _StudioShellState extends State<StudioShell> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Container(
-                        width: 52,
-                        height: 52,
-                        decoration: BoxDecoration(
-                          color: scheme.primary,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Icon(
-                          Icons.face_retouching_natural_rounded,
-                          color: scheme.onPrimary,
-                          size: 30,
-                        ),
-                      ),
+                      const StudioBrandMark(),
                       if (expanded) ...[
                         const SizedBox(width: 12),
                         Expanded(

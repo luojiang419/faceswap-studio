@@ -15,6 +15,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 from release_modelscope import sources, file_url, read_json, write_json, sha256, read_remote
+from sync_brand_icons import sync as sync_brand_icons
 
 
 def application_sources(windows_root=None):
@@ -112,6 +113,7 @@ def refresh_payload(output, baseline, windows_root=None):
 
 
 def compile_installer(manifest, output, demo=False):
+    sync_brand_icons()
     output.parent.mkdir(parents=True, exist_ok=True)
     descriptor = output.with_suffix('.manifest.json.gz')
     descriptor.write_bytes(gzip.compress(json.dumps(manifest, ensure_ascii=False, separators=(',', ':')).encode(), mtime=0))
@@ -197,6 +199,7 @@ def verify_remote_asset(url, size, expected):
 
 
 def build(directory, existing=None, refresh_from=None, windows_root=None):
+    sync_brand_icons()
     config = read_json(ROOT / 'update-config.json')
     version = (ROOT / 'VERSION').read_text('utf-8-sig').strip()
     release = config['releaseId']

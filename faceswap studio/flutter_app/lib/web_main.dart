@@ -5,6 +5,7 @@ import 'dart:js_interop';
 import 'package:faceswap_studio/app/theme/studio_theme.dart';
 import 'package:faceswap_studio/features/workspace/presentation/workspace_options_panel.dart';
 import 'package:faceswap_studio/shared/services/bridge_client.dart';
+import 'package:faceswap_studio/shared/widgets/studio_brand_mark.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -2630,6 +2631,10 @@ class _Header extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        const Padding(
+          padding: EdgeInsets.only(right: 12),
+          child: StudioBrandMark(size: 48),
+        ),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

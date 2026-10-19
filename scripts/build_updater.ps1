@@ -8,6 +8,7 @@ $repoRoot = Get-RepoRoot
 $distDir = Join-Path $repoRoot "dist"
 $buildDir = Join-Path $repoRoot "build\updater"
 $sourcePath = Join-Path $repoRoot "updater\FaceSwapStudioUpdater.cs"
+$iconPath = Join-Path $repoRoot "facefusion.ico"
 $outputPath = Join-Path $distDir "FaceSwapStudioUpdater.exe"
 
 $cscCandidates = @(
@@ -36,6 +37,7 @@ $compilerArgs = @(
     "/platform:x64",
     "/optimize+",
     "/out:$outputPath",
+    "/win32icon:$iconPath",
     "/r:System.dll",
     "/r:System.Core.dll",
     "/r:System.Windows.Forms.dll",
