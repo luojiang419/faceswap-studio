@@ -2,11 +2,11 @@
 
 [CODEX_LONG_TASK_CONTINUE_V3]
 
-状态：品牌替换、构建与真实首次安装验收完成，正在发布配套下载资源。
-下一步：完成最终维护与发布完整回读，验收卸载，整理记录并提交。
-TODO：发布完整回读；最终卸载验证与文档提交。
+状态：全部完成；新版安装器与配套资源已发布，完整校验通过；后续发布默认流程已按用户反馈减轻。
+下一步：用户运行新版安装器，检查并更新已有安装的名称。
+TODO：无。
 最近验证：Windows/Web Release 通过；60 项 Python 检查（含新增回滚兼容与核心版本检查）、50 项原生回归、2 项 Flutter 界面检查通过；真实中文目录安装、窗口标题、首帧握手、核心 ready、快捷方式与卸载显示名通过。
-Branch：feat/yirong-studio-brand；起点 49351c5。
+Branch：feat/yirong-studio-brand；起点 49351c5；实现提交 3389fc9。
 GitHub：2026-10-19 已完成当日同步检查，本轮仅本地提交。
 阻塞：无。
 
@@ -29,3 +29,23 @@ GitHub：2026-10-19 已完成当日同步检查，本轮仅本地提交。
 - 维护夹具在已有正式安装的机器上首次被安装防护正确拒绝；验收工具已改用隔离 `.Test.<GUID>` 注册路径，不绕过生产安装限制。
 - 实际日常安装在 `D:\Program Files\FaceSwapStudio`。真实首帧验收时仅在确认队列为空后正常退出该安装，隔离验证结束后恢复原安装；不以开发目录启动成功冒充原安装恢复。
 - 当前使用说明见 `docs/品牌与发行规范.md` 与 `docs/魔搭更新与轻量安装器.md`。旧根启动器已归档到 `build/yirong-brand/legacy/`；根目录仅保留新的 `易容 Studio.exe`。
+
+## 最终运行验收
+
+- `build/yirong-brand/install-final-verified/installation-result.json`：最终运行包在中文目录真实展开，Python/ONNX/14 个模型自检、真实首帧、核心 ready、WebUI 配置、新窗口标题、快捷方式和隔离卸载登记通过。完整 ZIP 来自本地已校验缓存，不冒充联网下载 3.61 GiB。
+- `build/yirong-brand/uninstall-result.json`：最终隔离安装真实卸载，删除应用、依赖与模型，保留测试作品及配置，隔离登记被清除。
+- `build/yirong-brand/original-restored.json`：测试退出码 0，隔离进程正常退出，原 D 盘工作台已恢复；HTTP health 为 ok，核心状态 ready。
+- `build/installer-maintenance/real-validation.json`：使用最终正式 EXE 执行检查、故意移除 Python、同长度破坏 Bridge、破坏模型 hash、真实恢复和复检；三项损坏恢复，作品、个人配置、INI 和自定义模型均保留，健康检查只读。
+- 最终安装器：1,467,392 字节，SHA-256 `503afed70e9c7bd61db841c88311ee294342b59438f09bed302687cdcf4d4e35`；完整运行包 3,875,142,297 字节。
+- 最终 `publication.json` 的运行包、安装器、分发 ZIP 三项匿名完整 SHA-256 回读全部通过；`verification.json` 为 `ok=true`。原生 `native-download/result.json` 确认实际魔搭 HTTPS、已有分片恢复与最终安装器 SHA-256 通过。
+- 完整运行包 SHA-256：`404001431c723a536721f7f3ada6d4c7f54f8bb89ea50c1ab76105f93d30d66d`；分发 ZIP：1,401,805 字节，SHA-256 `0748240eede97c3b78ddba7616d55922d328531aa1b8666c4bfaf6418880112c`。
+
+## 后续发布流程调整
+
+用户指出重复上传及全量回读浪费时间。本次校验在反馈到达时已结束，不再重跑任何发布或打包；已修改后续默认流程：
+
+- 相同远端路径且 SHA-256、大小相同直接复用，不再上传；上传后的默认校验为远端哈希和大小加匿名单字节访问。即使服务器忽略 Range，也只读一个字节。
+- 全量匿名回读保留为显式 `--full-readback`，不再默认执行。
+- 安装器独立改动可使用 `--payload` 复用已发布运行包，保留原运行包 URL、实际应用序号和文件记录，避免新路径下重复上传完整运行包。应用变更才重建运行包。
+- 这些调整只影响开发发布脚本，不更改本次已验证的安装器及运行包，不需要再次上传。
+- 发布相关 30 项测试通过，覆盖相同资源不上传、不同内容拒绝覆盖、全量回读显式选择、服务器忽略 Range 时仅读一个字节、仅重编译安装器复用原包地址和应用序号。真实已发布安装器再次执行默认发布校验通过，并明确拦截了上传和全量回读函数，确认两者均未调用；证据 `build/yirong-brand/default-publication-check.json`。

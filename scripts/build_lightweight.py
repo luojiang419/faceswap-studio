@@ -10,6 +10,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import urllib.parse
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -133,7 +134,7 @@ def compile_installer(manifest, output, demo=False):
     return output
 
 
-def publish_asset(file, remote):
+def publish_asset(file, remote, full_readback=False):
     from modelscope.hub.api import HubApi
     config = read_json(ROOT / 'update-config.json')
     api = HubApi()
@@ -144,10 +145,30 @@ def publish_asset(file, remote):
             raise ValueError('拒绝覆盖魔搭同名不同内容资源：' + remote)
     else:
         api.upload_file(path_or_fileobj=str(file), path_in_repo=remote, repo_id=config['repository'], commit_message='assets: immutable FaceFusion desktop distribution')
-    # 流式匿名完整回读，避免数 GB 的内存峰值。
+        existing = next((a for a in api.get_model_files(config['repository'], recursive=True) if a['Path'] == remote), None)
+    if not existing or existing.get('Sha256') != digest or existing.get('Size') != file.stat().st_size:
+        raise ValueError('远端资源 SHA-256 或大小不一致：' + remote)
     url = file_url(config['repository'], remote)
-    verify_remote_asset(url, file.stat().st_size, digest)
-    return {'url': url, 'sha256': digest, 'size': file.stat().st_size, 'anonymousFullVerified': True}
+    verify_public_access(url, file.stat().st_size)
+    if full_readback:
+        verify_remote_asset(url, file.stat().st_size, digest)
+    return {'url': url, 'sha256': digest, 'size': file.stat().st_size,
+            'remoteMetadataVerified': True, 'anonymousAccessVerified': True,
+            'anonymousFullVerified': full_readback}
+
+
+def verify_public_access(url, size):
+    """匿名读取一个字节验证可访问性；服务器忽略 Range 时也不下载整包。"""
+    from urllib.request import build_opener, ProxyHandler, Request
+    request = Request(url, headers={'Range': 'bytes=0-0', 'Accept-Encoding': 'identity'})
+    with build_opener(ProxyHandler({})).open(request, timeout=30) as response:
+        if response.status == 206:
+            if response.headers.get('Content-Range') != f'bytes 0-0/{size}':
+                raise ValueError('匿名访问的资源大小不一致')
+        elif response.status != 200 or int(response.headers.get('Content-Length', -1)) != size:
+            raise ValueError('匿名访问的资源状态或大小不一致')
+        if size and not response.read(1):
+            raise ValueError('匿名资源为空')
 
 
 def verify_remote_asset(url, size, expected):
@@ -204,15 +225,32 @@ def build(directory, existing=None, refresh_from=None, windows_root=None):
     version = (ROOT / 'VERSION').read_text('utf-8-sig').strip()
     release = config['releaseId']
     directory.mkdir(parents=True, exist_ok=True)
-    package = existing or directory / f'易容-Studio-{version}-{release}-Runtime.zip'
+    package = existing.resolve(strict=True) if existing else directory / f'易容-Studio-{version}-{release}-Runtime.zip'
     if refresh_from:
         refresh_payload(package, refresh_from, windows_root)
     records = read_json(package.with_suffix('.files.json')) if package.exists() else payload(package, windows_root)
     prefix = f'bootstrap/{version}/{release}'
+    payload_remote = prefix + '/' + package.name
+    app_release = release
+    package_digest = sha256(package)
+    if existing:
+        previous = read_json(package.parent / 'bootstrap-manifest.json')
+        if previous['package']['sha256'] != package_digest or previous['package']['size'] != package.stat().st_size:
+            raise ValueError('复用运行包与原发行清单不一致')
+        if previous['appVersion'] != version or previous['entry'] != '易容 Studio.exe':
+            raise ValueError('复用运行包的版本或启动入口不兼容')
+        if previous['files'] != records or previous['publicKey'] != config['publicKey']:
+            raise ValueError('复用运行包的文件记录或信任公钥不一致')
+        old_url = previous['package']['urls'][0]
+        payload_remote = urllib.parse.parse_qs(urllib.parse.urlsplit(old_url).query)['FilePath'][0]
+        if file_url(config['repository'], payload_remote) != old_url:
+            raise ValueError('复用运行包必须来自当前分发仓库')
+        app_release = previous.get('appReleaseId', previous['releaseId'])
     manifest = {'protocol': 1, 'componentProtocol': 0, 'releaseId': release, 'appVersion': version, 'appReleaseId': release, 'publicKey': config['publicKey'],
                 'entry': '易容 Studio.exe', 'files': records,
-                'package': {'name': package.name, 'size': package.stat().st_size, 'sha256': sha256(package),
-                            'urls': [file_url(config['repository'], prefix + '/' + package.name)]}}
+                'package': {'name': package.name, 'size': package.stat().st_size, 'sha256': package_digest,
+                            'urls': [file_url(config['repository'], payload_remote)]}}
+    manifest['appReleaseId'] = app_release
     write_json(directory / 'bootstrap-manifest.json', manifest)
     executable = compile_installer(manifest, directory / '易容 Studio 安装器.exe')
     (directory / '使用说明.txt').write_text('双击 易容 Studio 安装器.exe，首次选择专用安装目录后安装并运行。\n再次运行会识别已有安装并自动进行只读检查；正常时提示一切正常，可直接开始创作。\n发现问题后点击“开始修复”，正常关闭本目录工作台后按需恢复，保留作品、人物数据、配置与清单外模型。\n修复入口独立于目标 Python；修复失败会回滚本次修改，不把检查失败报告为正常。较新版本禁止被旧修复包覆盖。\n修复前请完成或取消生成任务；无法正常退出时请从托盘退出后重试，不会强杀正在生成的任务。\n检查与修复日志位于 %LOCALAPPDATA%/FaceSwapStudioMaintenance/sessions。\n安装器从魔搭下载固定 SHA-256 的完整运行包（包含 Python、常用模型和 FFmpeg），无需预装 Python。\n首次安装需要联网、至少 12 GiB 可用空间；中断后重新运行可续传。\n完成后从桌面快捷方式运行换脸工作台。软件自动检查魔搭签名更新，更新保留模型、配置与作品。\nWindows 应用列表可卸载，默认保留个人数据。\n', 'utf-8')
@@ -221,7 +259,7 @@ def build(directory, existing=None, refresh_from=None, windows_root=None):
     with zipfile.ZipFile(distribution, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         for file in (executable, directory / '使用说明.txt', directory / 'SHA256SUMS.txt'):
             archive.write(file, file.name)
-    write_json(directory / 'publication-plan.json', {'prefix': prefix, 'payload': str(package), 'installer': str(executable), 'distribution': str(distribution)})
+    write_json(directory / 'publication-plan.json', {'prefix': prefix, 'payloadRemote': payload_remote, 'payload': str(package), 'installer': str(executable), 'distribution': str(distribution)})
     print(json.dumps({'installer': str(executable), 'bytes': executable.stat().st_size, 'runtimeBytes': package.stat().st_size}, ensure_ascii=False))
 
 
@@ -232,7 +270,10 @@ if __name__ == '__main__':
     parser.add_argument('--refresh-from', type=Path, help='从已验证运行包复制并增量更新；保留旧产物')
     parser.add_argument('--windows-build-root', type=Path, help='使用指定 Windows Release 构建，不改动本机部署')
     parser.add_argument('--publish', action='store_true')
+    parser.add_argument('--full-readback', action='store_true', help='发布时额外匿名完整下载校验；默认仅核对远端哈希、大小与匿名访问')
     args = parser.parse_args()
+    if args.full_readback and not args.publish:
+        parser.error('--full-readback 仅用于发布验证')
     if args.refresh_from and (args.publish or args.payload):
         parser.error('--refresh-from仅用于构建，不能与--payload或--publish合用')
     if args.windows_build_root and (args.payload or args.publish):
@@ -241,6 +282,10 @@ if __name__ == '__main__':
         build(args.output.resolve(), args.payload, args.refresh_from, args.windows_build_root)
     else:
         plan = read_json(args.output / 'publication-plan.json')
-        proof = {name: publish_asset(Path(plan[name]), plan['prefix'] + '/' + Path(plan[name]).name) for name in ('payload', 'installer', 'distribution')}
+        proof = {}
+        for name in ('payload', 'installer', 'distribution'):
+            remote = plan.get('payloadRemote') if name == 'payload' else None
+            remote = remote or plan['prefix'] + '/' + Path(plan[name]).name
+            proof[name] = publish_asset(Path(plan[name]), remote, full_readback=args.full_readback)
         write_json(args.output / 'publication.json', proof)
         print(json.dumps(proof, ensure_ascii=False, indent=2))
