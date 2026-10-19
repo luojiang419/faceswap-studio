@@ -20,6 +20,10 @@ public static class MaintenanceSmoke {
                 string cache=Path.Combine(root,"data/cache/bootstrap"),package=Path.Combine(cache,manifest.package.name);
                 Directory.CreateDirectory(cache);
                 if(!CreateHardLink(package,Path.GetFullPath(args[1]),IntPtr.Zero)) File.Copy(args[1],package);
+                if(manifest.application!=null && args.Length>4) {
+                    string application=Path.Combine(cache,manifest.application.name);
+                    if(!CreateHardLink(application,Path.GetFullPath(args[4]),IntPtr.Zero)) File.Copy(args[4],application);
+                }
                 Core.Prepare(root,manifest,CancellationToken.None,new Log());
                 File.WriteAllText(Path.Combine(root,".venv-win/pyvenv.cfg"),"home = "+Path.Combine(root,".python")+"\ninclude-system-site-packages = false\nexecutable = "+Path.Combine(root,".python/python.exe")+"\n");
                 Installer.InstallUninstaller(root,Path.GetFullPath(args[2]));

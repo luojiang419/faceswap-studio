@@ -233,15 +233,15 @@ namespace FaceSwapBootstrap {
                 if(processes.Any(p=>!p.HasExited)) throw new IOException("本目录进程尚未正常退出，未开始替换文件；请退出工作台后重试。");
             } finally { foreach(var process in processes) process.Dispose(); }
         }
-        static string GetPackage(string root, Manifest manifest, string local, CancellationToken token,IProgress<Status> progress) {
+        static string GetPackage(string root, Asset asset, string local, CancellationToken token,IProgress<Status> progress) {
             if(!String.IsNullOrEmpty(local)) {
-                if(!Core.Verified(local,manifest.package)) throw new IOException("本地运行包校验失败");
+                if(!Core.Verified(local,asset)) throw new IOException("本地运行包校验失败");
                 return Path.GetFullPath(local);
             }
-            string adjacent=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,manifest.package.name);
-            if(Core.Verified(adjacent,manifest.package)) return adjacent;
-            string cache=Safe(root,"data/cache/bootstrap/"+manifest.package.name);
-            Core.Download(manifest.package,Path.GetDirectoryName(cache),token,progress);
+            string adjacent=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,asset.name);
+            if(Core.Verified(adjacent,asset)) return adjacent;
+            string cache=Safe(root,"data/cache/bootstrap/"+asset.name);
+            Core.Download(asset,Path.GetDirectoryName(cache),token,progress);
             return cache;
         }
         static Asset[] IntegrationFiles(Asset icon) {
@@ -252,13 +252,13 @@ namespace FaceSwapBootstrap {
                 new Asset{name="uninstall.exe",size=new FileInfo(self).Length,sha256=Core.Hash(self)}
             };
         }
-        static void Stage(string package,string stage,IEnumerable<Asset> files,CancellationToken token) {
+        static void Stage(string package,string stage,IEnumerable<Asset> files,CancellationToken token,Manifest application=null) {
             using(var zip=ZipFile.OpenRead(package)) foreach(var file in files) {
                 token.ThrowIfCancellationRequested();
                 string target=Safe(stage,file.name); Directory.CreateDirectory(Path.GetDirectoryName(target));
                 if(file.name=="uninstall.exe") { File.Copy(Assembly.GetExecutingAssembly().Location,target); continue; }
                 string sourceName=(file.name=="faceswap.ico" || file.name=="faceswap-installer.ico")?"facefusion.ico":file.name;
-                string name="FaceSwapStudio/"+sourceName;
+                string name=application==null?"FaceSwapStudio/"+sourceName:Core.ApplicationSource(application,sourceName);
                 var entries=zip.Entries.Where(e=>e.FullName==name).ToArray();
                 if(entries.Length!=1 || entries[0].Length!=file.size || ((entries[0].ExternalAttributes>>16)&0xf000)==0xa000)
                     throw new IOException("修复包条目无效："+file.name);
@@ -337,11 +337,18 @@ namespace FaceSwapBootstrap {
                     // 导入失败但字节清单正常时不能盲目覆盖，保留真实诊断。
                     throw new IOException("程序文件完整，但运行环境探测失败；请查看检查报告。未覆盖任何文件。");
                 }
-                string package=selected.Count==0?null:GetPackage(root,manifest,localPackage,token,progress);
+                var appNames=new HashSet<string>(manifest.applicationFiles??new string[0],StringComparer.OrdinalIgnoreCase);
+                Func<Asset,bool> fromApplication=f=>manifest.application!=null && appNames.Contains(f.name=="faceswap.ico" || f.name=="faceswap-installer.ico"?"facefusion.ico":f.name);
+                var baseSelected=selected.Where(f=>f.name!="uninstall.exe" && !fromApplication(f)).ToList();
+                var appSelected=selected.Where(f=>fromApplication(f)).ToList();
+                string package=baseSelected.Count==0?null:GetPackage(root,manifest.package,localPackage,token,progress);
+                string applicationPackage=appSelected.Count==0?null:GetPackage(root,manifest.application,null,token,progress);
                 if(new DriveInfo(Path.GetPathRoot(work)).AvailableFreeSpace < selected.Sum(f=>f.size)*2+32L*1024*1024)
                     throw new IOException("修复会话所在磁盘空间不足，未开始替换文件。");
                 string stage=Path.Combine(work,"stage"); Directory.CreateDirectory(stage);
-                if(package!=null) Stage(package,stage,selected,token);
+                if(package!=null) Stage(package,stage,baseSelected,token);
+                if(applicationPackage!=null) Stage(applicationPackage,stage,appSelected,token,manifest);
+                if(selected.Any(f=>f.name=="uninstall.exe")) File.Copy(Assembly.GetExecutingAssembly().Location,Safe(stage,"uninstall.exe"));
                 if(selected.Any(f=>f.name==".venv-win/pyvenv.cfg")) RuntimeConfig(root,Safe(stage,".venv-win/pyvenv.cfg"));
                 if(selected.Any(f=>f.name=="update-config.json")) {
                     try {

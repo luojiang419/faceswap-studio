@@ -36,6 +36,10 @@ public static class InstallationSmoke {
                 Directory.CreateDirectory(cache);
                 string package=Path.Combine(cache,manifest.package.name);
                 if(!File.Exists(package) && !CreateHardLink(package,Path.GetFullPath(args[1]),IntPtr.Zero)) File.Copy(args[1],package);
+                if(manifest.application!=null && args.Length>4) {
+                    string application=Path.Combine(cache,manifest.application.name);
+                    if(!File.Exists(application) && !CreateHardLink(application,Path.GetFullPath(args[4]),IntPtr.Zero)) File.Copy(args[4],application);
+                }
                 Core.Prepare(root,manifest,CancellationToken.None,new Log());
                 int bridgePort=FreePort(), corePort=FreePort();
                 string settings=Path.Combine(root,"faceswap studio/runtime/settings.json".Replace('/',Path.DirectorySeparatorChar));

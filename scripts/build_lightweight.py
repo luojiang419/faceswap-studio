@@ -139,6 +139,7 @@ def publish_asset(file, remote, full_readback=False):
     config = read_json(ROOT / 'update-config.json')
     api = HubApi()
     existing = next((a for a in api.get_model_files(config['repository'], recursive=True) if a['Path'] == remote), None)
+    reused = existing is not None
     digest = sha256(file)
     if existing:
         if existing.get('Sha256') != digest or existing.get('Size') != file.stat().st_size:
@@ -154,7 +155,7 @@ def publish_asset(file, remote, full_readback=False):
         verify_remote_asset(url, file.stat().st_size, digest)
     return {'url': url, 'sha256': digest, 'size': file.stat().st_size,
             'remoteMetadataVerified': True, 'anonymousAccessVerified': True,
-            'anonymousFullVerified': full_readback}
+            'anonymousFullVerified': full_readback, 'reusedWithoutUpload': reused}
 
 
 def verify_public_access(url, size):
@@ -265,6 +266,92 @@ def build(directory, existing=None, refresh_from=None, windows_root=None):
     print(json.dumps({'installer': str(executable), 'bytes': executable.stat().st_size, 'runtimeBytes': package.stat().st_size}, ensure_ascii=False))
 
 
+def build_composite(directory, application_snapshot, base_directory=None):
+    """固定基础包仅引用已发布地址；代码发布只增加应用包与安装器。"""
+    from updater.service import verify_envelope
+    config = read_json(ROOT / 'update-config.json')
+    pointer = ROOT / 'installer/runtime-base.json'
+    if base_directory:
+        base = read_json(base_directory / 'bootstrap-manifest.json')
+        raw = json.dumps(base, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+        digest = hashlib.sha256(raw).hexdigest()
+        reference = {'url': file_url(config['repository'], f"bootstrap/{base['appVersion']}/{base['releaseId']}/runtime-base.json"),
+                     'sha256': digest, 'size': len(raw)}
+        cached = ROOT / '.runtime/installer-base' / (digest + '.json')
+        cached.parent.mkdir(parents=True, exist_ok=True); cached.write_bytes(raw)
+        write_json(pointer, reference)
+    else:
+        if not pointer.is_file():
+            raise ValueError('尚未指定固定基础包；首次使用 --base <已发布安装器目录>，禁止自动重建数 GiB 运行包')
+        reference = read_json(pointer)
+        cached = ROOT / '.runtime/installer-base' / (reference['sha256'] + '.json')
+        if not cached.exists():
+            data = read_remote(reference['url'])
+            if len(data) != reference['size'] or hashlib.sha256(data).hexdigest() != reference['sha256']:
+                raise ValueError('固定基础包描述校验失败')
+            cached.parent.mkdir(parents=True, exist_ok=True); cached.write_bytes(data)
+        raw = cached.read_bytes()
+        if len(raw) != reference['size'] or hashlib.sha256(raw).hexdigest() != reference['sha256']:
+            raise ValueError('缓存的基础包描述校验失败')
+        base = json.loads(raw)
+    manifest = verify_envelope(read_json(application_snapshot / 'envelope.json'), config['publicKey'])
+    if base['publicKey'] != config['publicKey']:
+        raise ValueError('应用与固定基础包信任关系不兼容')
+    base_records = {f['name']: f for f in base['files']}
+    for name in ('requirements.txt', 'installer/core-models.txt'):
+        if (ROOT / name).is_file() and name in base_records and sha256(ROOT / name) != base_records[name]['sha256']:
+            raise ValueError('运行依赖或常用模型定义已变化，必须显式生成并验证新基础包：' + name)
+    package = application_snapshot / manifest['package']['name']
+    if package.stat().st_size != manifest['package']['size'] or sha256(package) != manifest['package']['sha256']:
+        raise ValueError('应用包与签名清单不一致')
+    if directory.exists() and any(directory.iterdir()):
+        raise ValueError('拒绝覆盖已有安装器目录')
+    directory.mkdir(parents=True, exist_ok=True)
+    foundation = ('.python/', '.venv-win/', '.assets/', '.runtime/')
+    static = {'facefusion.ini', 'requirements.txt', 'LICENSE.md', 'scripts/validate_offline_models.py', 'installer/core-models.txt'}
+    records = {f['name']: f for f in base['files'] if f['name'].startswith(foundation) or f['name'] in static}
+    names = []
+    entry = '启动FaceSwap Studio.exe' if any(f['path'] == '启动FaceSwap Studio.exe' for f in manifest['files']) else '易容 Studio.exe'
+    for f in manifest['files']:
+        name = '易容 Studio.exe' if f['path'] == entry else f['path']
+        records[name] = {'name': name, 'size': f['size'], 'sha256': f['sha256']}
+        names.append(name)
+    release = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
+    descriptor = {'protocol': 1, 'componentProtocol': 0, 'releaseId': release,
+                  'appVersion': manifest['version'], 'appReleaseId': manifest['releaseId'], 'publicKey': config['publicKey'],
+                  'entry': '易容 Studio.exe', 'package': base['package'],
+                  'application': {'name': package.name, 'size': manifest['package']['size'], 'sha256': manifest['package']['sha256'], 'urls': [manifest['package']['url']]},
+                  'applicationFiles': names, 'applicationEntry': entry, 'files': sorted(records.values(), key=lambda f: f['name'])}
+    write_json(directory / 'bootstrap-manifest.json', descriptor)
+    executable = compile_installer(descriptor, directory / '易容 Studio 安装器.exe')
+    (directory / '使用说明.txt').write_text('首次运行安装；已有安装检查后点击“开始修复”。\n安装器复用固定基础运行包，应用更新独立下载；普通代码修复不重新上传基础包。\n修复保留作品、配置与自定义模型；只修应用文件时不会下载完整基础包。\n', encoding='utf-8')
+    (directory / 'SHA256SUMS.txt').write_text(f'{sha256(executable)}  {executable.name}\n', encoding='utf-8')
+    distribution = directory / '易容-Studio-轻量安装器.zip'
+    with zipfile.ZipFile(distribution, 'x', zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        for file in (executable, directory / '使用说明.txt', directory / 'SHA256SUMS.txt'):
+            archive.write(file, file.name)
+    write_json(directory / 'publication-plan.json', {'prefix': f"bootstrap/{manifest['version']}/{release}",
+        'reusedPayload': base['package'], 'baseManifest': str(cached), 'baseManifestAsset': reference,
+        'application': str(package), 'applicationRemote': urllib.parse.parse_qs(urllib.parse.urlsplit(manifest['package']['url']).query)['FilePath'][0],
+        'installer': str(executable), 'distribution': str(distribution)})
+    return descriptor
+
+
+def verify_published_reference(asset):
+    """复用基础包必须已经存在；绝不通过此路径上传大包。"""
+    from modelscope.hub.api import HubApi
+    config = read_json(ROOT / 'update-config.json')
+    remote = urllib.parse.parse_qs(urllib.parse.urlsplit(asset['urls'][0]).query)['FilePath'][0]
+    if file_url(config['repository'], remote) != asset['urls'][0]:
+        raise ValueError('基础包不属于当前仓库')
+    record = next((f for f in HubApi().get_model_files(config['repository'], recursive=True) if f['Path'] == remote), None)
+    if not record or record.get('Sha256') != asset['sha256'] or record.get('Size') != asset['size']:
+        raise ValueError('固定基础包尚未发布或与清单不一致；不会自动上传完整包')
+    verify_public_access(asset['urls'][0], asset['size'])
+    return {'url': asset['urls'][0], 'size': asset['size'], 'sha256': asset['sha256'],
+            'reusedWithoutUpload': True, 'remoteMetadataVerified': True, 'anonymousAccessVerified': True, 'anonymousFullVerified': False}
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=ROOT / 'dist/modelscope/installer')
@@ -273,6 +360,9 @@ if __name__ == '__main__':
     parser.add_argument('--windows-build-root', type=Path, help='使用指定 Windows Release 构建，不改动本机部署')
     parser.add_argument('--publish', action='store_true')
     parser.add_argument('--full-readback', action='store_true', help='发布时额外匿名完整下载校验；默认仅核对远端哈希、大小与匿名访问')
+    parser.add_argument('--base', type=Path, help='首次指定已发布固定基础包目录；后续自动复用 installer/runtime-base.json')
+    parser.add_argument('--application-snapshot', type=Path, help='签名应用快照，默认采用 update-config.json 对应的应用发行')
+    parser.add_argument('--full-runtime', action='store_true', help='仅在依赖或模型变化时显式生成新完整运行包')
     args = parser.parse_args()
     if args.full_readback and not args.publish:
         parser.error('--full-readback 仅用于发布验证')
@@ -280,12 +370,27 @@ if __name__ == '__main__':
         parser.error('--refresh-from仅用于构建，不能与--payload或--publish合用')
     if args.windows_build_root and (args.payload or args.publish):
         parser.error('--windows-build-root 仅用于构建新运行包，不能与 --payload 或 --publish 合用')
+    if (args.base or args.application_snapshot) and (args.full_runtime or args.payload or args.refresh_from or args.publish):
+        parser.error('组合安装参数不能与完整运行包构建、旧包模式或发布参数合用')
+    if args.windows_build_root and not (args.full_runtime or args.refresh_from):
+        parser.error('组合安装直接使用签名应用快照；--windows-build-root 仅适用于显式重建基础包')
     if not args.publish:
-        build(args.output.resolve(), args.payload, args.refresh_from, args.windows_build_root)
+        if args.full_runtime or args.payload or args.refresh_from:
+            build(args.output.resolve(), args.payload, args.refresh_from, args.windows_build_root)
+        else:
+            config = read_json(ROOT / 'update-config.json')
+            snapshot = args.application_snapshot or ROOT / 'dist/modelscope/updates' / f"{(ROOT/'VERSION').read_text('utf-8-sig').strip()}-{config['releaseId']}"
+            result = build_composite(args.output.resolve(), snapshot.resolve(), args.base.resolve() if args.base else None)
+            print(json.dumps({'installer': str(args.output / '易容 Studio 安装器.exe'), 'releaseId': result['releaseId'], 'runtimeReused': True}, ensure_ascii=False))
     else:
         plan = read_json(args.output / 'publication-plan.json')
         proof = {}
-        for name in ('payload', 'installer', 'distribution'):
+        if plan.get('reusedPayload'):
+            proof['payload'] = verify_published_reference(plan['reusedPayload'])
+            remote = urllib.parse.parse_qs(urllib.parse.urlsplit(plan['baseManifestAsset']['url']).query)['FilePath'][0]
+            proof['baseManifest'] = publish_asset(Path(plan['baseManifest']), remote)
+            proof['application'] = publish_asset(Path(plan['application']), plan['applicationRemote'])
+        for name in (('installer', 'distribution') if plan.get('reusedPayload') else ('payload', 'installer', 'distribution')):
             remote = plan.get('payloadRemote') if name == 'payload' else None
             remote = remote or plan['prefix'] + '/' + Path(plan[name]).name
             proof[name] = publish_asset(Path(plan[name]), remote, full_readback=args.full_readback)

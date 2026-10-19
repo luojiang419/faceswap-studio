@@ -21,7 +21,7 @@ using System.Windows.Forms;
 namespace FaceSwapBootstrap {
     public sealed class Asset { public string name; public long size; public string sha256; public string[] urls; }
     public sealed class ComponentChoice { public string id, label; public long size; public int minMemoryMB; public Asset[] files; }
-    public sealed class Manifest { public int protocol; public int componentProtocol; public ComponentChoice[] components; public long musicRuntimeSize, musicArchiveSize; public string musicRuntimeVersion; public string releaseId; public string appVersion; public string appReleaseId; public string publicKey; public string entry; public Asset package; public Asset[] files; }
+    public sealed class Manifest { public int protocol; public int componentProtocol; public ComponentChoice[] components; public long musicRuntimeSize, musicArchiveSize; public string musicRuntimeVersion; public string releaseId; public string appVersion; public string appReleaseId; public string publicKey; public string entry; public Asset package, application; public Asset[] files, baseFiles; public string[] applicationFiles; public string applicationEntry; }
     public sealed class Status { public string text; public long done; public long total; }
 
     public static class Core {
@@ -51,7 +51,7 @@ namespace FaceSwapBootstrap {
                 !System.Text.RegularExpressions.Regex.IsMatch(manifest.releaseId ?? "", @"^\d{14}$")) throw new IOException("启动器清单无效");
             SafePath(Path.GetTempPath(), manifest.entry);
             var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (Asset asset in manifest.files.Concat(new[] { manifest.package })) {
+            foreach (Asset asset in manifest.files.Concat(new[] { manifest.package }).Concat(manifest.application==null?new Asset[0]:new[]{manifest.application}).Concat(manifest.baseFiles??new Asset[0])) {
                 SafePath(Path.GetTempPath(), asset.name);
                 if (asset.size < 0 || !System.Text.RegularExpressions.Regex.IsMatch(asset.sha256 ?? "", "^[a-f0-9]{64}$")) throw new IOException("清单校验信息无效");
             }
@@ -61,6 +61,40 @@ namespace FaceSwapBootstrap {
             }
             if (!names.Contains(manifest.entry) || manifest.package.urls == null || manifest.package.urls.Length == 0 ||
                 manifest.package.urls.Any(u => new Uri(u).Scheme != "https")) throw new IOException("启动器下载地址无效");
+            if(manifest.application!=null) {
+                if(manifest.applicationFiles==null || manifest.applicationFiles.Length==0 ||
+                    manifest.applicationFiles.Distinct(StringComparer.OrdinalIgnoreCase).Count()!=manifest.applicationFiles.Length ||
+                    manifest.applicationFiles.Any(name=>!names.Contains(name) || name.StartsWith(".assets/",StringComparison.OrdinalIgnoreCase) || name.StartsWith(".venv-win/",StringComparison.OrdinalIgnoreCase) || name.StartsWith(".python/",StringComparison.OrdinalIgnoreCase) || name.StartsWith(".runtime/",StringComparison.OrdinalIgnoreCase)) ||
+                    manifest.application.urls==null || manifest.application.urls.Length==0 || manifest.application.urls.Any(u=>new Uri(u).Scheme!="https") ||
+                    manifest.application.name==manifest.package.name || (manifest.applicationEntry!="易容 Studio.exe" && manifest.applicationEntry!="启动FaceSwap Studio.exe"))
+                    throw new IOException("独立应用包清单无效");
+            }
+        }
+        public static string ApplicationSource(Manifest manifest,string name) {return name==manifest.entry?manifest.applicationEntry:name;}
+        public static void ExtractApplication(string archive,string staging,Manifest manifest,CancellationToken token) {
+            var expected=manifest.files.Where(f=>manifest.applicationFiles.Contains(f.name,StringComparer.OrdinalIgnoreCase)).ToDictionary(f=>ApplicationSource(manifest,f.name),StringComparer.OrdinalIgnoreCase);
+            var seen=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            using(var zip=ZipFile.OpenRead(archive)) foreach(var entry in zip.Entries) {
+                token.ThrowIfCancellationRequested();
+                if(entry.FullName.EndsWith("/",StringComparison.Ordinal) && entry.Length==0) {
+                    string directory=entry.FullName.TrimEnd('/');SafePath(staging,directory);
+                    if(((entry.ExternalAttributes>>16)&0xf000)==0xa000 || !expected.Keys.Any(name=>name.StartsWith(directory+"/",StringComparison.OrdinalIgnoreCase))) throw new IOException("应用包目录无效");
+                    continue;
+                }
+                SafePath(staging,entry.FullName);Asset asset;
+                if(!expected.TryGetValue(entry.FullName,out asset) || !seen.Add(entry.FullName) || entry.Length!=asset.size || ((entry.ExternalAttributes>>16)&0xf000)==0xa000) throw new IOException("应用包文件与内置清单不一致");
+                string target=SafePath(staging,asset.name);Directory.CreateDirectory(Path.GetDirectoryName(target));
+                using(var input=entry.Open()) using(var output=File.Create(target)) {
+                    byte[] buffer=new byte[256*1024];int count;long done=0;
+                    while((count=input.Read(buffer,0,buffer.Length))>0) {
+                        token.ThrowIfCancellationRequested();done+=count;
+                        if(done>asset.size) throw new IOException("应用文件解压大小超过清单");
+                        output.Write(buffer,0,count);
+                    }
+                }
+                if(!Verified(target,asset)) throw new IOException("应用包文件 SHA-256 校验失败");
+            }
+            if(seen.Count!=expected.Count) throw new IOException("应用包缺少必要文件");
         }
         public static void Download(Asset asset, string directory, CancellationToken token, IProgress<Status> progress, bool allowHttp = false) {
             Directory.CreateDirectory(directory);
@@ -139,7 +173,7 @@ namespace FaceSwapBootstrap {
             foreach (Asset file in manifest.files) { token.ThrowIfCancellationRequested(); if (!Verified(SafePath(root, file.name), file)) return false; }
             return true;
         }
-        public static void Extract(string archive, string staging, Manifest manifest, CancellationToken token) {
+        public static void Extract(string archive, string staging, Manifest manifest, CancellationToken token,bool allowUnused=false) {
             var expected = manifest.files.ToDictionary(a => a.name, StringComparer.OrdinalIgnoreCase);
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             using (var zip = ZipFile.OpenRead(archive)) {
@@ -152,7 +186,7 @@ namespace FaceSwapBootstrap {
                         if (slash == entry.FullName.Length - 1) continue;
                         string folder = entry.FullName.Substring(slash + 1).TrimEnd('/');
                         SafePath(staging, folder);
-                        if (!expected.Keys.Any(name => name.StartsWith(folder + "/", StringComparison.OrdinalIgnoreCase)))
+                        if (!allowUnused && !expected.Keys.Any(name => name.StartsWith(folder + "/", StringComparison.OrdinalIgnoreCase)))
                             throw new IOException("压缩包包含清单以外的目录");
                         continue;
                     }
@@ -160,6 +194,10 @@ namespace FaceSwapBootstrap {
                     string relative = entry.FullName.Substring(slash + 1);
                     string target = SafePath(staging, relative);
                     Asset asset;
+                    if(allowUnused && !expected.ContainsKey(relative)) {
+                        if(((entry.ExternalAttributes>>16)&0xf000)==0xa000) throw new IOException("基础包包含文件链接");
+                        continue;
+                    }
                     if (!expected.TryGetValue(relative, out asset) || !seen.Add(relative) || entry.Length != asset.size ||
                         (((entry.ExternalAttributes >> 16) & 0xf000) == 0xa000)) throw new IOException("压缩包文件与内置清单不一致");
                     Directory.CreateDirectory(Path.GetDirectoryName(target));
@@ -188,11 +226,13 @@ namespace FaceSwapBootstrap {
                 }
                 string cache = Path.Combine(root, "data", "cache", "bootstrap");
                 Download(manifest.package, cache, token, progress);
+                if(manifest.application!=null) Download(manifest.application,cache,token,progress);
                 string staging = Path.Combine(root, ".desktop-staging-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(staging);
                 try {
                     progress.Report(new Status { text = "正在校验并展开桌面环境" });
-                    Extract(SafePath(cache, manifest.package.name), staging, manifest, token);
+                    Extract(SafePath(cache, manifest.package.name), staging, manifest.application==null?manifest:new Manifest{files=manifest.files.Where(f=>!manifest.applicationFiles.Contains(f.name,StringComparer.OrdinalIgnoreCase)).ToArray()}, token,manifest.application!=null);
+                    if(manifest.application!=null) ExtractApplication(SafePath(cache,manifest.application.name),staging,manifest,token);
                     foreach (Asset file in manifest.files) {
                         token.ThrowIfCancellationRequested();
                         string target = SafePath(root, file.name); Directory.CreateDirectory(Path.GetDirectoryName(target));

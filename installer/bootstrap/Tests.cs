@@ -130,6 +130,23 @@ public static class BootstrapTests {
                 Reject(() => Core.DesktopReady(directory, manifest, CancellationToken.None), "桌面核心损坏应被拒绝");
                 Check(File.ReadAllText(Path.Combine(directory, "VERSION")).Contains("2.0.3"), "新版配置不应被覆盖");
             });
+            Run("固定基础包与独立应用包组合安装，拒绝坏应用",()=>{
+                string directory=Path.Combine(root,"composite"),cache=Path.Combine(directory,"data/cache/bootstrap");Directory.CreateDirectory(cache);
+                string oldFile=Path.Combine(root,"old.txt"),newFile=Path.Combine(root,"new.txt"),environment=Path.Combine(root,"env.txt");
+                File.WriteAllText(oldFile,"old-app");File.WriteAllText(newFile,"new-app");File.WriteAllText(environment,"unchanged-env");
+                Func<string,string,Asset> record=(name,file)=>new Asset{name=name,size=new FileInfo(file).Length,sha256=Core.Hash(file)};
+                var old=record("易容 Studio.exe",oldFile);var current=record("易容 Studio.exe",newFile);var dependency=record(".python/runtime.bin",environment);
+                string basis=Path.Combine(cache,"runtime.zip"),application=Path.Combine(cache,"application.zip");
+                using(var zip=ZipFile.Open(basis,ZipArchiveMode.Create)) {zip.CreateEntryFromFile(oldFile,"FaceSwapStudio/易容 Studio.exe");zip.CreateEntryFromFile(environment,"FaceSwapStudio/.python/runtime.bin");}
+                using(var zip=ZipFile.Open(application,ZipArchiveMode.Create)) zip.CreateEntryFromFile(newFile,"启动FaceSwap Studio.exe");
+                var manifest=new Manifest{protocol=1,releaseId="20261019000001",entry="易容 Studio.exe",files=new[]{current,dependency},baseFiles=new[]{old,dependency},applicationFiles=new[]{current.name},applicationEntry="启动FaceSwap Studio.exe",package=record("runtime.zip",basis),application=record("application.zip",application)};
+                manifest.package.urls=new[]{"https://example.invalid/runtime.zip"};manifest.application.urls=new[]{"https://example.invalid/application.zip"};
+                Core.Prepare(directory,manifest,CancellationToken.None,quiet);
+                Check(Core.Verified(Path.Combine(directory,current.name),current) && Core.Verified(Path.Combine(directory,dependency.name),dependency),"未正确组合应用和基础环境");
+                File.WriteAllText(Path.Combine(directory,current.name),"bad-app");File.WriteAllBytes(application,new byte[new FileInfo(application).Length]);
+                Reject(()=>Core.ExtractApplication(application,Path.Combine(root,"bad-composite"),manifest,CancellationToken.None),"损坏应用包通过");
+                manifest.applicationFiles=new[]{".python/runtime.bin"};Reject(()=>Core.Validate(manifest),"应用包允许覆盖基础依赖");
+            });
             Console.WriteLine(passes + " native bootstrap tests passed"); return 0;
         } catch (Exception error) { Console.Error.WriteLine(error); return 1; }
         finally {

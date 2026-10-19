@@ -175,6 +175,19 @@ public static class MaintenanceTests {
                 Check(f.Run(true).repaired && f.Get("app.exe")=="good-app","未前向恢复");
                 Check(File.Exists(Path.Combine(session,"journal.json")) && !File.Exists(Path.Combine(f.root,"faceswap studio/data/cache/updates/pending.json")),"旧日志丢失或未清除阻塞标记");
             });
+            test("只修应用时无需基础包，继续保护个人数据",f=>{
+                f.manifest.baseFiles=f.manifest.files;
+                var updated=new Asset{name="app.exe",size=11,sha256=""};
+                string temp=Path.Combine(f.directory,"updated");File.WriteAllText(temp,"updated-app");updated.sha256=Core.Hash(temp);
+                f.manifest.files=f.manifest.files.Select(a=>a.name=="app.exe"?updated:a).ToArray();
+                f.manifest.applicationFiles=new[]{"app.exe"};f.manifest.applicationEntry="易容 Studio.exe";
+                string zip=Path.Combine(f.root,"data/cache/bootstrap/application.zip");Directory.CreateDirectory(Path.GetDirectoryName(zip));
+                using(var archive=ZipFile.Open(zip,ZipArchiveMode.Create)) archive.CreateEntryFromFile(temp,"易容 Studio.exe");
+                f.manifest.application=new Asset{name="application.zip",size=new FileInfo(zip).Length,sha256=Core.Hash(zip),urls=new[]{"https://example.invalid/application.zip"}};
+                f.Put("faceswap studio/data/output/作品.txt","preserved");File.Delete(f.package);
+                Check(f.Run(true).repaired && f.Get("app.exe")=="updated-app","应用修复未完成或错误依赖基础包");
+                Check(f.Get("faceswap studio/data/output/作品.txt")=="preserved","个人数据丢失");
+            });
             Console.WriteLine("ALL PASSED: "+passed);return 0;
         } catch(Exception error) {Console.Error.WriteLine(error);return 1;}
     }
