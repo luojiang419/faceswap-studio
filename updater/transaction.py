@@ -238,10 +238,38 @@ def preparation_deadline(session, manifest, pid, deadline, limit):
     return deadline
 
 
+def native_updater_pid(session):
+    """仅信任当前会话的原生更新器，兼容没有显式传递 PID 的旧窗口。"""
+    try:
+        import psutil
+        pid = int(os.environ.get('FACESWAP_STUDIO_UPDATER_PID') or os.getppid())
+        process = psutil.Process(pid)
+        return pid if Path(process.exe()).resolve() == (session / 'FaceSwapStudioUpdater.exe').resolve() else None
+    except (OSError, ValueError, psutil.Error):
+        return None
+
+
 def restart(root, session, health=True):
+    updater_pid = native_updater_pid(session)
     env = {k: v for k, v in os.environ.items() if k not in (
         "ELECTRON_RUN_AS_NODE", "FACESWAP_STUDIO_UPDATE_HEALTH_FILE", "FACESWAP_STUDIO_UPDATE_SESSION",
-        "FACESWAP_STUDIO_UPDATE_TOKEN", "FACESWAP_STUDIO_WRAPPER_PID", "FACESWAP_STUDIO_LAUNCHER_PID")}
+        "FACESWAP_STUDIO_UPDATE_TOKEN", "FACESWAP_STUDIO_WRAPPER_PID", "FACESWAP_STUDIO_LAUNCHER_PID",
+        "FACESWAP_STUDIO_START_HIDDEN", "FACESWAP_STUDIO_UPDATE_UPDATER_PID", "FACESWAP_STUDIO_UPDATER_PID")}
+    if updater_pid and not health:
+        write_json(session / 'restore-after-updater.json', {'pid': updater_pid, 'root': str(root)})
+        launcher = root / '易容 Studio.exe'
+        if not launcher.is_file():
+            launcher = root / '启动FaceSwap Studio.exe'
+        env.update(FACESWAP_STUDIO_SKIP_DEFERRED_UPDATE='1', FACESWAP_STUDIO_SKIP_UPDATE_PROMPT='1')
+        code = ('import subprocess,sys\nfrom pathlib import Path\nimport psutil\n'
+                'try: psutil.Process(int(sys.argv[1])).wait()\nexcept psutil.NoSuchProcess: pass\n'
+                'subprocess.Popen([sys.argv[2],"--faceswap-run","--faceswap-show"],cwd=sys.argv[3],'
+                'stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)\n'
+                'Path(sys.argv[4]).unlink(missing_ok=True)\n')
+        return subprocess.Popen([sys.executable, '-c', code, str(updater_pid), str(launcher), str(root),
+                                 str(session / 'restore-after-updater.json')], cwd=root, env=env,
+                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     if health:
         for name in ('healthy.json', 'frontend-ready.json', 'healthy.json.preparing'):
             (session / name).unlink(missing_ok=True)
@@ -250,6 +278,9 @@ def restart(root, session, health=True):
         env["FACESWAP_STUDIO_UPDATE_HEALTH_FILE"] = str(session / "healthy.json")
         env["FACESWAP_STUDIO_UPDATE_SESSION"] = str(session)
         env["FACESWAP_STUDIO_UPDATE_TOKEN"] = token
+        if updater_pid:
+            env['FACESWAP_STUDIO_START_HIDDEN'] = '1'
+            env['FACESWAP_STUDIO_UPDATE_UPDATER_PID'] = str(updater_pid)
     launcher = root / "易容 Studio.exe"
     if not launcher.is_file():
         launcher = root / "启动FaceSwap Studio.exe"  # 旧版本回滚后仍可正常启动。

@@ -130,7 +130,7 @@ def prepare_offer(source, monkeypatch):
 def test_startup_offer_opens_native_before_any_download_and_deduplicates(source, monkeypatch):
     service, session, launched = prepare_offer(source, monkeypatch)
     assert service.offer(automatic=True)['native_prompt_opened']
-    assert '--offer' in launched[0]
+    assert launched[0][-1] == 'show' and str(session / 'offer.py') in launched[0]
     assert service.worker is None and not (session / 'package.zip').exists()
     service.offer(automatic=True)
     assert len(launched) == 1
@@ -180,7 +180,7 @@ def test_deferred_obsolete_release_is_removed_without_reinstall(source, monkeypa
     assert not (service.cache / 'deferred.json').exists()
 
 
-def test_now_downloads_and_verifies_before_closing_or_installing(source, monkeypatch):
+def test_now_closes_workbench_before_downloading_and_installing(source, monkeypatch):
     from updater import offer, transaction
     service, session, _ = prepare_offer(source, monkeypatch)
     service.offer()
@@ -190,19 +190,22 @@ def test_now_downloads_and_verifies_before_closing_or_installing(source, monkeyp
     monkeypatch.setattr(transaction, 'run', lambda *a: actions.append('install'))
     offer.execute(session, 'now')
     assert (session / 'package.zip').read_bytes() == source[4]
-    assert actions == ['verified', 'close', 'install']
+    assert actions == ['close', 'verified', 'install']
 
 
-def test_bad_download_keeps_current_app_running(source, monkeypatch):
+def test_bad_download_keeps_original_files_for_restoration(source, monkeypatch):
     from updater import offer, transaction
     service, session, _ = prepare_offer(source, monkeypatch)
     source[1]['package']['sha256'] = '0' * 64
     service.envelope = source[6]()
     service.offer()
-    monkeypatch.setattr(offer, 'close_studio', lambda *a: pytest.fail('坏包不能退出当前软件'))
+    closed = []
+    monkeypatch.setattr(offer, 'close_studio', lambda *a: closed.append(True))
     monkeypatch.setattr(transaction, 'run', lambda *a: pytest.fail('坏包不能安装'))
     with pytest.raises(RuntimeError, match='SHA-256'):
         offer.execute(session, 'now')
+    assert closed == [True]
+    assert (service.root / 'VERSION').read_text('utf-8') == '0.1.3'
 
 
 def test_offer_launch_failure_allows_retry_without_download(source, monkeypatch):

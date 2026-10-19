@@ -654,6 +654,51 @@ def monitor_update_health(repo_root: Path, stop: threading.Event) -> None:
             continue
 
 
+def reveal_frontend(pid):
+    """只显示本次启动的前端，不激活其他安装或用户窗口。"""
+    import ctypes
+    user32 = ctypes.WinDLL('user32', use_last_error=True)
+    callback_type = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_ssize_t)
+    user32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+    user32.GetClassNameW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
+    user32.PostMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t]
+    message = user32.RegisterWindowMessageW(ACTIVATE_WINDOW_MESSAGE_NAME)
+    shown = []
+    @callback_type
+    def visit(window, _):
+        owner = ctypes.c_ulong(); user32.GetWindowThreadProcessId(window, ctypes.byref(owner))
+        name = ctypes.create_unicode_buffer(256); user32.GetClassNameW(window, name, len(name))
+        if owner.value == pid and name.value == 'FLUTTER_RUNNER_WIN32_WINDOW':
+            shown.append(bool(user32.PostMessageW(window, message, 0, 0)))
+        return True
+    user32.EnumWindows(visit, 0)
+    return any(shown)
+
+
+def monitor_frontend_visibility(repo_root, pid, stop):
+    if os.environ.get('FACESWAP_STUDIO_START_HIDDEN') != '1':
+        return
+    from updater.transaction import alive, read_json, write_json
+    try:
+        updater_pid = int(os.environ['FACESWAP_STUDIO_UPDATE_UPDATER_PID'])
+        session = Path(os.environ['FACESWAP_STUDIO_UPDATE_SESSION'])
+    except (KeyError, ValueError):
+        return
+    while not stop.wait(.2):
+        try:
+            if alive(updater_pid) or read_json(session / 'status.json').get('status') != 'complete':
+                continue
+            if reveal_frontend(pid):
+                marker = session.parent / 'active-offer.json'
+                if marker.exists() and read_json(marker).get('pid') == updater_pid:
+                    marker.unlink(missing_ok=True)
+                write_json(session / 'frontend-revealed.json', {'pid': pid, 'root': str(repo_root.resolve()),
+                    'updaterPid': updater_pid, 'updaterExited': True, 'shownAt': time.time()})
+                return
+        except (OSError, ValueError):
+            continue
+
+
 def launch_frontend(command: list[str], command_cwd: Path) -> tuple[int, float]:
     started_at = time.monotonic()
     process = subprocess.Popen(command, cwd=command_cwd, shell=False)
@@ -661,11 +706,14 @@ def launch_frontend(command: list[str], command_cwd: Path) -> tuple[int, float]:
     stop = threading.Event()
     monitor = threading.Thread(target=monitor_update_health, args=(resolve_repo_root(), stop), daemon=True)
     monitor.start()
+    visibility = threading.Thread(target=monitor_frontend_visibility, args=(resolve_repo_root(), process.pid, stop), daemon=True)
+    visibility.start()
     try:
         exit_code = process.wait()
     finally:
         stop.set()
         monitor.join(timeout=10)
+        visibility.join(timeout=5)
     return exit_code, time.monotonic() - started_at
 
 
@@ -710,6 +758,11 @@ def terminate_process_tree(process: subprocess.Popen[str], studio_root: Path) ->
 def main() -> int:
     repo_root = resolve_repo_root()
     studio_root = repo_root / "faceswap studio"
+    if not os.environ.get('FACESWAP_STUDIO_UPDATE_SESSION'):
+        from updater.startup import active_update
+        if active_update(repo_root):
+            write_launcher_log(studio_root, 'Updater owns the session; workbench launch ignored until update finishes.')
+            return 0
     if os.environ.get("FACESWAP_STUDIO_ISOLATED"):
         global LAUNCHER_MUTEX_NAME
         import hashlib

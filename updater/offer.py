@@ -6,6 +6,7 @@ import ctypes
 import os
 from pathlib import Path
 import sys
+import subprocess
 from urllib.parse import urlparse
 from urllib.request import build_opener, ProxyHandler
 import json
@@ -68,6 +69,22 @@ def close_studio(root, bridge_url):
     user32.EnumWindows(visit, 0)
     if sent != pids:
         raise RuntimeError('无法正常退出工作台，请从托盘退出后重试。')
+    _, remaining = psutil.wait_procs(frontends, timeout=30)
+    if remaining:
+        raise RuntimeError('工作台尚未正常退出，未开始下载或安装更新。')
+
+
+def launch_studio(root):
+    executable = root / '易容 Studio.exe'
+    if not executable.is_file():
+        executable = root / '启动FaceSwap Studio.exe'
+    env = {k: v for k, v in os.environ.items() if k not in (
+        'FACESWAP_STUDIO_UPDATE_SESSION', 'FACESWAP_STUDIO_UPDATE_HEALTH_FILE', 'FACESWAP_STUDIO_UPDATE_TOKEN',
+        'FACESWAP_STUDIO_WRAPPER_PID', 'FACESWAP_STUDIO_LAUNCHER_PID', 'FACESWAP_STUDIO_UPDATER_PID',
+        'FACESWAP_STUDIO_UPDATE_UPDATER_PID', 'FACESWAP_STUDIO_START_HIDDEN')}
+    env.update(FACESWAP_STUDIO_SKIP_DEFERRED_UPDATE='1', FACESWAP_STUDIO_SKIP_UPDATE_PROMPT='1')
+    return subprocess.Popen([str(executable), '--faceswap-run', '--faceswap-show'], cwd=root, env=env,
+                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
 
 
 def execute(session, action):
@@ -75,6 +92,25 @@ def execute(session, action):
     from updater.transaction import read_json, write_json, emit, validate, run, version
     root, prompt, manifest = load_offer(session)
     session = Path(session).resolve()
+    if action == 'show':
+        from updater.transaction import wait_exit
+        active = session.parent / 'active-offer.json'
+        write_json(active, {'root': str(root), 'session': str(session), 'pid': os.getpid()})
+        close_studio(root, prompt['bridge_url'])
+        settings = read_json(session / 'session.json')
+        wait_exit(settings['parentPid'], timeout=30)
+        prompt['resume_studio'] = True
+        write_json(session / 'prompt.json', prompt)
+        try:
+            child = subprocess.Popen([str(session / 'FaceSwapStudioUpdater.exe'), '--offer', str(session), sys.executable],
+                                     cwd=session, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            if isinstance(getattr(child, 'pid', None), int):
+                write_json(active, {'root': str(root), 'session': str(session), 'pid': child.pid})
+        except OSError:
+            active.unlink(missing_ok=True)
+            launch_studio(root)
+            raise
+        return
     service = UpdateService(root)
     if action == 'later':
         write_json(service.cache / 'deferred.json', {'session': str(session), 'root': str(root)})
@@ -86,6 +122,8 @@ def execute(session, action):
     if (version(service.current_version), service.config['releaseId']) >= (version(manifest['version']), manifest['releaseId']):
         emit('当前已是该版本或更新版本，无需重复安装。', 100)
         return 2
+    emit('正在正常退出工作台…', 0)
+    close_studio(root, prompt['bridge_url'])
     service.envelope = read_json(session / 'envelope.json')
     service.set(state='update_available', update_available=True, delta_available=True)
     service.download()
@@ -98,8 +136,7 @@ def execute(session, action):
         raise RuntimeError(status.get('error') or status['message'])
     settings = read_json(session / 'session.json')
     validate(session, settings)
-    emit('更新包已验证，正在正常退出工作台…', 28)
-    close_studio(root, prompt['bridge_url'])
+    emit('更新包已验证，正在安装更新…', 28)
     (service.cache / 'deferred.json').unlink(missing_ok=True)
     (service.cache / 'scheduled.json').unlink(missing_ok=True)
     run(session)
@@ -108,7 +145,7 @@ def execute(session, action):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('session', type=Path)
-    parser.add_argument('action', choices=('now', 'later'))
+    parser.add_argument('action', choices=('now', 'later', 'show'))
     args = parser.parse_args()
     # 会话中的副本启动时，将已验证的安装根加入模块搜索路径。
     try:
@@ -117,4 +154,8 @@ if __name__ == '__main__':
         raise SystemExit(execute(args.session, args.action) or 0)
     except Exception as error:
         print(json.dumps({'message': str(error), 'progress': 0}, ensure_ascii=True), flush=True)
+        if args.action == 'show':
+            from updater.transaction import write_json
+            write_json(args.session / 'handoff-error.json', {'error': str(error)})
+            ctypes.windll.user32.MessageBoxW(None, str(error), '暂时无法进入更新', 0x10)
         raise SystemExit(1)

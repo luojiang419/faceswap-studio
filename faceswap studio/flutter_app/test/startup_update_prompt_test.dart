@@ -25,7 +25,8 @@ class UpdateClient extends BridgeClient {
   }) async {
     requests.add('prompt:$automatic');
     return {
-      'native_prompt_opened': scenario != 'launch_failed',
+      'native_prompt_opened': scenario != 'launch_failed' && scenario != 'skipped',
+      'prompt_skipped': scenario == 'skipped',
       'error': 'native failure',
     };
   }
@@ -36,7 +37,13 @@ class UpdateClient extends BridgeClient {
 }
 
 void main() {
-  for (final scenario in ['available', 'current', 'failed', 'launch_failed']) {
+  for (final scenario in [
+    'available',
+    'current',
+    'failed',
+    'launch_failed',
+    'skipped',
+  ]) {
     testWidgets(
       'Windows 更新流程 $scenario 直接路由独立窗口',
       (tester) async {

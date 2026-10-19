@@ -26,6 +26,42 @@ def finalize_installation(root, session):
                    check=True, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
 
 
+def active_update(root):
+    """更新接管期间的普通启动请求不能重新打开或激活工作台。"""
+    root = Path(root).resolve()
+    cache = root / 'faceswap studio/data/cache/updates'
+    for name in ('active-offer.json', 'pending.json'):
+        marker = cache / name
+        if not marker.is_file():
+            continue
+        try:
+            state = read_json(marker)
+            session = Path(state['session']).resolve()
+            if not session.is_relative_to(cache.resolve()):
+                continue
+            if name == 'active-offer.json' and Path(state['root']).resolve() != root:
+                continue
+            pid = int(state['pid'])
+            if alive(pid):
+                import psutil
+                try:
+                    process = psutil.Process(pid)
+                    executable = Path(process.exe()).resolve()
+                    if executable == (session / 'FaceSwapStudioUpdater.exe').resolve():
+                        return True
+                    args = process.cmdline()
+                    if executable.name.lower() in ('python.exe', 'pythonw.exe') and len(args) > 1:
+                        if Path(args[1]).resolve() in ((session / 'offer.py').resolve(), (session / 'transaction.py').resolve()):
+                            return True
+                except (OSError, ValueError, psutil.Error):
+                    pass
+            if name == 'active-offer.json':
+                marker.unlink(missing_ok=True)
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    return False
+
+
 def resume_update(root):
     root = Path(root).resolve()
     cache = root / 'faceswap studio/data/cache/updates'
@@ -56,8 +92,10 @@ def resume_update(root):
         settings = read_json(session / 'session.json')
         settings['parentPid'] = int(os.environ.get('FACESWAP_STUDIO_WRAPPER_PID', os.getpid()))
         write_json(session / 'session.json', settings)
-        subprocess.Popen([str(session / 'FaceSwapStudioUpdater.exe'), '--install-offer', str(session), sys.executable],
+        child = subprocess.Popen([str(session / 'FaceSwapStudioUpdater.exe'), '--install-offer', str(session), sys.executable],
                          creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        if isinstance(getattr(child, 'pid', None), int):
+            write_json(cache / 'active-offer.json', {'root': str(root), 'session': str(session), 'pid': child.pid})
         deferred.unlink()
         return True
     scheduled = cache / 'scheduled.json'

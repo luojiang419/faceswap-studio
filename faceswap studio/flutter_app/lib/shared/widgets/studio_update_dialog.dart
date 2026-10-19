@@ -36,6 +36,7 @@ Future<void> startStudioUpdateFlow(
       status['update_available'] == true &&
       status['delta_available'] == true) {
     final prompt = await client.openUpdatePrompt(automatic: automatic);
+    if (prompt['prompt_skipped'] == true) return;
     if (prompt['native_prompt_opened'] != true) {
       throw BridgeClientException('${prompt['error'] ?? '无法打开独立更新器，请稍后重试。'}');
     }

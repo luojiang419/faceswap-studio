@@ -68,6 +68,8 @@ class UpdateService:
         self.session = None
         self.prompt_pid = None
         self.prompted_release = None
+        self.skip_automatic_prompt = (os.environ.pop('FACESWAP_STUDIO_SKIP_UPDATE_PROMPT', None) == '1'
+                                      or bool(os.environ.get('FACESWAP_STUDIO_UPDATE_SESSION')))
         self.state = {'state': 'idle', 'message': '通过魔搭检查软件更新。', 'current_version': self.current_version,
                       'update_available': False, 'delta_available': False, 'percent': 0, 'error': None}
 
@@ -130,8 +132,10 @@ class UpdateService:
             return dict(self.state)
 
     def offer(self, automatic=False):
-        """先打开独立选择窗口，不下载、不关闭当前工作台。"""
+        """独立执行器正常退出工作台后，再打开选择窗口；尚不下载。"""
         with self.lock:
+            if automatic and self.skip_automatic_prompt:
+                return {**self.status(), 'native_prompt_opened': False, 'prompt_skipped': True}
             if not self.envelope or not self.state.get('delta_available'):
                 return self.status()
             manifest = verify_envelope(self.envelope, self.config['publicKey'])
@@ -165,7 +169,7 @@ class UpdateService:
                 helper = subprocess.run([
                     sys.executable, '-c',
                     'import subprocess,sys; p=subprocess.Popen(sys.argv[1:],creationflags=0x208); print(p.pid)',
-                    str(session / 'FaceSwapStudioUpdater.exe'), '--offer', str(session), sys.executable,
+                    sys.executable, str(session / 'offer.py'), str(session), 'show',
                 ], check=True, capture_output=True, text=True,
                     creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
                 self.prompt_pid = int(helper.stdout.strip())

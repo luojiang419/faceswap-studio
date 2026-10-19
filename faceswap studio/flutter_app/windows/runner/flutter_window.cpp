@@ -92,7 +92,11 @@ bool FlutterWindow::OnCreate() {
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
-    this->Show();
+    wchar_t hidden[2] = {};
+    if (GetEnvironmentVariableW(L"FACESWAP_STUDIO_START_HIDDEN", hidden, 2) != 1 ||
+        hidden[0] != L'1') {
+      this->Show();
+    }
   });
 
   // Flutter can complete the first frame before the "show window" callback is

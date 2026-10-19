@@ -41,6 +41,7 @@ internal sealed class UpdateWindow : StudioUpdateSurface {
                 RedirectStandardOutput = true, RedirectStandardError = true
             };
             start.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
+            start.EnvironmentVariables["FACESWAP_STUDIO_UPDATER_PID"] = Process.GetCurrentProcess().Id.ToString();
             child = new Process { StartInfo = start, EnableRaisingEvents = true };
             child.OutputDataReceived += (s,e) => {
                 if (e.Data == null) return;
@@ -92,12 +93,13 @@ internal sealed class UpdateOfferWindow : StudioUpdateSurface {
     readonly ProgressBar progress=new ProgressBar();
     readonly SoftButton now, later, close;
     readonly string session, python, root;
-    readonly bool startup;
+    readonly bool startup, resumeStudio;
     Process child;
     bool busy, updated, current;
     public UpdateOfferWindow(string directory,string interpreter,bool automatic) {
         session=directory;python=interpreter;startup=automatic;
         var prompt=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(File.ReadAllText(Path.Combine(session,"prompt.json")));
+        object resume;resumeStudio=prompt.TryGetValue("resume_studio",out resume) && Convert.ToBoolean(resume);
         root=Path.GetFullPath(Convert.ToString(prompt["root"]));
         Text="易容 Studio · 软件更新";Name="update-offer";
         Icon=Icon.ExtractAssociatedIcon(Application.ExecutablePath);
@@ -111,18 +113,22 @@ internal sealed class UpdateOfferWindow : StudioUpdateSurface {
         close.Name="close-update";close.Text="继续使用";close.Visible=false;close.Click+=(s,e)=>Close();
         progress.Visible=false;Controls.Add(progress);
         AcceptButton=now;
-        FormClosing+=(s,e)=>{if(busy) e.Cancel=true;else if(startup && !updated) ReturnToStudio();};
+        FormClosing+=(s,e)=>{if(busy) e.Cancel=true;else if((startup || resumeStudio) && !updated) ReturnToStudio();};
         Shown+=(s,e)=>{if(startup) BeginInvoke((Action)(()=>StartChoice("now")));else now.Focus();};
         SyncSurface();
     }
     void SyncSurface() {StatusTitle=title.Text;StatusDetail=detail.Text;Fraction=progress.Value/100d;View=busy?(progress.Value>=28?"working":"downloading"):updated||current?"ready":close.Visible?"error":"idle";IsBusy=busy;RefreshSurface();}
     void Dispatch(Action action) {if(!IsDisposed && IsHandleCreated) BeginInvoke((Action)(()=>{action();if(!IsDisposed) SyncSurface();}));}
     void ReturnToStudio() {
+        if(File.Exists(Path.Combine(session,"restore-after-updater.json"))) return;
         string executable=Path.Combine(root,"易容 Studio.exe");
         if(!File.Exists(executable)) executable=Path.Combine(root,"启动FaceSwap Studio.exe");
         if(File.Exists(executable)) {
-            var start=new ProcessStartInfo(executable,"--faceswap-run --faceswap-show"){WorkingDirectory=root,UseShellExecute=false};
+            string code="import psutil,subprocess,sys\ntry: psutil.Process(int(sys.argv[1])).wait()\nexcept psutil.NoSuchProcess: pass\nsubprocess.Popen([sys.argv[2],'--faceswap-run','--faceswap-show'],cwd=sys.argv[3])";
+            var start=new ProcessStartInfo(python,"-c \""+code+"\" "+Process.GetCurrentProcess().Id+" \""+executable+"\" \""+root+"\""){WorkingDirectory=root,UseShellExecute=false,CreateNoWindow=true};
+            foreach(string name in new[]{"FACESWAP_STUDIO_UPDATE_SESSION","FACESWAP_STUDIO_UPDATE_HEALTH_FILE","FACESWAP_STUDIO_UPDATE_TOKEN","FACESWAP_STUDIO_WRAPPER_PID","FACESWAP_STUDIO_LAUNCHER_PID","FACESWAP_STUDIO_UPDATER_PID","FACESWAP_STUDIO_UPDATE_UPDATER_PID","FACESWAP_STUDIO_START_HIDDEN"}) start.EnvironmentVariables.Remove(name);
             start.EnvironmentVariables["FACESWAP_STUDIO_SKIP_DEFERRED_UPDATE"]="1";
+            start.EnvironmentVariables["FACESWAP_STUDIO_SKIP_UPDATE_PROMPT"]="1";
             Process.Start(start);
         }
     }
@@ -137,6 +143,7 @@ internal sealed class UpdateOfferWindow : StudioUpdateSurface {
                 WorkingDirectory=session,UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true
             };
             start.EnvironmentVariables["PYTHONIOENCODING"]="utf-8";
+            start.EnvironmentVariables["FACESWAP_STUDIO_UPDATER_PID"]=Process.GetCurrentProcess().Id.ToString();
             child=new Process{StartInfo=start};
             child.OutputDataReceived+=(s,e)=>{
                 if(e.Data==null)return;
