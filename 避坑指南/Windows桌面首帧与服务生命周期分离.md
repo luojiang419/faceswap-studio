@@ -25,3 +25,11 @@ Bridge 的 `/health` 调用 `runtime.status()`，间接持有核心锁、探测 
 配套回归包含真实 Windows 命名互斥锁交接、预检/Bridge 取消、核心锁持有期间的快速健康响应、晚连接与握手恢复，以及真实关闭弹窗和托盘恢复。
 
 Windows UI 测试应枚举并匹配当前测试 PID，不能只匹配 `FLUTTER_RUNNER_WIN32_WINDOW`；RustDesk 等其他程序也会使用此类名。
+
+## 兼容更新后的启动入口必须同步
+
+兼容旧客户端白名单时，应用 ZIP 使用 `启动FaceSwap Studio.exe`，而当前桌面快捷方式指向 `易容 Studio.exe`。若入口整理只在新名字不存在时复制，已有 canonical EXE 将保持旧字节；即使源代码未变，每次 C# 编译的二进制也可能不同，导致最新安装器判坏，后续启动器修改也不会生效。
+
+已验证做法：核对更新清单中的旧入口 SHA-256，确认 canonical 文件属于当前安装；内容不一致时先保留 `integration-backup/易容 Studio.exe`，复制为临时文件后使用 `File.Replace` 原子替换。Windows 已加载的 EXE 可以通过这种方式替换，不能原地覆写。相同内容不重写，同名外部文件和篡改的旧入口拒绝接管。
+
+原生迁移回归 10 项通过；从真实上个发行升级后，入口整理报告 `canonicalEntryUpdated=true`，维护检查 healthy，连续启动 0.556–0.602 秒。
