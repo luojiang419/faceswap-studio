@@ -2082,41 +2082,33 @@ class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
               ),
             ],
           ),
-          SizedBox(height: widget.compact ? 10 : 12),
-          Text(
-            '点击缩略图会写入参考脸位置并自动切换到 reference 模式。排序、性别、种族、年龄和距离请在右侧参数面板的进阶控制中调整。',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-              height: 1.35,
-            ),
-          ),
-          SizedBox(height: widget.compact ? 10 : 12),
-          if (previewResult == null)
-            const _FaceSelectorEmptyState(message: '生成预览后显示当前帧检测到的人脸')
-          else if (faceChoices.isEmpty)
-            const _FaceSelectorEmptyState(message: '当前帧未检测到人脸')
-          else
-            SizedBox(
-              height: widget.compact ? 84 : 92,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: faceChoices.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 10),
-                itemBuilder: (context, index) {
-                  final face = faceChoices[index];
-                  return _FaceChoiceTile(
-                    face: face,
-                    compact: widget.compact,
-                    selected:
-                        (selectedMode == 'reference' &&
-                            face.index == selectedPosition) ||
-                        face.selected,
-                    enabled: controlsEnabled,
-                    onSelected: () => _selectReferenceFace(face),
-                  );
-                },
+          if (previewResult != null) ...[
+            SizedBox(height: widget.compact ? 10 : 12),
+            if (faceChoices.isEmpty)
+              const _FaceSelectorEmptyState(message: '当前帧未检测到人脸')
+            else
+              SizedBox(
+                height: widget.compact ? 84 : 92,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: faceChoices.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 10),
+                  itemBuilder: (context, index) {
+                    final face = faceChoices[index];
+                    return _FaceChoiceTile(
+                      face: face,
+                      compact: widget.compact,
+                      selected:
+                          (selectedMode == 'reference' &&
+                              face.index == selectedPosition) ||
+                          face.selected,
+                      enabled: controlsEnabled,
+                      onSelected: () => _selectReferenceFace(face),
+                    );
+                  },
+                ),
               ),
-            ),
+          ],
         ],
       ),
     );
