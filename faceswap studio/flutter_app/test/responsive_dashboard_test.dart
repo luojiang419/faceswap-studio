@@ -298,7 +298,7 @@ void main() {
       await show(tester, const WorkspacePage(), size);
       expect(tester.takeException(), isNull, reason: '$size 初始布局');
       expect(find.text('工作台'), findsNothing);
-      for (final title in ['SOURCE', 'TARGET', '原生预览']) {
+      for (final title in ['人脸参考', '待换脸视频', '原生预览']) {
         final rect = tester.getRect(find.text(title));
         expect(
           (Offset.zero & size).contains(rect.topLeft),
@@ -448,8 +448,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(tester.takeException(), isNull);
     expect(find.text('工作台'), findsOneWidget);
-    expect(find.text('SOURCE'), findsOneWidget);
-    expect(find.text('TARGET'), findsOneWidget);
+    expect(find.text('人脸参考'), findsOneWidget);
+    expect(find.text('待换脸视频'), findsOneWidget);
     expect(find.text('原生预览'), findsOneWidget);
     await capture(tester, 'shell-workspace-default');
     await tester.pumpWidget(const SizedBox.shrink());

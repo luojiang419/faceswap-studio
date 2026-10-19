@@ -564,11 +564,11 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
         context,
         filePaths: imagePaths,
         initialIndex: initialIndex < 0 ? 0 : initialIndex,
-        title: 'SOURCE',
+        title: '人脸参考',
       );
       return;
     }
-    await showStudioImageViewer(context, filePath: path, title: 'SOURCE');
+    await showStudioImageViewer(context, filePath: path, title: '人脸参考');
   }
 
   Future<void> _openTargetPreview() async {
@@ -578,10 +578,10 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
       return;
     }
     if (mediaType == 'video') {
-      await showStudioVideoViewer(context, filePath: path, title: 'TARGET');
+      await showStudioVideoViewer(context, filePath: path, title: '待换脸视频');
       return;
     }
-    await showStudioImageViewer(context, filePath: path, title: 'TARGET');
+    await showStudioImageViewer(context, filePath: path, title: '待换脸视频');
   }
 
   Future<void> _openPreviewResult() async {
@@ -762,7 +762,7 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
     final confirmed = await _confirmWorkspaceAction(
       context,
       title: '清空源文件',
-      message: '确定清空当前已选择的源文件吗？预览结果会一并清除。',
+      message: '确定清空当前已选择的人脸参考吗？预览结果会一并清除。',
       confirmLabel: '清空',
       destructive: true,
     );
@@ -877,9 +877,7 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
                     alignment: Alignment.centerRight,
                     child: IconButton(
                       onPressed: _isWebUiReady ? _togglePinnedPreview : null,
-                      tooltip: _isPinned
-                          ? '取消顶部固定'
-                          : '固定 SOURCE / TARGET / PREVIEW',
+                      tooltip: _isPinned ? '取消顶部固定' : '固定人脸参考 / 待换脸视频 / 预览',
                       icon: Icon(
                         _isPinned
                             ? Icons.push_pin_rounded
@@ -1099,14 +1097,14 @@ class _NativeWorkbenchPane extends StatelessWidget {
 
         final sourceCard = _WorkspaceDraftCard(
           compact: compact,
-          title: 'SOURCE',
+          title: '人脸参考',
           subtitle: currentDraft.sourcePaths.isEmpty
-              ? '支持图片和音频，可一次选择多个源文件。'
-              : '已选择 ${currentDraft.sourcePaths.length} 个源文件。',
+              ? '可添加多张人脸图片。'
+              : '已选 ${currentDraft.sourcePaths.length} 个文件，支持多张图片。',
           filePath: currentDraft.primarySourcePath,
           thumbnailPath: currentDraft.sourceThumbnail,
           mediaType: currentDraft.primarySourceMediaType,
-          actionLabel: '选择源文件',
+          actionLabel: '选择人脸参考',
           extraActions: [
             _WorkspaceDraftAction(
               label: '选择人物形象',
@@ -1135,14 +1133,14 @@ class _NativeWorkbenchPane extends StatelessWidget {
 
         final targetCard = _WorkspaceDraftCard(
           compact: compact,
-          title: 'TARGET',
+          title: '待换脸视频',
           subtitle: currentDraft.targetPath == null
-              ? '支持目标图片或目标视频。'
-              : '当前目标已就绪。',
+              ? '选择待换脸视频，也支持图片。'
+              : '待换脸素材已就绪。',
           filePath: currentDraft.targetPath,
           thumbnailPath: currentDraft.targetThumbnail,
           mediaType: currentDraft.targetMediaType,
-          actionLabel: '选择目标文件',
+          actionLabel: '选择待换脸视频',
           onOpenPreview:
               currentDraft.targetPath != null &&
                   currentDraft.targetMediaType != null
@@ -3339,14 +3337,14 @@ class _QueueTaskCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _QueueMediaPreview(
-                label: 'SOURCE',
+                label: '人脸参考',
                 filePath: task.primarySourcePath,
                 mediaType: task.sourceMediaType,
                 thumbnailPath: task.sourceThumbnail,
               ),
               const SizedBox(width: 12),
               _QueueMediaPreview(
-                label: 'TARGET',
+                label: '待换脸视频',
                 filePath: task.targetPath,
                 mediaType: task.targetMediaType,
                 thumbnailPath: task.targetThumbnail,
