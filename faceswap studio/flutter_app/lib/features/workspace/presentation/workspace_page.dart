@@ -1104,10 +1104,11 @@ class _NativeWorkbenchPane extends StatelessWidget {
           filePath: currentDraft.primarySourcePath,
           thumbnailPath: currentDraft.sourceThumbnail,
           mediaType: currentDraft.primarySourceMediaType,
-          actionLabel: '选择人脸参考',
+          actionLabel: '上传人脸图片',
+          visibleActionCount: 2,
           extraActions: [
             _WorkspaceDraftAction(
-              label: '选择人物形象',
+              label: '从形象库选择',
               icon: Icons.badge_outlined,
               onPressed: bridgeOnline && !busy ? onPickPersona : null,
             ),
@@ -1300,6 +1301,7 @@ class _WorkspaceDraftCard extends StatelessWidget {
     required this.thumbnailPath,
     required this.mediaType,
     required this.actionLabel,
+    this.visibleActionCount = 1,
     this.extraActions = const <_WorkspaceDraftAction>[],
     required this.onOpenPreview,
     required this.onPick,
@@ -1313,6 +1315,7 @@ class _WorkspaceDraftCard extends StatelessWidget {
   final String? thumbnailPath;
   final String? mediaType;
   final String actionLabel;
+  final int visibleActionCount;
   final List<_WorkspaceDraftAction> extraActions;
   final VoidCallback? onOpenPreview;
   final VoidCallback? onPick;
@@ -1424,6 +1427,7 @@ class _WorkspaceDraftCard extends StatelessWidget {
           SizedBox(height: compact ? 10 : 14),
           _WorkspaceDraftActionsBar(
             compact: compact,
+            visibleActionCount: visibleActionCount,
             actions: [
               _WorkspaceDraftAction(
                 label: actionLabel,
@@ -1460,10 +1464,12 @@ class _WorkspaceDraftActionsBar extends StatelessWidget {
   const _WorkspaceDraftActionsBar({
     required this.compact,
     required this.actions,
+    required this.visibleActionCount,
   });
 
   final bool compact;
   final List<_WorkspaceDraftAction> actions;
+  final int visibleActionCount;
 
   @override
   Widget build(BuildContext context) {
@@ -1471,31 +1477,56 @@ class _WorkspaceDraftActionsBar extends StatelessWidget {
     final minActionWidth = compact ? 132.0 : 150.0;
     return LayoutBuilder(
       builder: (context, constraints) {
-        if (constraints.maxWidth < 520) {
-          final primary = actions.first;
+        if (constraints.maxWidth < 520 || visibleActionCount > 1) {
+          final visibleActions = actions.take(visibleActionCount).toList();
+          final availableWidth = constraints.maxWidth - 48 - gap;
+          final columns = visibleActions.length;
+          final itemWidth = (availableWidth - gap * (columns - 1)) / columns;
           return Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Expanded(
-                child: FilledButton.tonalIcon(
-                  onPressed: primary.onPressed,
-                  icon: Icon(primary.icon, size: 18),
-                  label: Text(
-                    primary.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size(0, 36),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                  ),
+                child: Row(
+                  children: [
+                    for (
+                      var index = 0;
+                      index < visibleActions.length;
+                      index++
+                    ) ...[
+                      if (index > 0) SizedBox(width: gap),
+                      Expanded(
+                        child: FilledButton.tonal(
+                          onPressed: visibleActions[index].onPressed,
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size(0, 36),
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                          ),
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (itemWidth >= minActionWidth) ...[
+                                  Icon(visibleActions[index].icon, size: 18),
+                                  const SizedBox(width: 8),
+                                ],
+                                Text(visibleActions[index].label, maxLines: 1),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
+              SizedBox(width: gap),
               PopupMenuButton<_WorkspaceDraftAction>(
                 tooltip: '更多素材操作',
                 icon: const Icon(Icons.more_horiz_rounded),
                 onSelected: (action) => action.onPressed?.call(),
                 itemBuilder: (context) => [
-                  for (final action in actions.skip(1))
+                  for (final action in actions.skip(visibleActionCount))
                     PopupMenuItem(
                       value: action,
                       enabled: action.onPressed != null,

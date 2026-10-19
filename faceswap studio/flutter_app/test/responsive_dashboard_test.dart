@@ -314,6 +314,19 @@ void main() {
     for (final size in sizes) {
       await show(tester, const WorkspacePage(), size);
       expect(tester.takeException(), isNull, reason: '$size 初始布局');
+      for (final label in ['上传人脸图片', '从形象库选择']) {
+        final button = find.ancestor(
+          of: find.text(label),
+          matching: find.byWidgetPredicate((widget) => widget is FilledButton),
+        );
+        expect(button, findsOneWidget, reason: '$size 直接显示素材入口');
+        expect(tester.widget<FilledButton>(button).onPressed, isNotNull);
+        expect(button.hitTestable(), findsOneWidget);
+      }
+      final uploadRect = tester.getRect(find.text('上传人脸图片'));
+      final personaRect = tester.getRect(find.text('从形象库选择'));
+      expect(uploadRect.center.dy, closeTo(personaRect.center.dy, 0.5));
+      expect(uploadRect.right, lessThan(personaRect.left));
       expect(find.text('工作台'), findsNothing);
       for (final title in ['人脸参考', '待换脸视频', '原生预览']) {
         final rect = tester.getRect(find.text(title));
@@ -412,9 +425,14 @@ void main() {
     );
     expect(tester.takeException(), isNull, reason: '130% 字体');
     await capture(tester, 'workspace-light-130percent');
-    await tester.tap(find.byTooltip('更多素材操作').first);
+    await tester.tap(find.text('从形象库选择'));
     await tester.pumpAndSettle();
     expect(find.text('选择人物形象'), findsOneWidget);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('更多素材操作').first);
+    await tester.pumpAndSettle();
+    expect(find.text('选择人物形象'), findsNothing);
     expect(find.text('保存人物形象'), findsOneWidget);
     expect(find.text('清空'), findsOneWidget);
     await tester.tapAt(const Offset(1, 1));
@@ -422,6 +440,21 @@ void main() {
     fixture.online = false;
     await tester.pump(const Duration(seconds: 2));
     await tester.pump();
+    for (final label in ['上传人脸图片', '从形象库选择']) {
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.ancestor(
+                of: find.text(label),
+                matching: find.byWidgetPredicate(
+                  (widget) => widget is FilledButton,
+                ),
+              ),
+            )
+            .onPressed,
+        isNull,
+      );
+    }
     expect(
       tester
           .widget<FilledButton>(
