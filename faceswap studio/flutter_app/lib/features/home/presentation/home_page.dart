@@ -2,6 +2,7 @@ import 'package:faceswap_studio/app/theme/studio_depth.dart';
 import 'dart:async';
 
 import 'package:faceswap_studio/shared/services/bridge_client.dart';
+import 'package:faceswap_studio/shared/services/local_startup.dart';
 import 'package:faceswap_studio/shared/widgets/studio_update_dialog.dart';
 import 'package:faceswap_studio/shared/widgets/runtime_control_panel.dart';
 import 'package:flutter/material.dart';
@@ -22,8 +23,8 @@ class _HomePageState extends State<HomePage> {
   bool _requestInFlight = false;
   bool _actionInFlight = false;
   int _lastLogId = 0;
-  String _serviceState = 'stopped';
-  String _serviceMessage = 'Bridge 未连接';
+  String _serviceState = 'starting';
+  String _serviceMessage = '正在启动本地服务…';
   String _webuiUrl = 'http://127.0.0.1:7860';
   int? _facefusionPid;
   _MetricsSnapshot? _metrics;
@@ -61,6 +62,7 @@ class _HomePageState extends State<HomePage> {
     _requestInFlight = true;
 
     try {
+      await _client.probeStartup();
       final results = await Future.wait<dynamic>([
         _client.getStatus(),
         _client.getMetrics(),
@@ -106,13 +108,16 @@ class _HomePageState extends State<HomePage> {
       _maybeShowModelBootstrapDialog(modelBootstrap);
       _maybeCheckForUpdates();
     } catch (_) {
+      final startup = await readLocalStartupState();
       if (!mounted) {
         return;
       }
       setState(() {
         _bridgeOnline = false;
-        _serviceState = 'bridge_offline';
-        _serviceMessage = 'Bridge 不可用，请通过启动脚本拉起应用。';
+        _serviceState = startup['state'] == 'failed'
+            ? 'bridge_offline'
+            : 'starting';
+        _serviceMessage = '${startup['message'] ?? '正在连接本地服务…'}';
       });
     } finally {
       _requestInFlight = false;

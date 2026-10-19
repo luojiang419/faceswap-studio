@@ -35,9 +35,9 @@ void main() {
     final kernel = DynamicLibrary.open('kernel32.dll');
     final findWindow = user
         .lookupFunction<
-          IntPtr Function(Pointer<Utf16>, Pointer<Utf16>),
-          int Function(Pointer<Utf16>, Pointer<Utf16>)
-        >('FindWindowW');
+          IntPtr Function(IntPtr, IntPtr, Pointer<Utf16>, Pointer<Utf16>),
+          int Function(int, int, Pointer<Utf16>, Pointer<Utf16>)
+        >('FindWindowExW');
     final windowPid = user
         .lookupFunction<
           Uint32 Function(IntPtr, Pointer<Uint32>),
@@ -66,7 +66,14 @@ void main() {
     late int window;
     late int activate;
     try {
-      window = findWindow(className, nullptr);
+      var after = 0;
+      while (true) {
+        window = findWindow(0, after, className, nullptr);
+        if (window == 0) break;
+        windowPid(window, pid);
+        if (pid.value == currentPid()) break;
+        after = window;
+      }
       expect(window, isNonZero);
       windowPid(window, pid);
       // 只向当前测试进程的窗口发送消息，不触碰用户的软件实例。

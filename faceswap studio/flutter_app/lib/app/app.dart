@@ -2,6 +2,7 @@ import 'package:faceswap_studio/app/theme/studio_theme.dart';
 import 'package:faceswap_studio/app/widgets/studio_shell.dart';
 import 'package:faceswap_studio/app/widgets/studio_window_lifecycle.dart';
 import 'package:faceswap_studio/shared/services/bridge_client.dart';
+import 'package:faceswap_studio/shared/services/startup_connection.dart';
 import 'package:flutter/material.dart';
 
 class FaceSwapStudioApp extends StatefulWidget {
@@ -13,33 +14,33 @@ class FaceSwapStudioApp extends StatefulWidget {
 
 class _FaceSwapStudioAppState extends State<FaceSwapStudioApp> {
   final BridgeClient _client = BridgeClient();
+  late final StartupConnection _startup;
   ThemeMode _themeMode = ThemeMode.light;
   bool _sidebarExpanded = false;
 
   @override
   void initState() {
     super.initState();
-    _loadSettings();
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      try {
-        await _client.confirmStartup();
-      } catch (_) {}
+    _startup = StartupConnection(client: _client, onSettings: _applySettings);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _startup.start());
+  }
+
+  void _applySettings(Map<String, dynamic> settings) {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _themeMode = '${settings['theme'] ?? 'light'}' == 'light'
+          ? ThemeMode.light
+          : ThemeMode.dark;
+      _sidebarExpanded = settings['sidebar_expanded'] == true;
     });
   }
 
-  Future<void> _loadSettings() async {
-    try {
-      final settings = await _client.getSettings();
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _themeMode = '${settings['theme'] ?? 'light'}' == 'light'
-            ? ThemeMode.light
-            : ThemeMode.dark;
-        _sidebarExpanded = settings['sidebar_expanded'] == true;
-      });
-    } catch (_) {}
+  @override
+  void dispose() {
+    _startup.dispose();
+    super.dispose();
   }
 
   void _toggleTheme() {

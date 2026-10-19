@@ -40,6 +40,9 @@ class BridgeClient {
   Future<Map<String, dynamic>> confirmStartup() async =>
       _postJson('/updates/healthy');
 
+  Future<Map<String, dynamic>> probeStartup() async =>
+      _getJson('/health', timeout: const Duration(milliseconds: 750));
+
   Future<Map<String, dynamic>> getStatus() async =>
       _getJson('/facefusion/status');
 
@@ -233,13 +236,16 @@ class BridgeClient {
     return value;
   }
 
-  Future<Map<String, dynamic>> _getJson(String path) async {
+  Future<Map<String, dynamic>> _getJson(
+    String path, {
+    Duration timeout = _defaultTimeout,
+  }) async {
     final response = await http
         .get(
           Uri.parse('$_baseUrl$path'),
           headers: {'Accept': 'application/json'},
         )
-        .timeout(_defaultTimeout, onTimeout: _handleTimeout);
+        .timeout(timeout, onTimeout: _handleTimeout);
     _ensureSuccess(response);
     return jsonDecode(response.body) as Map<String, dynamic>;
   }

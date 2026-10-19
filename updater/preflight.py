@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 
 def check(root):
@@ -43,15 +44,47 @@ def check(root):
     return {'ok': True, 'coreVersion': metadata.get('version'), 'root': str(root)}
 
 
-def run_preflight(root, python=None):
+def run_preflight(root, python=None, *, cancel=None):
+    if cancel is not None and cancel.is_set():
+        raise InterruptedError('Startup preflight cancelled')
     root = Path(root).resolve(strict=True)
     env = dict(os.environ)
     env.pop('PYTHONPATH', None)
     env['PYTHONDONTWRITEBYTECODE'] = '1'
-    result = subprocess.run(
-        [str(python or sys.executable), '-B', str(Path(__file__).resolve()), '--root', str(root)],
-        cwd=root, env=env, capture_output=True, text=True, encoding='utf-8', errors='replace',
-        timeout=120, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    command = [str(python or sys.executable), '-B', str(Path(__file__).resolve()), '--root', str(root)]
+    options = dict(cwd=root, env=env, text=True, encoding='utf-8', errors='replace',
+                   creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    if cancel is None:
+        result = subprocess.run(command, capture_output=True, timeout=120, **options)
+    else:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **options)
+        deadline = time.monotonic() + 120
+        try:
+            while not cancel.is_set():
+                try:
+                    stdout, stderr = process.communicate(timeout=.1)
+                    result = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+                    break
+                except subprocess.TimeoutExpired:
+                    if time.monotonic() >= deadline:
+                        raise
+            else:
+                raise InterruptedError('Startup preflight cancelled')
+        finally:
+            if process.poll() is None:
+                import psutil
+                try:
+                    root_process = psutil.Process(process.pid)
+                    children = root_process.children(recursive=True)
+                    for child in children:
+                        try:
+                            child.kill()
+                        except psutil.NoSuchProcess:
+                            pass
+                    root_process.kill()
+                except psutil.NoSuchProcess:
+                    pass
+                process.communicate(timeout=5)
     if result.returncode:
         raise RuntimeError('核心与 Studio 兼容性预检失败：\n' + (result.stderr or result.stdout)[-6000:])
     return json.loads(result.stdout.strip().splitlines()[-1])

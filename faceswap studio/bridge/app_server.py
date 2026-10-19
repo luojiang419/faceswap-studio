@@ -352,6 +352,10 @@ class FaceFusionRuntime:
         target_path = self._bundled_ffmpeg_executable()
         marker_path = self._bundled_ffmpeg_marker()
         target_usable = self._ffmpeg_has_video_encoder(target_path)
+        # 安装内的编码器可用时直接复用，避免每次启动探测外部 PATH/旧构建目录。
+        # 显式指定来源仍保留原有替换逻辑。
+        if target_usable and not os.environ.get(FFMPEG_SOURCE_ENV):
+            return
         if target_path.exists() and not target_usable:
             self._append_log(f"[bridge] Bundled ffmpeg is unusable and will be replaced: {target_path}")
         ffmpeg_source = self._resolve_ffmpeg_source()
@@ -4621,6 +4625,9 @@ class FaceFusionRuntime:
 
     def _is_webui_ready(self) -> bool:
         try:
+            # Windows 对未监听端口的 HTTP 连接会等到超时；先做极短的端口探测。
+            with socket.create_connection((self.webui_client_host, int(self._settings['facefusion_port'])), timeout=.05):
+                pass
             with urlopen(self.webui_url, timeout=0.75):
                 return True
         except (URLError, OSError, TimeoutError):
@@ -4634,6 +4641,11 @@ class FaceFusionRuntime:
                 self._append_log(line)
 
     def _find_webui_process_pid(self) -> int | None:
+        try:
+            with socket.create_connection((self.webui_client_host, int(self._settings['facefusion_port'])), timeout=.05):
+                pass
+        except OSError:
+            return None
         try:
             connections = psutil.net_connections(kind="tcp")
         except psutil.Error:
@@ -6168,12 +6180,28 @@ def studio_asset(asset_path: str):
 
 @app.get("/health")
 def health() -> dict[str, Any]:
-    status = runtime.status()
+    # Bridge 存活检查必须独立于推理核心，不能持有核心锁或全机扫描 TCP。
+    # 核心就绪仍由 /facefusion/status 和更新器的严格健康心跳确认。
+    state = runtime._state
+    process = runtime._process
+    status = {
+        'state': state,
+        'is_running': state in {'starting', 'ready', 'stopping'},
+        'is_ready': state == 'ready',
+        'status_message': runtime._status_message,
+        'pid': process.pid if process and process.poll() is None else None,
+        'webui_url': runtime.webui_url,
+        'webui_bind_host': runtime.webui_bind_host,
+        'webui_bind_url': runtime.webui_bind_url,
+        'started_at': runtime._started_at,
+    }
     return {
         "status": "ok",
         "service": "faceswap-studio-bridge",
         "bridge_host": BRIDGE_HOST,
         "bridge_port": BRIDGE_PORT,
+        "pid": os.getpid(),
+        "root": str(runtime.repo_root),
         "facefusion": status,
     }
 

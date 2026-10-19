@@ -62,6 +62,9 @@ void main() {
   });
 
   Future<void> launch(WidgetTester tester) async {
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
     await tester.pumpWidget(
       MaterialApp(
         theme: StudioTheme.dark(),
@@ -196,5 +199,18 @@ void main() {
     await tester.tap(find.text('取消'));
     await tester.pumpAndSettle();
     await retry;
+  });
+
+  windowsTest('Bridge 晚就绪后自动恢复已保存的关闭偏好', (tester) async {
+    client.failRead = true;
+    await launch(tester);
+    expect(nativeCalls.last.arguments, {'close_behavior': 'ask'});
+    client.failRead = false;
+    client.settings['close_behavior'] = 'exit';
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(nativeCalls.last.arguments, {'close_behavior': 'exit'});
+    await closeRequest();
+    expect(nativeCalls.last.method, 'applyCloseAction');
   });
 }

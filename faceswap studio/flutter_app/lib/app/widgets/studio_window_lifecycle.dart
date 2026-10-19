@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../shared/services/bridge_client.dart';
+import '../../shared/services/local_startup.dart';
 import 'close_behavior_dialog.dart';
 
 /// 将 Windows 关闭请求路由到当前主题下的 Flutter 弹窗。
@@ -20,6 +23,8 @@ class _StudioWindowLifecycleState extends State<StudioWindowLifecycle> {
   static const _channel = MethodChannel('faceswap_studio/window');
   late final BridgeClient _client = widget.client ?? BridgeClient();
   late final Future<void> _initialization;
+  Timer? _settingsRetry;
+  String? _configuredBehavior;
   bool _handlingClose = false;
   StudioCloseAction _lastAction = StudioCloseAction.background;
   Map<String, dynamic> _lastSettings = {
@@ -35,7 +40,7 @@ class _StudioWindowLifecycleState extends State<StudioWindowLifecycle> {
     super.initState();
     if (_supported) {
       _channel.setMethodCallHandler(_onMethodCall);
-      _initialization = _configureWindow();
+      _initialization = _initializeWindow();
     } else {
       _initialization = Future.value();
     }
@@ -47,18 +52,33 @@ class _StudioWindowLifecycleState extends State<StudioWindowLifecycle> {
     _ => 'ask',
   };
 
+  Future<void> _initializeWindow() async {
+    final local = await readLocalStartupSettings();
+    if (local.isNotEmpty) _lastSettings = local;
+    await _configureWindow();
+  }
+
   Future<void> _configureWindow() async {
-    var behavior = 'ask';
+    var connected = false;
     try {
-      final settings = await _client.getSettings();
+      final settings = await _client.getSettings().timeout(
+        const Duration(milliseconds: 800),
+      );
       _lastSettings = settings;
-      behavior = _normalize(settings['close_behavior']);
+      connected = true;
     } catch (_) {}
     if (!mounted) return;
+    if (!connected) {
+      _settingsRetry = Timer(const Duration(seconds: 1), _configureWindow);
+    }
+    if (_handlingClose) return;
+    final behavior = _normalize(_lastSettings['close_behavior']);
+    if (_configuredBehavior == behavior) return;
     try {
       await _channel.invokeMethod<void>('setCloseBehavior', {
         'close_behavior': behavior,
       });
+      _configuredBehavior = behavior;
     } catch (_) {}
   }
 
@@ -70,7 +90,9 @@ class _StudioWindowLifecycleState extends State<StudioWindowLifecycle> {
       await _initialization;
       var settings = _lastSettings;
       try {
-        settings = await _client.getSettings();
+        settings = await _client.getSettings().timeout(
+          const Duration(milliseconds: 800),
+        );
         _lastSettings = settings;
       } catch (_) {
         // Bridge 异常时仍允许用户看到关闭选项。
@@ -124,6 +146,7 @@ class _StudioWindowLifecycleState extends State<StudioWindowLifecycle> {
       await _channel.invokeMethod<void>('setCloseBehavior', {
         'close_behavior': preference,
       });
+      _configuredBehavior = preference;
       await _applyAction(action);
     } catch (error) {
       if (mounted) {
@@ -143,6 +166,7 @@ class _StudioWindowLifecycleState extends State<StudioWindowLifecycle> {
 
   @override
   void dispose() {
+    _settingsRetry?.cancel();
     if (_supported) _channel.setMethodCallHandler(null);
     super.dispose();
   }
