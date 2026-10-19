@@ -165,11 +165,50 @@ namespace FaceSwapBootstrap {
         [DllImport("user32.dll")] static extern bool EnumWindows(WindowVisitor callback, IntPtr data);
         [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window,out uint pid);
         [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr window,StringBuilder text,int count);
+        [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr window,StringBuilder text,int count);
         [DllImport("user32.dll")] static extern bool PostMessage(IntPtr window,uint message,IntPtr w,IntPtr l);
+        internal static void CloseCompletedUpdaters(string root,List<Process> processes,CancellationToken token) {
+            string cache=Safe(root,UpdateCache)+Path.DirectorySeparatorChar;
+            foreach(var process in processes) {
+                token.ThrowIfCancellationRequested();
+                try {
+                    if(process.HasExited) continue;
+                    string exe=process.MainModule.FileName,session=Path.GetDirectoryName(exe);
+                    if(!String.Equals(Path.GetFileName(exe),"FaceSwapStudioUpdater.exe",StringComparison.OrdinalIgnoreCase) ||
+                        !session.StartsWith(cache,StringComparison.OrdinalIgnoreCase)) continue;
+                    string status=Safe(session,"status.json"),identity=Safe(session,"session.json");
+                    if(!File.Exists(status) || !File.Exists(identity)) continue;
+                    var state=Read(status);var update=Read(identity);object value;
+                    if(!state.TryGetValue("status",out value) || Convert.ToString(value)!="complete" ||
+                        !update.TryGetValue("root",out value) || !Installer.SamePath(Convert.ToString(value),root)) continue;
+                    // 只请求正常关闭；正在更新的窗口仍可拒绝关闭，不强杀任何进程。
+                    bool requested=false;
+                    WindowVisitor visit=(window,data)=> {
+                        uint pid;GetWindowThreadProcessId(window,out pid);
+                        if(pid==(uint)process.Id) {
+                            var title=new StringBuilder(256);GetWindowText(window,title,256);
+                            if(title.ToString()=="易容 Studio · 软件更新" || title.ToString()=="FaceSwap Studio · 软件更新")
+                                requested=PostMessage(window,0x0010,IntPtr.Zero,IntPtr.Zero)||requested;
+                        }
+                        return true;
+                    };
+                    EnumWindows(visit,IntPtr.Zero);
+                    if(requested) {
+                        var timer=Stopwatch.StartNew();
+                        while(!process.WaitForExit(100) && timer.Elapsed.TotalSeconds<5) token.ThrowIfCancellationRequested();
+                    }
+                } catch(System.ComponentModel.Win32Exception) { }
+                catch(InvalidOperationException) { }
+                catch(IOException) { }
+                catch(ArgumentException) { }
+            }
+        }
         static void StopOwned(string root, CancellationToken token) {
             var processes=OwnedProcesses(root);
             if(processes.Count==0) return;
             try {
+                CloseCompletedUpdaters(root,processes,token);
+                if(processes.All(p=>p.HasExited)) return;
                 try {
                     var request=(HttpWebRequest)WebRequest.Create("http://127.0.0.1:52741/queue/tasks"); request.Timeout=3000;
                     using(var response=request.GetResponse()) using(var reader=new StreamReader(response.GetResponseStream())) {

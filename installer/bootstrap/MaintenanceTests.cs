@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Threading;
 using System.Web.Script.Serialization;
+using System.Windows.Forms;
 using FaceSwapBootstrap;
 
 public static class MaintenanceTests {
@@ -35,11 +37,42 @@ public static class MaintenanceTests {
             if(Directory.Exists(work)) work=Path.Combine(directory,"repair-"+Guid.NewGuid().ToString("N"));
             return Maintenance.Run(root,manifest,repair,CancellationToken.None,new Quiet(),package,work,false,fail);
         }
+        public Process Updater(string status="complete",bool sameRoot=true,bool busy=false) {
+            string session=Path.Combine(root,"faceswap studio/data/cache/updates/20260101000000");Directory.CreateDirectory(session);
+            var json=new JavaScriptSerializer();
+            File.WriteAllText(Path.Combine(session,"session.json"),json.Serialize(new{root=sameRoot?root:directory}));
+            File.WriteAllText(Path.Combine(session,"status.json"),json.Serialize(new{status}));
+            string exe=Path.Combine(session,"FaceSwapStudioUpdater.exe"),ready=Path.Combine(session,"window-ready");
+            File.Copy(Process.GetCurrentProcess().MainModule.FileName,exe);
+            var child=Process.Start(new ProcessStartInfo(exe,"--updater-fixture \""+ready+"\" "+(busy?"busy":"idle")){UseShellExecute=false,CreateNoWindow=true});
+            for(int i=0;i<100 && !File.Exists(ready) && !child.HasExited;i++) Thread.Sleep(50);
+            if(!File.Exists(ready)) throw new Exception("测试更新器未启动");
+            return child;
+        }
         public void Dispose() { }
     }
     static void Check(bool value,string reason) {if(!value) throw new Exception(reason);}
     static void Reject(Action action,string text) {try {action();} catch(Exception error) {Check(error.Message.Contains(text),error.ToString());return;}throw new Exception("未拒绝："+text);}
+    static void ReleaseUpdater(Process child) {
+        try {
+            if(child.HasExited) return;
+            File.WriteAllText(Path.Combine(Path.GetDirectoryName(child.MainModule.FileName),"release-worker"),"");
+            if(!child.WaitForExit(5000)) child.Kill();
+        } finally {child.Dispose();}
+    }
+    [STAThread]
     public static int Main(string[] args) {
+        if(args[0]=="--updater-fixture") {
+            using(var form=new Form{Text="易容 Studio · 软件更新",Opacity=0,ShowInTaskbar=false})
+            using(var timer=new System.Windows.Forms.Timer{Interval=100}) {
+                form.Shown+=(s,e)=>File.WriteAllText(args[1],"ready");
+                form.FormClosing+=(s,e)=>{if(args[2]=="busy" && !File.Exists(Path.Combine(Path.GetDirectoryName(args[1]),"release-worker"))) e.Cancel=true;};
+                timer.Tick+=(s,e)=>{if(File.Exists(Path.Combine(Path.GetDirectoryName(args[1]),"release-worker"))) form.Close();};
+                timer.Start();
+                Application.Run(form);
+            }
+            return 0;
+        }
         string output=Path.GetFullPath(args[0]);Directory.CreateDirectory(output);int passed=0;
         Action<string,Action<Fixture>> test=(name,action)=>{using(var f=new Fixture(output)) {action(f);Console.WriteLine("PASS "+name);passed++;}};
         try {
@@ -52,6 +85,34 @@ public static class MaintenanceTests {
             });
             test("只检查发现同长度损坏，不自动写入",f=>{
                 f.Put("app.exe","evil-app");var result=f.Run();Check(result.status=="damaged" && f.Get("app.exe")=="evil-app","检查误修复或漏检");
+            });
+            test("只读检查不关闭已完成的旧更新器",f=>{
+                var child=f.Updater();try {f.Run();Check(!child.HasExited,"只读检查关闭了更新器");} finally {ReleaseUpdater(child);}
+            });
+            test("修复正常关闭本目录已完成更新器并继续替换",f=>{
+                var child=f.Updater();try {
+                    f.Put("app.exe","evil-app");Check(f.Run(true).repaired,"残留更新器阻止修复");
+                    Check(child.WaitForExit(1000) && child.ExitCode==0,"更新器未正常退出");
+                    Check(f.Get("app.exe")=="good-app","程序未替换");
+                } finally {ReleaseUpdater(child);}
+            });
+            test("正在执行的更新事务不请求关闭",f=>{
+                var child=f.Updater("installing");try {
+                    Maintenance.CloseCompletedUpdaters(f.root,new List<Process>{child},CancellationToken.None);
+                    Thread.Sleep(200);Check(!child.HasExited,"关闭了执行中事务");
+                } finally {ReleaseUpdater(child);}
+            });
+            test("事务身份不匹配不关闭其他安装的更新器",f=>{
+                var child=f.Updater(sameRoot:false);try {
+                    Maintenance.CloseCompletedUpdaters(f.root,new List<Process>{child},CancellationToken.None);
+                    Thread.Sleep(200);Check(!child.HasExited,"关闭了身份不匹配窗口");
+                } finally {ReleaseUpdater(child);}
+            });
+            test("旧状态记录不能强杀仍繁忙的更新器",f=>{
+                var child=f.Updater(busy:true);try {
+                    Maintenance.CloseCompletedUpdaters(f.root,new List<Process>{child},CancellationToken.None);
+                    Check(!child.HasExited,"强杀了繁忙更新器");
+                } finally {ReleaseUpdater(child);}
             });
             test("独立恢复缺失的目标 Python，不调用损坏环境",f=>{
                 File.Delete(Path.Combine(f.root,".venv-win/Scripts/python.exe"));var result=f.Run(true);
