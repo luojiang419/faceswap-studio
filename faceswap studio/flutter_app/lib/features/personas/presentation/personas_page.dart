@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:desktop_drop/desktop_drop.dart';
+import 'package:faceswap_studio/app/theme/studio_depth.dart';
 import 'package:faceswap_studio/shared/services/bridge_client.dart';
 import 'package:faceswap_studio/shared/widgets/studio_media_viewer.dart';
 import 'package:file_selector/file_selector.dart';
@@ -296,6 +297,7 @@ class _PersonasPageState extends State<PersonasPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
 
     return LayoutBuilder(
       builder: (context, constraints) => Listener(
@@ -306,37 +308,65 @@ class _PersonasPageState extends State<PersonasPage> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '人物形象',
-                        style: theme.textTheme.headlineMedium,
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: _refresh,
-                      icon: const Icon(Icons.refresh_rounded),
-                      tooltip: '刷新人物形象',
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  _root.isEmpty ? '人物形象库' : _root,
-                  style: theme.textTheme.bodyLarge?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: scheme.surface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: scheme.outlineVariant),
+                    boxShadow: StudioDepth.shadows(context, subtle: true),
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('人物形象', style: theme.textTheme.headlineMedium),
+                            const SizedBox(height: 8),
+                            Text(
+                              _root.isEmpty ? '人物形象库' : _root,
+                              style: theme.textTheme.bodyLarge?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      IconButton(
+                        onPressed: _refresh,
+                        icon: const Icon(Icons.refresh_rounded),
+                        tooltip: '刷新人物形象',
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 18),
-                Expanded(child: _buildGrid(theme)),
+                const SizedBox(height: 16),
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    clipBehavior: Clip.antiAlias,
+                    decoration: BoxDecoration(
+                      color: Color.lerp(
+                        scheme.surface,
+                        scheme.surfaceContainer,
+                        0.3,
+                      ),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: scheme.outlineVariant),
+                      boxShadow: StudioDepth.shadows(context, subtle: true),
+                    ),
+                    child: _buildGrid(theme),
+                  ),
+                ),
               ],
             ),
             Positioned(
-              right: 0,
-              bottom: 72,
+              right: 16,
+              bottom: 88,
               child: MouseRegion(
                 onEnter: (_) => setState(() => _zoomHovered = true),
                 onExit: (_) => setState(() => _zoomHovered = false),
@@ -346,7 +376,10 @@ class _PersonasPageState extends State<PersonasPage> {
                   children: [
                     if (_zoomHovered || _zoomPinned)
                       Container(
-                        width: math.min(320, constraints.maxWidth),
+                        width: math.min(
+                          320,
+                          math.max(0, constraints.maxWidth - 32),
+                        ),
                         margin: const EdgeInsets.only(bottom: 8),
                         child: Card(
                           elevation: 6,
@@ -401,8 +434,8 @@ class _PersonasPageState extends State<PersonasPage> {
               ),
             ),
             Positioned(
-              right: 0,
-              bottom: 0,
+              right: 16,
+              bottom: 16,
               child: FloatingActionButton.extended(
                 onPressed: _addPersona,
                 icon: const Icon(Icons.person_add_alt_1_outlined),
