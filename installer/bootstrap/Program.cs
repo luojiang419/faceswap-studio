@@ -307,6 +307,105 @@ namespace FaceSwapBootstrap {
         protected override void Dispose(bool disposing) { if(disposing && background!=null) background.Dispose(); base.Dispose(disposing); }
     }
 
+    // 原创人脸配准插画：轮廓、稀疏特征网与沿映射曲线移动的粒子。
+    // 使用原生向量，随主题与 DPI 缩放，不依赖位图帧或网页运行时。
+    public static class FaceFusionArtwork {
+        static readonly PointF[] Landmarks = {
+            new PointF(-25,-27), new PointF(25,-27), new PointF(-28,-7), new PointF(28,-7),
+            new PointF(-22,18), new PointF(22,18), new PointF(-13,36), new PointF(13,36), new PointF(0,44),
+            new PointF(-20,-14), new PointF(-10,-15), new PointF(10,-15), new PointF(20,-14),
+            new PointF(0,-8), new PointF(-6,10), new PointF(6,10),
+            new PointF(-12,25), new PointF(0,22), new PointF(12,25), new PointF(0,30)
+        };
+        static readonly int[,] Edges = {
+            {0,9},{0,10},{1,11},{1,12},{2,9},{2,14},{3,12},{3,15},{9,10},{11,12},
+            {10,13},{11,13},{13,14},{13,15},{14,15},{14,16},{15,18},{14,17},{15,17},
+            {4,14},{5,15},{4,16},{5,18},{16,17},{17,18},{16,19},{18,19},{6,19},{7,19},{8,19}
+        };
+        static GraphicsPath Contour() {
+            var path = new GraphicsPath();
+            path.AddBezier(-29,-18,-32,-57,32,-57,29,-18);
+            path.AddBezier(29,-18,32,-8,29,0,27,3);
+            path.AddBezier(27,3,25,25,15,42,0,46);
+            path.AddBezier(0,46,-15,42,-25,25,-27,3);
+            path.AddBezier(-27,3,-29,0,-32,-8,-29,-18); path.CloseFigure(); return path;
+        }
+        static PointF Curve(float t, PointF a, PointF b, PointF c, PointF d) {
+            float u=1-t;
+            return new PointF(u*u*u*a.X+3*u*u*t*b.X+3*u*t*t*c.X+t*t*t*d.X,
+                              u*u*u*a.Y+3*u*u*t*b.Y+3*u*t*t*c.Y+t*t*t*d.Y);
+        }
+        static void Face(Graphics g,float x,float y,float scale,Color ink,Color paper,double time,bool scan) {
+            var state=g.Save(); g.TranslateTransform(x,y); g.ScaleTransform(scale,scale);
+            using(var contour=Contour()) {
+                using(var fill=new SolidBrush(paper)) g.FillPath(fill,contour);
+                using(var pen=new Pen(Color.FromArgb(175,ink),1.25f)) g.DrawPath(pen,contour);
+                using(var pen=new Pen(Color.FromArgb(53,ink),.75f))
+                    for(int i=0;i<Edges.GetLength(0);i++) g.DrawLine(pen,Landmarks[Edges[i,0]],Landmarks[Edges[i,1]]);
+                // 眉眼、鼻梁和嘴唇使小尺寸下依然能直接读出“人脸”。
+                using(var pen=new Pen(Color.FromArgb(175,ink),1.15f) { StartCap=LineCap.Round,EndCap=LineCap.Round }) {
+                    g.DrawBezier(pen,-21,-21,-17,-25,-12,-25,-8,-22);
+                    g.DrawBezier(pen,8,-22,12,-25,17,-25,21,-21);
+                    g.DrawBezier(pen,-20,-14,-17,-11,-13,-11,-10,-15);
+                    g.DrawBezier(pen,10,-15,13,-11,17,-11,20,-14);
+                    g.DrawLines(pen,new[] {new PointF(0,-8),new PointF(-4,9),new PointF(0,12),new PointF(5,9)});
+                    g.DrawBezier(pen,-12,25,-4,29,4,29,12,25);
+                }
+                if(scan) {
+                    var clip=g.Save(); g.SetClip(contour);
+                    float line=(float)(-44+90*((Math.Sin(time*.9)+1)/2));
+                    using(var fade=new LinearGradientBrush(new PointF(0,line-15),new PointF(0,line),Color.FromArgb(0,ink),Color.FromArgb(28,ink)))
+                        g.FillRectangle(fade,-33,line-15,66,15);
+                    using(var pen=new Pen(Color.FromArgb(115,ink),.9f)) g.DrawLine(pen,-33,line,33,line);
+                    g.Restore(clip);
+                }
+                for(int i=0;i<Landmarks.Length;i++) {
+                    float radius=i>=9?1.5f:1.2f;
+                    using(var brush=new SolidBrush(Color.FromArgb(i>=9?210:145,ink)))
+                        g.FillEllipse(brush,Landmarks[i].X-radius,Landmarks[i].Y-radius,radius*2,radius*2);
+                }
+            }
+            g.Restore(state);
+        }
+        public static void Draw(Graphics g,bool dark,double seconds,string view) {
+            var state=g.Save(); g.SetClip(new RectangleF(438,103,244,140));
+            Color copper=dark?Color.FromArgb(218,166,121):Color.FromArgb(169,109,72);
+            Color sage=dark?Color.FromArgb(151,164,144):Color.FromArgb(137,151,128);
+            Color paper=dark?Color.FromArgb(29,31,29):Color.FromArgb(251,250,247);
+            bool moving=view=="idle" || view=="downloading" || view=="working";
+            double time=seconds;
+            using(var pen=new Pen(Color.FromArgb(dark?34:40,copper),.8f)) {
+                g.DrawEllipse(pen,554,110,116,116);
+                g.DrawArc(pen,546,102,132,132,215,75);
+            }
+            float breathe=moving?(float)Math.Sin(time*.8)*1.1f:0;
+            Face(g,490,168+breathe,.88f,sage,paper,time,false);
+            // 三条对应关系穿过两张人脸之间，粒子向目标脸移动。
+            for(int i=0;i<3;i++) {
+                float y=149+i*22;
+                var a=new PointF(516,y); var b=new PointF(541,y-19+i*9);
+                var c=new PointF(553,y+19-i*9); var d=new PointF(582,y);
+                using(var pen=new Pen(Color.FromArgb(dark?64:70,copper),.85f)) g.DrawBezier(pen,a,b,c,d);
+                if(moving) {
+                    float t=(float)((time*.23+i*.31)%1); var p=Curve(t,a,b,c,d);
+                    using(var brush=new SolidBrush(Color.FromArgb(28,copper))) g.FillEllipse(brush,p.X-5,p.Y-5,10,10);
+                    using(var brush=new SolidBrush(Color.FromArgb(210,copper))) g.FillEllipse(brush,p.X-1.7f,p.Y-1.7f,3.4f,3.4f);
+                }
+            }
+            Face(g,612,167-breathe,1.05f,copper,paper,time,moving);
+            // 配准框只保留四角，给画面留白。
+            using(var pen=new Pen(Color.FromArgb(125,copper),1.1f)) {
+                foreach(int side in new[] {-1,1}) foreach(int vertical in new[] {-1,1}) {
+                    float x=612+side*44, y=169+vertical*59;
+                    g.DrawLines(pen,new[] {new PointF(x-side*9,y),new PointF(x,y),new PointF(x,y-vertical*9)});
+                }
+            }
+            if(view=="ready") using(var pen=new Pen(copper,1.6f) { StartCap=LineCap.Round,EndCap=LineCap.Round })
+                g.DrawLines(pen,new[] {new PointF(650,214),new PointF(654,218),new PointF(662,209)});
+            g.Restore(state);
+        }
+    }
+
     public sealed class Launcher : Form {
         readonly SoftButton run = new SoftButton { Primary = true }, pause = new SoftButton(), close = new SoftButton(), minimize = new SoftButton();
         readonly SoftButton browse = new SoftButton(), detect = new SoftButton(), theme = new SoftButton();
@@ -325,6 +424,8 @@ namespace FaceSwapBootstrap {
         public bool IsDark { get { return dark; } }
         readonly System.Windows.Forms.Timer animation = new System.Windows.Forms.Timer { Interval = 16 };
         readonly Stopwatch animationClock = new Stopwatch();
+        readonly Stopwatch artworkClock = new Stopwatch();
+        public double? ArtworkPreviewSeconds { get; set; }
         double demoStart;
         CancellationTokenSource cancellation;
         string view = "idle", statusTitle = "一切准备，交给我们。", statusDetail = "选好位置后开始，自动补齐应用、依赖和模型。";
@@ -402,7 +503,13 @@ namespace FaceSwapBootstrap {
                     installPhase = fraction > .55 ? 1 : 0;
                     if (time >= 8) SetPreview("ready", 1);
                 }
-                Invalidate();
+                if(view=="downloading" || view=="working") Invalidate();
+                else Invalidate(new Rectangle((int)(438*ClientSize.Width/720f),(int)(103*ClientSize.Height/830f),(int)(244*ClientSize.Width/720f)+1,(int)(140*ClientSize.Height/830f)+1));
+            };
+            Shown += (sender,args) => { artworkClock.Start(); if(view=="idle") animation.Start(); };
+            Resize += (sender,args) => {
+                if(WindowState==FormWindowState.Minimized) { animation.Stop(); artworkClock.Stop(); }
+                else if(view=="idle" || view=="downloading" || view=="working") { artworkClock.Start(); animation.Start(); }
             };
             FormClosing += (sender, args) => { animation.Stop(); if (cancellation != null) cancellation.Cancel(); };
             Resize += (sender, args) => LayoutButtons(); LayoutButtons(); DetectDestination();
@@ -498,19 +605,12 @@ namespace FaceSwapBootstrap {
             g.ScaleTransform(ClientSize.Width / 720f, ClientSize.Height / 830f);
             using (var shape = Round(new RectangleF(0.5f, .5f, 719, 829), 22)) using (var border = new Pen(dark ? Color.FromArgb(58, 61, 55) : Color.FromArgb(224, 225, 216))) g.DrawPath(border, shape);
             if (brandMark != null) g.DrawImage(brandMark, new Rectangle(36, 28, 50, 50));
-            else TextAt(g, "V", 28, Accent, 48, 36, 32, true);
+            else TextAt(g, "F", 28, Accent, 48, 36, 32, true);
             TextAt(g, "FACESWAP_STUDIO", 14, Ink, 92, 35, 160, true); TextAt(g, "STUDIO", 10, Muted, 93, 57, 140);
             TextAt(g, "本地 AI 换脸工作台", 11, Muted, 438, 43, 140);
             TextAt(g, "新形象，从这里开始。", 31, Ink, 40, 133, 420);
             TextAt(g, "选择安装位置，剩下的交给我们。", 14, Muted, 43, 183, 400);
-            // 波形用向量绘制，不携带图片或网页运行时。
-            using (var pen = new Pen(dark ? Color.FromArgb(48, 52, 46) : Color.FromArgb(234, 232, 221), 1)) { g.DrawEllipse(pen, 470, 109, 150, 150); g.DrawEllipse(pen, 493, 132, 104, 104); }
-            for (int i = 0; i < 37; i++) {
-                double envelope = Math.Pow(Math.Sin((i + 1) * Math.PI / 38), 1.8);
-                float h = (float)(8 + envelope * (20 + 42 * Math.Abs(Math.Sin(i * .69)) * ((view == "working" || view == "downloading") ? .6 + pulse*.4 : 1)));
-                float x = 444 + i * 5.7f;
-                using (var pen = new Pen(i > 14 && i < 24 ? Accent : (dark ? Color.FromArgb(115, 120, 108) : Color.FromArgb(181, 186, 171)), 2.8f)) { pen.StartCap = LineCap.Round; pen.EndCap = LineCap.Round; g.DrawLine(pen, x, 184 - h / 2, x, 184 + h / 2); }
-            }
+            FaceFusionArtwork.Draw(g,dark,ArtworkPreviewSeconds ?? artworkClock.Elapsed.TotalSeconds,view);
             TextAt(g, "安装位置", 12, Muted, 43, 240, 130);
             TextAt(g, "非 C 盘优先 · 至少 12 GiB", 11, Muted, 480, 242, 210);
             TextAt(g, "安装到专用应用文件夹", 11, Muted, 44, 411, 400);
@@ -564,7 +664,9 @@ namespace FaceSwapBootstrap {
             else if (state == "ready") { installPhase = 2; statusTitle = "安装完成，开始创作。"; statusDetail = "已准备运行环境，并按你的选择创建快捷方式。"; run.Text = preview ? "重新演示  ↻" : "开始创作  →"; }
             else { statusTitle = "正在准备你的创作空间。"; statusDetail = "从魔搭补齐桌面环境，完成后自动打开工作台。"; run.Text = "正在准备…"; }
             run.Enabled = state != "downloading" && state != "working"; pause.Visible = state == "downloading" || state == "working";
-            if (state == "downloading" || state == "working") { animationClock.Restart(); animation.Start(); } else { animation.Stop(); animationClock.Stop(); }
+            if (state == "downloading" || state == "working") { animationClock.Restart(); artworkClock.Start(); animation.Start(); }
+            else if(state=="idle") { animationClock.Stop(); artworkClock.Start(); animation.Start(); }
+            else { animation.Stop(); animationClock.Stop(); artworkClock.Stop(); }
             AccessibleDescription = statusTitle + statusDetail; Invalidate();
         }
         void StartDemo() { if (view == "ready") fraction = 0; demoStart = fraction; installPhase = fraction > .55 ? 1 : 0; SetPreview("downloading", fraction); }

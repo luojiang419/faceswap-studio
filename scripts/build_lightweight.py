@@ -17,7 +17,24 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 from release_modelscope import sources, file_url, read_json, write_json, sha256, read_remote
 
 
-def payload(output):
+def application_sources(windows_root=None):
+    """可直接打包新构建，无需关闭或覆盖正在使用的本机工作台。"""
+    prefix = 'faceswap studio/runtime/windows_app/current/'
+    if windows_root is not None:
+        windows_root = windows_root.resolve(strict=True)
+        for name in ('faceswap_studio.exe', 'flutter_windows.dll', 'data/app.so', 'data/icudtl.dat'):
+            if not (windows_root / name).is_file() or not (windows_root / name).stat().st_size:
+                raise ValueError('Windows 构建不完整：' + name)
+    for file, name in sources():
+        if windows_root is None or not name.startswith(prefix):
+            yield file, name
+    if windows_root is not None:
+        for file in sorted(windows_root.rglob('*')):
+            if file.is_file() and file.suffix not in ('.pdb', '.log'):
+                yield file, prefix + file.relative_to(windows_root).as_posix()
+
+
+def payload(output, windows_root=None):
     baseline = ROOT / 'build/installer/app'
     if not (baseline / '.python/python.exe').exists():
         raise ValueError('需要经过离线验证的安装 staging：先运行 scripts/build_installer.ps1 -SkipInnoBuild')
@@ -34,7 +51,7 @@ def payload(output):
             for file in ([match] if match.is_file() else match.rglob('*')):
                 if file.is_file() and '__pycache__' not in file.parts:
                     files['.venv-win/Lib/site-packages/' + file.relative_to(site).as_posix()] = file
-    files.update({relative: file for file, relative in sources()})
+    files.update({relative: file for file, relative in application_sources(windows_root)})
     for name in ('facefusion.ini', 'requirements.txt', 'LICENSE.md', 'scripts/validate_offline_models.py', 'installer/core-models.txt'):
         files[name] = ROOT / name
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -49,7 +66,7 @@ def payload(output):
     return records
 
 
-def refresh_payload(output, baseline):
+def refresh_payload(output, baseline, windows_root=None):
     """保留旧运行包，用7z增量替换应用文件，避免重新压缩全部依赖。"""
     from updater.transaction import safe_path
     baseline = baseline.resolve(strict=True)
@@ -69,7 +86,7 @@ def refresh_payload(output, baseline):
     if not executable:
         raise ValueError('增量更新运行包需要7z')
     stage = ROOT / 'build/lightweight-overlay' / output.stem
-    overlays = dict((name, file) for file, name in sources())
+    overlays = dict((name, file) for file, name in application_sources(windows_root))
     overlays['facefusion.ini'] = ROOT / 'facefusion.ini'
     for name, file in overlays.items():
         if name != 'facefusion.ini':
@@ -179,15 +196,15 @@ def verify_remote_asset(url, size, expected):
         raise ValueError('匿名完整回读 SHA-256 不一致')
 
 
-def build(directory, existing=None, refresh_from=None):
+def build(directory, existing=None, refresh_from=None, windows_root=None):
     config = read_json(ROOT / 'update-config.json')
     version = (ROOT / 'VERSION').read_text('utf-8-sig').strip()
     release = config['releaseId']
     directory.mkdir(parents=True, exist_ok=True)
     package = existing or directory / f'FaceSwap-Studio-{version}-{release}-Runtime.zip'
     if refresh_from:
-        refresh_payload(package, refresh_from)
-    records = read_json(package.with_suffix('.files.json')) if package.exists() else payload(package)
+        refresh_payload(package, refresh_from, windows_root)
+    records = read_json(package.with_suffix('.files.json')) if package.exists() else payload(package, windows_root)
     prefix = f'bootstrap/{version}/{release}'
     manifest = {'protocol': 1, 'componentProtocol': 0, 'releaseId': release, 'appVersion': version, 'appReleaseId': release,
                 'entry': '启动FaceSwap Studio.exe', 'files': records,
@@ -210,12 +227,15 @@ if __name__ == '__main__':
     parser.add_argument('--output', type=Path, default=ROOT / 'dist/modelscope/installer')
     parser.add_argument('--payload', type=Path)
     parser.add_argument('--refresh-from', type=Path, help='从已验证运行包复制并增量更新；保留旧产物')
+    parser.add_argument('--windows-build-root', type=Path, help='使用指定 Windows Release 构建，不改动本机部署')
     parser.add_argument('--publish', action='store_true')
     args = parser.parse_args()
     if args.refresh_from and (args.publish or args.payload):
         parser.error('--refresh-from仅用于构建，不能与--payload或--publish合用')
+    if args.windows_build_root and (args.payload or args.publish):
+        parser.error('--windows-build-root 仅用于构建新运行包，不能与 --payload 或 --publish 合用')
     if not args.publish:
-        build(args.output.resolve(), args.payload, args.refresh_from)
+        build(args.output.resolve(), args.payload, args.refresh_from, args.windows_build_root)
     else:
         plan = read_json(args.output / 'publication-plan.json')
         proof = {name: publish_asset(Path(plan[name]), plan['prefix'] + '/' + Path(plan[name]).name) for name in ('payload', 'installer', 'distribution')}

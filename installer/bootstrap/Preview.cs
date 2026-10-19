@@ -45,6 +45,7 @@ public static class BootstrapPreview {
                 }
                 var panel = (DiskStrip)form.Controls["local-disks"];
                 foreach (DiskCard card in panel.Controls) card.AdvanceAnimation(1);
+                form.ArtworkPreviewSeconds=2.4;
                 ((TextBox)form.Controls["destination"]).DeselectAll();
                 using (var bitmap = new Bitmap(form.ClientSize.Width, form.ClientSize.Height)) {
                     form.DrawToBitmap(bitmap, form.ClientRectangle);
@@ -99,6 +100,19 @@ public static class BootstrapPreview {
             }
             form.Close();
         }
-        Console.WriteLine("18 张实际原生界面及两张屏幕合成截图已渲染：" + output); return 0;
+        foreach(bool dark in new[] { false,true }) using(var form=new Launcher(manifest,true,dark)) {
+            form.ShowInTaskbar=false; form.Opacity=0; form.Show(); Application.DoEvents();
+            string frames=Path.Combine(output,"face-fusion-"+(dark?"dark":"light")); Directory.CreateDirectory(frames);
+            for(int frame=0;frame<40;frame++) {
+                form.ArtworkPreviewSeconds=frame*.15;
+                using(var bitmap=new Bitmap(form.Width,form.Height)) {
+                    form.DrawToBitmap(bitmap,form.ClientRectangle);
+                    using(var crop=bitmap.Clone(new Rectangle(438,103,244,140),PixelFormat.Format32bppArgb))
+                        crop.Save(Path.Combine(frames,frame.ToString("D3")+".png"),ImageFormat.Png);
+                }
+            }
+            form.Close();
+        }
+        Console.WriteLine("原生状态、浅深主题、屏幕截图及 80 帧人脸融合动效已渲染：" + output); return 0;
     }
 }

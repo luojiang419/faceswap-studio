@@ -16,6 +16,10 @@ public static class InstallationSmoke {
         string previous;
         public void Report(Status state) { if (previous != state.text) { Console.WriteLine(state.text); previous=state.text; } }
     }
+    static int FreePort() {
+        var listener=new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback,0);
+        listener.Start(); int port=((System.Net.IPEndPoint)listener.LocalEndpoint).Port; listener.Stop(); return port;
+    }
     static void Check(bool value, string message) { if (!value) throw new IOException(message); }
     [STAThread] public static int Main(string[] args) {
         var json = new JavaScriptSerializer { MaxJsonLength=32*1024*1024 };
@@ -33,12 +37,16 @@ public static class InstallationSmoke {
                 string package=Path.Combine(cache,manifest.package.name);
                 if(!File.Exists(package) && !CreateHardLink(package,Path.GetFullPath(args[1]),IntPtr.Zero)) File.Copy(args[1],package);
                 Core.Prepare(root,manifest,CancellationToken.None,new Log());
+                int bridgePort=FreePort(), corePort=FreePort();
+                string settings=Path.Combine(root,"faceswap studio/runtime/settings.json".Replace('/',Path.DirectorySeparatorChar));
+                Directory.CreateDirectory(Path.GetDirectoryName(settings));
+                File.WriteAllText(settings,json.Serialize(new { facefusion_port=corePort }));
                 Installer.InstallUninstaller(root,args[2]);
                 File.Copy(Path.Combine(root,"facefusion.ico"),Path.Combine(root,"faceswap.ico"),true);
                 File.Copy(Path.Combine(root,"facefusion.ico"),Path.Combine(root,"faceswap-installer.ico"),true);
                 string session=Guid.NewGuid().ToString("N"), report=Path.Combine(root,"data/cache/install".Replace('/',Path.DirectorySeparatorChar),session+".json");
                 Directory.CreateDirectory(Path.GetDirectoryName(report));
-                Environment.SetEnvironmentVariable("FACESWAP_STUDIO_BRIDGE_PORT","52761");
+                Environment.SetEnvironmentVariable("FACESWAP_STUDIO_BRIDGE_PORT",bridgePort.ToString());
                 Environment.SetEnvironmentVariable("FACESWAP_STUDIO_BRIDGE_HOST","127.0.0.1");
                 Environment.SetEnvironmentVariable("FACESWAP_STUDIO_ISOLATED","1");
                 child=Installer.StartPreparation(root,report,session);
@@ -50,9 +58,21 @@ public static class InstallationSmoke {
                 Check(owned.state=="complete" && owned.shortcuts.Length==3,"安装登记或快捷方式验收失败");
                 bool visible=Process.GetProcessesByName("faceswap_studio").Any(p=>{try{return Installer.SamePath(p.MainModule.FileName,Path.Combine(root,"faceswap studio/runtime/windows_app/current/faceswap_studio.exe".Replace('/',Path.DirectorySeparatorChar)))&&p.MainWindowHandle!=IntPtr.Zero;}catch{return false;}finally{p.Dispose();}});
                 Check(visible,"真实桌面窗口未打开");
+                bool coreReady=false;
+                using(var web=new System.Net.WebClient()) {
+                    web.Proxy=null;
+                    for(int attempt=0;attempt<90;attempt++) {
+                        var status=json.Deserialize<System.Collections.Generic.Dictionary<string,object>>(web.DownloadString("http://127.0.0.1:"+bridgePort+"/facefusion/status"));
+                        if(Convert.ToString(status["state"])=="ready") { coreReady=true; break; }
+                        if(Convert.ToString(status["state"])=="failed") throw new IOException("安装后的核心启动失败："+json.Serialize(status));
+                        Thread.Sleep(1000);
+                    }
+                    Check(coreReady,"安装后的核心启动超时");
+                    Check(web.DownloadString("http://127.0.0.1:"+corePort+"/config").Contains("alphaface_256"),"核心 WebUI 配置验收失败");
+                }
                 File.WriteAllText(Path.Combine(output,"installation-result.json"),json.Serialize(new {
                     root, sourceArchiveReused=true, fullArchiveSha256=Core.Hash(args[1]),
-                    realPythonAndModels=true, rendererAcknowledged=true, visibleWindow=true,
+                    realPythonAndModels=true, rendererAcknowledged=true, visibleWindow=true, coreReady, bridgePort, corePort,
                     shortcutsAndIsolatedRegistry=true, ready=json.DeserializeObject(File.ReadAllText(report)),
                     testRegistry=registry, installId=owned.id, bootstrapPid=child.Id
                 }));
