@@ -24,11 +24,11 @@ class WorkspacePage extends StatelessWidget {
         children: [
           TabBar(
             tabs: [
-              Tab(text: '操作台'),
-              Tab(text: '生成队列'),
+              Tab(height: 32, text: '操作台'),
+              Tab(height: 32, text: '生成队列'),
             ],
           ),
-          SizedBox(height: 8),
+          SizedBox(height: 4),
           Expanded(
             child: TabBarView(children: [_OperationWorkbench(), _QueueBoard()]),
           ),
@@ -864,6 +864,41 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
         final compactHeader =
             constraints.maxWidth <= 1180 || constraints.maxHeight <= 640;
 
+        if (_useNativeWorkbenchMode) {
+          return _NativeWorkbenchPane(
+            bridgeOnline: _bridgeOnline,
+            webUiReady: _isWebUiReady,
+            busy: _actionInFlight || _previewInFlight,
+            previewBusy: _previewInFlight,
+            draft: _workspaceDraft,
+            workspaceOptionsSchema: _workspaceOptionsSchema,
+            workspaceOptionsState: _workspaceOptionsState,
+            workspaceOptionsPanelWidth: _workspaceOptionsPanelWidth,
+            previewResult: _workspacePreviewResult,
+            lastVideoFrameTotal: _lastVideoFrameTotal,
+            workspaceMessage: _workspaceMessage,
+            previewMessage: _previewMessage,
+            onPickSourceFiles: _pickSourceFiles,
+            onPickPersona: _pickPersona,
+            onSavePersona: _savePersona,
+            onClearSourceFiles: _clearSourceFiles,
+            onPickTargetFile: _pickTargetFile,
+            onClearTargetFile: _clearTargetFile,
+            onUpdateOptions: _updateWorkspaceOptions,
+            onResetOptions: _resetWorkspaceOptions,
+            onWorkspaceOptionsPanelWidthChanged: _setWorkspacePanelWidth,
+            onWorkspaceOptionsPanelWidthChangeEnd: _persistWorkspacePanelWidth,
+            onPreviewWorkspace: _previewWorkspace,
+            onPreviewFrameSelected: _previewWorkspaceAtFrame,
+            onOpenSourcePreview: _openSourcePreview,
+            onOpenTargetPreview: _openTargetPreview,
+            onOpenPreviewResult: _openPreviewResult,
+            onQueueWorkspace: _queueWorkspace,
+            onRunWorkspace: _runWorkspace,
+            onOpenBrowser: _openBrowser,
+          );
+        }
+
         return Card(
           elevation: 2,
           shadowColor: Colors.black.withValues(alpha: 0.12),
@@ -913,45 +948,10 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
                           ),
                         ),
                       ),
-                      child: _useNativeWorkbenchMode
-                          ? _NativeWorkbenchPane(
-                              bridgeOnline: _bridgeOnline,
-                              webUiReady: _isWebUiReady,
-                              busy: _actionInFlight || _previewInFlight,
-                              previewBusy: _previewInFlight,
-                              draft: _workspaceDraft,
-                              workspaceOptionsSchema: _workspaceOptionsSchema,
-                              workspaceOptionsState: _workspaceOptionsState,
-                              workspaceOptionsPanelWidth:
-                                  _workspaceOptionsPanelWidth,
-                              previewResult: _workspacePreviewResult,
-                              lastVideoFrameTotal: _lastVideoFrameTotal,
-                              workspaceMessage: _workspaceMessage,
-                              previewMessage: _previewMessage,
-                              onPickSourceFiles: _pickSourceFiles,
-                              onPickPersona: _pickPersona,
-                              onSavePersona: _savePersona,
-                              onClearSourceFiles: _clearSourceFiles,
-                              onPickTargetFile: _pickTargetFile,
-                              onClearTargetFile: _clearTargetFile,
-                              onUpdateOptions: _updateWorkspaceOptions,
-                              onResetOptions: _resetWorkspaceOptions,
-                              onWorkspaceOptionsPanelWidthChanged:
-                                  _setWorkspacePanelWidth,
-                              onWorkspaceOptionsPanelWidthChangeEnd:
-                                  _persistWorkspacePanelWidth,
-                              onPreviewWorkspace: _previewWorkspace,
-                              onPreviewFrameSelected: _previewWorkspaceAtFrame,
-                              onOpenSourcePreview: _openSourcePreview,
-                              onOpenTargetPreview: _openTargetPreview,
-                              onOpenPreviewResult: _openPreviewResult,
-                              onQueueWorkspace: _queueWorkspace,
-                              onRunWorkspace: _runWorkspace,
-                              onOpenBrowser: _openBrowser,
-                            )
-                          : _isWebUiReady &&
-                                _controllerReady &&
-                                _webViewWidget != null
+                      child:
+                          _isWebUiReady &&
+                              _controllerReady &&
+                              _webViewWidget != null
                           ? _webViewWidget!
                           : Center(
                               child: Padding(
@@ -1074,7 +1074,7 @@ class _NativeWorkbenchPane extends StatelessWidget {
         final useSingleColumn = constraints.maxWidth < 760;
         final outerPadding = compact ? 10.0 : 16.0;
         final cardGap = compact ? 10.0 : 16.0;
-        final buttonGap = compact ? 8.0 : 12.0;
+        final buttonGap = compact ? 10.0 : 12.0;
         final collapsedOptionsRailWidth = compact ? 40.0 : 44.0;
         final collapsedOptionsRailGap = 8.0;
         final panelMinWidth = compact
@@ -1193,7 +1193,6 @@ class _NativeWorkbenchPane extends StatelessWidget {
         );
         final submitPanel = _WorkspaceSubmitPanel(
           compact: compact,
-          useSingleColumn: useSingleColumn,
           buttonGap: buttonGap,
           bridgeOnline: bridgeOnline,
           webUiReady: webUiReady,
@@ -1249,29 +1248,42 @@ class _NativeWorkbenchPane extends StatelessWidget {
             outerPadding + collapsedOptionsRailWidth + collapsedOptionsRailGap,
             outerPadding,
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(child: workspaceSections),
-              SizedBox(height: compact ? 10 : 16),
-              submitPanel,
-            ],
-          ),
+          child: workspaceSections,
         );
 
-        return Stack(
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Positioned.fill(child: workspaceContent),
-            WorkspaceFloatingOptionsOverlay(
-              compact: compact,
-              collapsedWidth: collapsedOptionsRailWidth,
-              panelWidth: resolvedPanelWidth,
-              minPanelWidth: panelMinWidth,
-              maxPanelWidth: panelMaxWidth,
-              onPanelWidthChanged: onWorkspaceOptionsPanelWidthChanged,
-              onPanelWidthChangeEnd: onWorkspaceOptionsPanelWidthChangeEnd,
-              child: optionsPanel,
+            Expanded(
+              child: Container(
+                key: const ValueKey('workspace-media-panel'),
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface,
+                  borderRadius: BorderRadius.circular(22),
+                  border: Border.all(color: StudioDepth.borderColor(context)),
+                  boxShadow: StudioDepth.shadows(context),
+                ),
+                child: Stack(
+                  children: [
+                    Positioned.fill(child: workspaceContent),
+                    WorkspaceFloatingOptionsOverlay(
+                      compact: compact,
+                      collapsedWidth: collapsedOptionsRailWidth,
+                      panelWidth: resolvedPanelWidth,
+                      minPanelWidth: panelMinWidth,
+                      maxPanelWidth: panelMaxWidth,
+                      onPanelWidthChanged: onWorkspaceOptionsPanelWidthChanged,
+                      onPanelWidthChangeEnd:
+                          onWorkspaceOptionsPanelWidthChangeEnd,
+                      child: optionsPanel,
+                    ),
+                  ],
+                ),
+              ),
             ),
+            SizedBox(height: compact ? 8 : 10),
+            submitPanel,
           ],
         );
       },
@@ -2587,7 +2599,6 @@ class _FaceChoiceTile extends StatelessWidget {
 class _WorkspaceSubmitPanel extends StatelessWidget {
   const _WorkspaceSubmitPanel({
     required this.compact,
-    required this.useSingleColumn,
     required this.buttonGap,
     required this.bridgeOnline,
     required this.webUiReady,
@@ -2602,7 +2613,6 @@ class _WorkspaceSubmitPanel extends StatelessWidget {
   });
 
   final bool compact;
-  final bool useSingleColumn;
   final double buttonGap;
   final bool bridgeOnline;
   final bool webUiReady;
@@ -2617,80 +2627,103 @@ class _WorkspaceSubmitPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final buttonHeight = compact ? 36.0 : 40.0;
-    final primaryWidth = useSingleColumn ? 148.0 : 168.0;
-    final secondaryWidth = useSingleColumn ? 140.0 : 156.0;
-    final browserWidth = useSingleColumn ? 176.0 : 196.0;
+    final theme = Theme.of(context);
+    final buttonHeight = compact ? 52.0 : 56.0;
+    final buttonStyle = FilledButton.styleFrom(
+      minimumSize: Size(0, buttonHeight),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      visualDensity: VisualDensity.standard,
+      textStyle: theme.textTheme.labelLarge?.copyWith(
+        fontSize: compact ? 15 : 16,
+        fontWeight: FontWeight.w700,
+      ),
+    );
 
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Wrap(
-        spacing: buttonGap,
-        runSpacing: compact ? 8 : buttonGap,
-        children: [
-          SizedBox(
-            width: primaryWidth,
-            child: FilledButton.icon(
-              onPressed: bridgeOnline && draft.canSubmit && !busy
-                  ? onQueueWorkspace
-                  : null,
-              icon: Icon(Icons.playlist_add_rounded, size: compact ? 18 : 20),
-              label: const Text('添加到队列'),
-              style: FilledButton.styleFrom(minimumSize: Size(0, buttonHeight)),
-            ),
-          ),
-          SizedBox(
-            width: secondaryWidth,
-            child: FilledButton.icon(
-              onPressed:
-                  bridgeOnline && draft.canSubmit && !busy && !previewBusy
-                  ? onPreviewWorkspace
-                  : null,
-              icon: previewBusy
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.preview_outlined, size: 18),
-              label: Text(
-                previewBusy
-                    ? '正在预览'
-                    : hasPreview
-                    ? '重新生成预览'
-                    : '生成预览',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+    return Container(
+      key: const ValueKey('workspace-actions-panel'),
+      padding: EdgeInsets.all(compact ? 10 : 12),
+      decoration: BoxDecoration(
+        color: theme.cardTheme.color ?? theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: StudioDepth.borderColor(context)),
+        boxShadow: StudioDepth.shadows(context),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final minButtonWidth =
+              168 * MediaQuery.textScalerOf(context).scale(15) / 15;
+          final columns =
+              constraints.maxWidth >= minButtonWidth * 4 + buttonGap * 3
+              ? 4
+              : 2;
+          final buttonWidth =
+              (constraints.maxWidth - buttonGap * (columns - 1)) / columns;
+          return Wrap(
+            spacing: buttonGap,
+            runSpacing: buttonGap,
+            children: [
+              SizedBox(
+                width: buttonWidth,
+                child: FilledButton.icon(
+                  onPressed: bridgeOnline && draft.canSubmit && !busy
+                      ? onQueueWorkspace
+                      : null,
+                  icon: Icon(Icons.playlist_add_rounded, size: 22),
+                  label: const Text('添加到队列'),
+                  style: buttonStyle,
+                ),
               ),
-              style: FilledButton.styleFrom(minimumSize: Size(0, buttonHeight)),
-            ),
-          ),
-          SizedBox(
-            width: secondaryWidth,
-            child: FilledButton.tonalIcon(
-              onPressed: bridgeOnline && draft.canSubmit && !busy
-                  ? onRunWorkspace
-                  : null,
-              icon: Icon(Icons.rocket_launch_rounded, size: compact ? 18 : 20),
-              label: const Text('立即生成'),
-              style: FilledButton.styleFrom(minimumSize: Size(0, buttonHeight)),
-            ),
-          ),
-          SizedBox(
-            width: browserWidth,
-            child: FilledButton.tonalIcon(
-              onPressed: bridgeOnline && webUiReady && !busy
-                  ? onOpenBrowser
-                  : null,
-              icon: Icon(
-                Icons.open_in_browser_rounded,
-                size: compact ? 18 : 20,
+              SizedBox(
+                width: buttonWidth,
+                child: FilledButton.icon(
+                  onPressed:
+                      bridgeOnline && draft.canSubmit && !busy && !previewBusy
+                      ? onPreviewWorkspace
+                      : null,
+                  icon: previewBusy
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.preview_outlined, size: 22),
+                  label: Text(
+                    previewBusy
+                        ? '正在预览'
+                        : hasPreview
+                        ? '重新生成预览'
+                        : '生成预览',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  style: buttonStyle,
+                ),
               ),
-              label: const Text('浏览器高级参数'),
-              style: FilledButton.styleFrom(minimumSize: Size(0, buttonHeight)),
-            ),
-          ),
-        ],
+              SizedBox(
+                width: buttonWidth,
+                child: FilledButton.tonalIcon(
+                  onPressed: bridgeOnline && draft.canSubmit && !busy
+                      ? onRunWorkspace
+                      : null,
+                  icon: Icon(Icons.rocket_launch_rounded, size: 22),
+                  label: const Text('立即生成'),
+                  style: buttonStyle,
+                ),
+              ),
+              SizedBox(
+                width: buttonWidth,
+                child: FilledButton.tonalIcon(
+                  onPressed: bridgeOnline && webUiReady && !busy
+                      ? onOpenBrowser
+                      : null,
+                  icon: Icon(Icons.open_in_browser_rounded, size: 22),
+                  label: const Text('浏览器高级参数'),
+                  style: buttonStyle,
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

@@ -341,9 +341,22 @@ void main() {
             )
             .first,
       );
-      expect(previewRect.left, lessThan(runRect.left));
-      expect(previewRect.top, runRect.top);
+      expect(runRect.top, greaterThanOrEqualTo(previewRect.top));
+      if (previewRect.top == runRect.top) {
+        expect(previewRect.left, lessThan(runRect.left));
+      } else {
+        expect(previewRect.bottom, lessThan(runRect.top));
+      }
       expect(previewRect.bottom, lessThanOrEqualTo(size.height));
+      expect(previewRect.height, greaterThanOrEqualTo(52));
+      final actionsRect = tester.getRect(
+        find.byKey(const ValueKey('workspace-actions-panel')),
+      );
+      final mediaRect = tester.getRect(
+        find.byKey(const ValueKey('workspace-media-panel')),
+      );
+      expect(mediaRect.bottom, lessThan(actionsRect.top));
+      expect(actionsRect.contains(previewRect.center), isTrue);
       for (final element
           in find
               .byWidgetPredicate(

@@ -217,7 +217,9 @@ class _StudioShellState extends State<StudioShell> {
             ),
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.all(24),
+                padding: _section == StudioSection.workspace
+                    ? const EdgeInsets.fromLTRB(24, 8, 24, 16)
+                    : const EdgeInsets.all(24),
                 child: _buildSection(),
               ),
             ),
