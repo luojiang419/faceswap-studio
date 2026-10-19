@@ -56,6 +56,7 @@ def responsive(window):
 
 def benchmark(root, iterations=3, timeout=90, wait_core=False, settle_seconds=0, duplicate=False):
     root = Path(root).resolve(strict=True)
+    status_url = f"http://127.0.0.1:{int(os.environ.get('FACESWAP_STUDIO_BRIDGE_PORT', '52741'))}/facefusion/status"
     if project_processes(root):
         raise RuntimeError('目标安装已有运行进程，请先自行关闭；计时器不操作用户现有窗口。')
     records, wrappers, owned = [], [], []
@@ -94,7 +95,7 @@ def benchmark(root, iterations=3, timeout=90, wait_core=False, settle_seconds=0,
                         if state.get('state') == 'failed':
                             raise RuntimeError(state.get('message'))
                     try:
-                        with urlopen('http://127.0.0.1:52741/facefusion/status', timeout=.5) as reply:
+                        with urlopen(status_url, timeout=.5) as reply:
                             status = json.load(reply)
                         if status['state'] == 'ready':
                             record['coreReadySeconds'] = round(time.perf_counter() - start, 3)

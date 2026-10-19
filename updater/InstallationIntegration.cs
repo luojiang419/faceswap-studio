@@ -74,14 +74,21 @@ internal static class InstallationIntegration {
             var records=((IEnumerable)manifest["files"]).Cast<object>().Cast<Dictionary<string,object>>().ToArray();
             foreach(var record in records) {string path=Full(Path.Combine(root,Value(record,"path").Replace('/',Path.DirectorySeparatorChar)));if(!path.StartsWith(root+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase))throw new IOException("更新文件超出安装目录");}
             string entry=Path.Combine(root,"易容 Studio.exe"),legacy=Path.Combine(root,"启动FaceSwap Studio.exe");
-            bool alias=false;
+            bool alias=false, refreshedAlias=false;
             if(File.Exists(entry)&&!List(state,"files").Contains("易容 Studio.exe",StringComparer.OrdinalIgnoreCase)&&
                 !records.Any(item=>Value(item,"path")=="易容 Studio.exe")&&(!File.Exists(legacy)||Hash(entry)!=Hash(legacy)))throw new IOException("同名启动文件不属于本软件，未改写入口");
+            var legacyRecord=records.FirstOrDefault(item=>Value(item,"path")=="启动FaceSwap Studio.exe");
+            if(legacyRecord!=null&&(!File.Exists(legacy)||Hash(legacy)!=Value(legacyRecord,"sha256")))throw new IOException("旧启动入口与已验证更新不一致");
+            if(!File.Exists(entry)&&legacyRecord==null)throw new IOException("更新包缺少可用的启动入口");
             UpdateUninstaller(root,session,manifest);
-            if(!File.Exists(entry)) {
-                var record=records.FirstOrDefault(item=>Value(item,"path")=="启动FaceSwap Studio.exe");
-                if(record==null||!File.Exists(legacy)||Hash(legacy)!=Value(record,"sha256"))throw new IOException("旧启动入口与已验证更新不一致");
-                File.Copy(legacy,entry);alias=true;
+            if(legacyRecord!=null&&(!File.Exists(entry)||Hash(entry)!=Value(legacyRecord,"sha256"))) {
+                bool existed=File.Exists(entry);
+                string backup=Path.Combine(session,"integration-backup");Directory.CreateDirectory(backup);
+                if(existed&&!File.Exists(Path.Combine(backup,"易容 Studio.exe")))File.Copy(entry,Path.Combine(backup,"易容 Studio.exe"));
+                // 原子替换允许已加载的 wrapper 正常退出，不能原地覆写正在运行的 EXE。
+                string temp=entry+".integrating";File.Copy(legacy,temp,true);
+                if(existed)File.Replace(temp,entry,null);else File.Move(temp,entry);
+                alias=!existed;refreshedAlias=existed;
             }
             state["files"]=List(state,"files").Concat(records.Select(item=>Value(item,"path"))).Concat(new[]{"易容 Studio.exe"}).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             if(File.Exists(Path.Combine(root,"uninstall.exe")))state["files"]=List(state,"files").Concat(new[]{"uninstall.exe"}).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
@@ -114,7 +121,7 @@ internal static class InstallationIntegration {
                 }
             }
             state["shortcuts"]=shortcuts.ToArray();Write(marker,state);
-            Write(Path.Combine(session,"integration-result.json"),new{ok=true,root,releaseId=Value(config,"releaseId"),canonicalEntryCreated=alias,trackedFiles=List(state,"files").Count()});
+            Write(Path.Combine(session,"integration-result.json"),new{ok=true,root,releaseId=Value(config,"releaseId"),canonicalEntryCreated=alias,canonicalEntryUpdated=refreshedAlias,trackedFiles=List(state,"files").Count()});
         }
     }
 }
