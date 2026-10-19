@@ -162,8 +162,10 @@ def verify_public_access(url, size):
     from urllib.request import build_opener, ProxyHandler, Request
     request = Request(url, headers={'Range': 'bytes=0-0', 'Accept-Encoding': 'identity'})
     with build_opener(ProxyHandler({})).open(request, timeout=30) as response:
-        if response.status == 206:
-            if response.headers.get('Content-Range') != f'bytes 0-0/{size}':
+        content_range = response.headers.get('Content-Range')
+        # 魔搭普通文本对象可能返回200，但仍按Range只发送一个字节。
+        if response.status in (200, 206) and content_range:
+            if content_range != f'bytes 0-0/{size}':
                 raise ValueError('匿名访问的资源大小不一致')
         elif response.status != 200 or int(response.headers.get('Content-Length', -1)) != size:
             raise ValueError('匿名访问的资源状态或大小不一致')

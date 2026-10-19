@@ -38,11 +38,13 @@ def test_publication_refuses_different_remote_content_without_upload(tmp_path, m
         packaging.publish_asset(file, 'runtime.zip')
 
 
-@pytest.mark.parametrize('status', [200, 206])
-def test_public_access_reads_only_one_byte_even_when_server_ignores_range(monkeypatch, status):
+@pytest.mark.parametrize('status,partial', [(200, False), (206, True), (200, True)])
+def test_public_access_reads_only_one_byte_even_when_server_ignores_range(monkeypatch, status, partial):
     size = 4 * 1024**3
     class Response:
-        headers = {'Content-Length': str(size), 'Content-Range': f'bytes 0-0/{size}'}
+        headers = {'Content-Length': '1' if partial else str(size)}
+        if partial:
+            headers['Content-Range'] = f'bytes 0-0/{size}'
         def __enter__(self): return self
         def __exit__(self, *args): pass
         def read(self, count):
@@ -54,6 +56,19 @@ def test_public_access_reads_only_one_byte_even_when_server_ignores_range(monkey
         return response
     monkeypatch.setattr('urllib.request.build_opener', lambda *a: SimpleNamespace(open=open))
     packaging.verify_public_access('https://example.test/runtime.zip', size)
+
+
+@pytest.mark.parametrize('status', [200, 206])
+def test_public_access_rejects_wrong_range_size_even_with_status_200(monkeypatch, status):
+    class Response:
+        headers = {'Content-Length': '1', 'Content-Range': 'bytes 0-0/99'}
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def read(self, count): pytest.fail('范围不匹配时不得接受响应正文')
+    response = Response(); response.status = status
+    monkeypatch.setattr('urllib.request.build_opener', lambda *a: SimpleNamespace(open=lambda *a, **k: response))
+    with pytest.raises(ValueError, match='资源大小不一致'):
+        packaging.verify_public_access('https://example.test/catalog.json', 100)
 
 
 def test_installer_only_build_reuses_published_runtime_url_and_release(tmp_path, monkeypatch):

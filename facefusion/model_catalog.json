@@ -11275,12 +11275,11 @@
       "upstream_commit": "728b9659bd9691bf32cbf7f61af478d94b7ba81e",
       "upstream_url": "https://huggingface.co/facefusion/models-3.0.0/resolve/728b9659bd9691bf32cbf7f61af478d94b7ba81e/ddcolor_artistic.onnx",
       "remote_path": "models/facefusion-3.9.0-v1/models-3.0.0/ddcolor_artistic.onnx",
-      "url": "https://huggingface.co/facefusion/models-3.0.0/resolve/728b9659bd9691bf32cbf7f61af478d94b7ba81e/ddcolor_artistic.onnx",
+      "url": "https://modelscope.cn/api/v1/models/jiangjiang419/facefusion-workbench-updates/repo?Revision=master&FilePath=models%2Ffacefusion-3.9.0-v1%2Fmodels-3.0.0%2Fddcolor_artistic.onnx",
       "sha256": "adad4b897990d627e139e858e8a6552c1f99e39e49e811d21e8f591803c877f1",
       "crc32": "ba331b60",
-      "download_origin": "external",
-      "download_label": "外网下载",
-      "proxy_policy": "system_auto"
+      "download_origin": "modelscope",
+      "download_label": "魔搭下载"
     },
     {
       "id": "models-3.0.0/deoldify.hash",
@@ -11390,12 +11389,11 @@
       "upstream_commit": "728b9659bd9691bf32cbf7f61af478d94b7ba81e",
       "upstream_url": "https://huggingface.co/facefusion/models-3.0.0/resolve/728b9659bd9691bf32cbf7f61af478d94b7ba81e/deoldify_stable.onnx",
       "remote_path": "models/facefusion-3.9.0-v1/models-3.0.0/deoldify_stable.onnx",
-      "url": "https://huggingface.co/facefusion/models-3.0.0/resolve/728b9659bd9691bf32cbf7f61af478d94b7ba81e/deoldify_stable.onnx",
+      "url": "https://modelscope.cn/api/v1/models/jiangjiang419/facefusion-workbench-updates/repo?Revision=master&FilePath=models%2Ffacefusion-3.9.0-v1%2Fmodels-3.0.0%2Fdeoldify_stable.onnx",
       "sha256": "b1623cecd1bace5966d0364b86920e9a1421a7fd0f55d63604e359e9ab9c4824",
       "crc32": "5c4cbe99",
-      "download_origin": "external",
-      "download_label": "外网下载",
-      "proxy_policy": "system_auto"
+      "download_origin": "modelscope",
+      "download_label": "魔搭下载"
     },
     {
       "id": "models-3.0.0/clear_reality_x4.hash",
