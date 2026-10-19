@@ -18,6 +18,9 @@ class _Fixture extends HttpOverrides {
   int previews = 0;
   Completer<void>? previewGate;
   Map<String, dynamic>? previewPayload;
+  bool video = false;
+  int faceCount = 0;
+  final Map<String, dynamic> options = {};
   late String imagePath;
   late String png;
 
@@ -33,12 +36,19 @@ class _Fixture extends HttpOverrides {
       case '/workspace/draft':
         return {
           'source_paths': [imagePath],
-          'target_path': imagePath,
+          // 视频控件布局独立于本机解码器；不创建真实的原生视频播放器。
+          'target_path': video ? null : imagePath,
           'source_thumbnail': imagePath,
           'target_thumbnail': imagePath,
-          'target_media_type': 'image',
+          'target_media_type': video ? 'video' : 'image',
+          if (video) 'target_video_frame_total': 860,
           'can_submit': true,
         };
+      case '/workspace/options':
+        if (body.isNotEmpty) {
+          options.addAll(jsonDecode(utf8.decode(body)) as Map<String, dynamic>);
+        }
+        return {'options': options};
       case '/workspace/preview':
         previews++;
         previewPayload = jsonDecode(utf8.decode(body)) as Map<String, dynamic>;
@@ -49,8 +59,15 @@ class _Fixture extends HttpOverrides {
           'after_image_base64': png,
           'width': 120,
           'height': 180,
-          'target_media_type': 'image',
-          'face_choices': [],
+          'target_media_type': video ? 'video' : 'image',
+          if (video) ...{
+            'frame_number': options['preview_frame_number'] ?? 500,
+            'video_frame_total': 860,
+          },
+          'face_choices': [
+            for (var i = 0; i < faceCount; i++)
+              {'index': i, 'image_base64': png},
+          ],
         };
       case '/models/bootstrap':
         return {'ready': true};
@@ -407,6 +424,98 @@ void main() {
     );
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
+  });
+
+  testWidgets('视频预览完整适配且无需纵向滚动，缩放后选帧和参考脸仍可操作', (tester) async {
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    fixture.video = true;
+    fixture.options['preview_frame_number'] = 500;
+
+    Rect bounds(Finder finder) {
+      final box = tester.renderObject<RenderBox>(finder);
+      return MatrixUtils.transformRect(
+        box.getTransformTo(null),
+        Offset.zero & box.size,
+      );
+    }
+
+    void checkFits(String state) {
+      final panel = find.byKey(const ValueKey('workspace-preview-panel'));
+      final panelRect = bounds(panel);
+      final controls = find.byKey(const ValueKey('workspace-preview-controls'));
+      final media = find.byKey(const ValueKey('workspace-preview-media'));
+      for (final item in [controls, media]) {
+        final rect = bounds(item);
+        expect(rect.width, greaterThan(0), reason: state);
+        expect(rect.height, greaterThan(0), reason: state);
+        expect(
+          panelRect.inflate(0.5).contains(rect.topLeft),
+          isTrue,
+          reason: state,
+        );
+        expect(
+          panelRect.inflate(0.5).contains(rect.bottomRight),
+          isTrue,
+          reason: state,
+        );
+      }
+      expect(bounds(media).bottom, lessThanOrEqualTo(bounds(controls).top));
+      expect(
+        find.descendant(of: panel, matching: find.byType(Scrollbar)),
+        findsNothing,
+      );
+      for (final scrollable in tester.widgetList<Scrollable>(
+        find.descendant(of: panel, matching: find.byType(Scrollable)),
+      )) {
+        expect(
+          scrollable.axisDirection,
+          anyOf(AxisDirection.left, AxisDirection.right),
+        );
+      }
+      expect(tester.takeException(), isNull, reason: state);
+    }
+
+    for (final dark in [false, true]) {
+      for (final size in [
+        const Size(1384, 661),
+        const Size(740, 850),
+        const Size(676, 513),
+        const Size(1000, 430),
+      ]) {
+        fixture.faceCount = 3;
+        await show(tester, const WorkspacePage(), size, dark: dark, scale: 1.3);
+        await capture(
+          tester,
+          'video-${dark ? 'dark' : 'light'}-${size.width.toInt()}-empty',
+        );
+        checkFits('$dark $size 未生成');
+        expect(find.text('预览帧'), findsOneWidget);
+        await tester.tap(find.text('生成预览'));
+        await tester.pump(const Duration(milliseconds: 300));
+        await capture(
+          tester,
+          'video-${dark ? 'dark' : 'light'}-${size.width.toInt()}-faces',
+        );
+        checkFits('$dark $size 有参考脸');
+        final previousPreviews = fixture.previews;
+        await tester.drag(find.byType(Slider).first, const Offset(30, 0));
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(fixture.previews, greaterThan(previousPreviews));
+        await tester.tap(find.byTooltip('人脸 #1'));
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(fixture.options['face_selector_mode'], 'reference');
+        expect(fixture.options['reference_face_position'], 1);
+        checkFits('$dark $size 切换参考脸');
+        fixture.faceCount = 0;
+        await tester.tap(find.text('重新生成预览'));
+        await tester.pump(const Duration(milliseconds: 300));
+        checkFits('$dark $size 无人脸');
+        expect(find.text('当前帧未检测到人脸'), findsOneWidget);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+      }
+    }
   });
 
   testWidgets('首页使用全宽模块并适配浅深主题与矮窗口', (tester) async {

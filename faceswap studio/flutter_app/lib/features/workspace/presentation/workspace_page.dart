@@ -1900,14 +1900,7 @@ class _WorkspacePreviewPanel extends StatefulWidget {
 }
 
 class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
-  final ScrollController _detailsScrollController = ScrollController();
   double? _sliderFrameValue;
-
-  @override
-  void dispose() {
-    _detailsScrollController.dispose();
-    super.dispose();
-  }
 
   StudioComparisonMode _comparisonMode = StudioComparisonMode.wipe;
   bool _comparisonEnabled = true;
@@ -1990,6 +1983,8 @@ class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
           style: FilledButton.styleFrom(
             visualDensity: VisualDensity.compact,
             minimumSize: const Size(0, 36),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
         ),
         if (canCompare && _comparisonEnabled)
@@ -2014,7 +2009,13 @@ class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
               });
             },
             showSelectedIcon: false,
-            style: const ButtonStyle(visualDensity: VisualDensity.compact),
+            style: const ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              padding: WidgetStatePropertyAll(
+                EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              ),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
           ),
       ],
     );
@@ -2054,7 +2055,7 @@ class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
     final controlsEnabled = widget.bridgeOnline && !widget.previewBusy;
 
     return Container(
-      padding: EdgeInsets.all(widget.compact ? 12 : 14),
+      padding: EdgeInsets.all(widget.compact ? 8 : 12),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest.withValues(
           alpha: theme.brightness == Brightness.dark ? 0.22 : 0.46,
@@ -2088,7 +2089,9 @@ class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
               const _FaceSelectorEmptyState(message: '当前帧未检测到人脸')
             else
               SizedBox(
-                height: widget.compact ? 84 : 92,
+                height:
+                    (widget.compact ? 82 : 90) +
+                    MediaQuery.textScalerOf(context).scale(20),
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   itemCount: faceChoices.length,
@@ -2126,6 +2129,7 @@ class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
 
     return LayoutBuilder(
       builder: (context, constraints) => Container(
+        key: const ValueKey('workspace-preview-panel'),
         padding: EdgeInsets.all(widget.compact ? 10 : 14),
         decoration: BoxDecoration(
           color: theme.cardTheme.color,
@@ -2156,219 +2160,255 @@ class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
             ),
             const SizedBox(height: 10),
             Expanded(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(18),
-                child: Material(
-                  color: theme.brightness == Brightness.dark
-                      ? const Color(0xFF20201E)
-                      : theme.colorScheme.surfaceContainer,
-                  child: InkWell(
-                    onTap: widget.onOpenPreviewResult,
-                    child: SizedBox(
-                      width: double.infinity,
-                      child: Stack(
-                        children: [
-                          Positioned.fill(
-                            child: widget.previewBusy
-                                ? Center(
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        const SizedBox(
-                                          width: 28,
-                                          height: 28,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2.4,
+              child: _AdaptivePreviewBody(
+                media: ClipRRect(
+                  borderRadius: BorderRadius.circular(18),
+                  child: Material(
+                    color: theme.brightness == Brightness.dark
+                        ? const Color(0xFF20201E)
+                        : theme.colorScheme.surfaceContainer,
+                    child: InkWell(
+                      onTap: widget.onOpenPreviewResult,
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: Stack(
+                          children: [
+                            Positioned.fill(
+                              child: widget.previewBusy
+                                  ? Center(
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const SizedBox(
+                                            width: 28,
+                                            height: 28,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2.4,
+                                            ),
                                           ),
-                                        ),
-                                        const SizedBox(height: 12),
-                                        Text(
-                                          '正在生成预览',
-                                          style: theme.textTheme.bodyMedium,
-                                        ),
-                                      ],
-                                    ),
-                                  )
-                                : previewResult != null
-                                ? previewResult.canCompare
-                                      ? StudioImageComparisonFrame(
-                                          beforeImage: MemoryImage(
-                                            previewResult.beforeImageBytes,
+                                          const SizedBox(height: 12),
+                                          Text(
+                                            '正在生成预览',
+                                            style: theme.textTheme.bodyMedium,
                                           ),
-                                          afterImage: MemoryImage(
-                                            previewResult.afterImageBytes,
-                                          ),
-                                          singleImage: MemoryImage(
+                                        ],
+                                      ),
+                                    )
+                                  : previewResult != null
+                                  ? previewResult.canCompare
+                                        ? StudioImageComparisonFrame(
+                                            beforeImage: MemoryImage(
+                                              previewResult.beforeImageBytes,
+                                            ),
+                                            afterImage: MemoryImage(
+                                              previewResult.afterImageBytes,
+                                            ),
+                                            singleImage: MemoryImage(
+                                              previewResult.imageBytes,
+                                            ),
+                                            mode: _comparisonEnabled
+                                                ? _comparisonMode
+                                                : StudioComparisonMode.single,
+                                            divider: _comparisonDivider,
+                                            onDividerChanged: (value) {
+                                              setState(() {
+                                                _comparisonDivider = value;
+                                              });
+                                            },
+                                            followPointer:
+                                                _comparisonEnabled &&
+                                                _comparisonMode ==
+                                                    StudioComparisonMode.wipe,
+                                            beforeLabel:
+                                                previewResult.targetMediaType ==
+                                                    'video'
+                                                ? '原视频帧'
+                                                : '原图',
+                                            afterLabel: '换脸结果',
+                                          )
+                                        : Image.memory(
                                             previewResult.imageBytes,
-                                          ),
-                                          mode: _comparisonEnabled
-                                              ? _comparisonMode
-                                              : StudioComparisonMode.single,
-                                          divider: _comparisonDivider,
-                                          onDividerChanged: (value) {
-                                            setState(() {
-                                              _comparisonDivider = value;
-                                            });
-                                          },
-                                          followPointer:
-                                              _comparisonEnabled &&
-                                              _comparisonMode ==
-                                                  StudioComparisonMode.wipe,
-                                          beforeLabel:
-                                              previewResult.targetMediaType ==
-                                                  'video'
-                                              ? '原视频帧'
-                                              : '原图',
-                                          afterLabel: '换脸结果',
-                                        )
-                                      : Image.memory(
-                                          previewResult.imageBytes,
-                                          fit: BoxFit.contain,
-                                          gaplessPlayback: true,
-                                          errorBuilder: (_, _, _) =>
-                                              _MediaPlaceholder(
-                                                compact: widget.compact,
-                                                mediaType:
-                                                    widget.targetMediaType,
-                                              ),
-                                        )
-                                : _MediaPlaceholder(
-                                    compact: widget.compact,
-                                    mediaType: widget.targetMediaType,
-                                  ),
-                          ),
-                          if (widget.onOpenPreviewResult != null)
-                            Positioned(
-                              right: widget.compact ? 8 : 10,
-                              bottom: widget.compact ? 8 : 10,
-                              child: const _PreviewActionBadge(label: '点击全屏查看'),
+                                            fit: BoxFit.contain,
+                                            gaplessPlayback: true,
+                                            errorBuilder: (_, _, _) =>
+                                                _MediaPlaceholder(
+                                                  compact: widget.compact,
+                                                  mediaType:
+                                                      widget.targetMediaType,
+                                                ),
+                                          )
+                                  : _MediaPlaceholder(
+                                      compact: widget.compact,
+                                      mediaType: widget.targetMediaType,
+                                    ),
                             ),
-                        ],
+                            if (widget.onOpenPreviewResult != null)
+                              Positioned(
+                                right: widget.compact ? 8 : 10,
+                                bottom: widget.compact ? 8 : 10,
+                                child: const _PreviewActionBadge(
+                                  label: '点击全屏查看',
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              height: (constraints.maxHeight * 0.30).clamp(60.0, 160.0),
-              child: Scrollbar(
-                controller: _detailsScrollController,
-                thumbVisibility: true,
-                child: SingleChildScrollView(
-                  controller: _detailsScrollController,
-                  primary: false,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (previewResult != null) ...[
-                        _buildComparisonControls(canCompare: canCompare),
-                        const SizedBox(height: 8),
-                      ],
-                      SizedBox(height: widget.compact ? 12 : 14),
-                      if (widget.targetMediaType == 'video') ...[
-                        Row(
-                          children: [
-                            Text(
-                              '预览帧',
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const Spacer(),
-                            Text(
-                              _frameSliderLabel(currentFrame, videoFrameTotal),
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
-                        Slider(
-                          value: sliderValue,
-                          min: 0,
-                          max: sliderMaxFrame.toDouble(),
-                          divisions: _showVideoSlider ? sliderMaxFrame : 1,
-                          label: '$currentFrame',
-                          onChanged:
-                              !_canScrubVideo ||
-                                  widget.onPreviewFrameSelected == null
-                              ? null
-                              : (nextValue) {
-                                  setState(() {
-                                    _sliderFrameValue = nextValue;
-                                  });
-                                },
-                          onChangeEnd:
-                              !_canScrubVideo ||
-                                  widget.onPreviewFrameSelected == null
-                              ? null
-                              : (nextValue) async {
-                                  final nextFrame = nextValue.round();
-                                  setState(() {
-                                    _sliderFrameValue = nextFrame.toDouble();
-                                  });
-                                  await widget.onPreviewFrameSelected!(
-                                    nextFrame,
-                                  );
-                                  if (!mounted) {
-                                    return;
-                                  }
-                                  setState(() {
-                                    _sliderFrameValue = null;
-                                  });
-                                },
-                        ),
-                        SizedBox(height: widget.compact ? 10 : 12),
-                      ],
-                      _buildFaceSelectorControls(theme),
-                      if (widget.previewMessage.isNotEmpty) ...[
-                        SizedBox(height: widget.compact ? 10 : 12),
-                        Text(
-                          widget.previewMessage,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                            height: 1.35,
-                          ),
-                        ),
-                      ],
-                      if (previewResult != null) ...[
-                        SizedBox(height: widget.compact ? 10 : 12),
-                        Wrap(
-                          spacing: widget.compact ? 8 : 10,
-                          runSpacing: widget.compact ? 8 : 10,
-                          children: [
-                            _PreviewMetaChip(
-                              label:
-                                  '${previewResult.width}x${previewResult.height}',
-                            ),
-                            _PreviewMetaChip(
-                              label: previewResult.previewModeLabel,
-                            ),
-                            _PreviewMetaChip(
-                              label: previewResult.previewResolution,
-                            ),
-                            if (previewResult.targetMediaType == 'video')
-                              _PreviewMetaChip(
-                                label: previewResult.videoFrameTotal == null
-                                    ? '帧 ${previewResult.frameNumber}'
-                                    : '帧 ${previewResult.frameNumber} / ${previewResult.videoFrameTotal! - 1}',
-                              ),
-                            _PreviewMetaChip(
-                              label: previewResult.orientationLabel,
-                            ),
-                          ],
-                        ),
-                      ],
+                controls: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (previewResult != null) ...[
+                      _buildComparisonControls(canCompare: canCompare),
+                      const SizedBox(height: 8),
                     ],
-                  ),
+                    if (widget.targetMediaType == 'video') ...[
+                      Row(
+                        children: [
+                          Text(
+                            '预览帧',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            _frameSliderLabel(currentFrame, videoFrameTotal),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Slider(
+                        value: sliderValue,
+                        min: 0,
+                        max: sliderMaxFrame.toDouble(),
+                        divisions: _showVideoSlider ? sliderMaxFrame : 1,
+                        label: '$currentFrame',
+                        onChanged:
+                            !_canScrubVideo ||
+                                widget.onPreviewFrameSelected == null
+                            ? null
+                            : (nextValue) {
+                                setState(() {
+                                  _sliderFrameValue = nextValue;
+                                });
+                              },
+                        onChangeEnd:
+                            !_canScrubVideo ||
+                                widget.onPreviewFrameSelected == null
+                            ? null
+                            : (nextValue) async {
+                                final nextFrame = nextValue.round();
+                                setState(() {
+                                  _sliderFrameValue = nextFrame.toDouble();
+                                });
+                                await widget.onPreviewFrameSelected!(nextFrame);
+                                if (!mounted) {
+                                  return;
+                                }
+                                setState(() {
+                                  _sliderFrameValue = null;
+                                });
+                              },
+                      ),
+                      SizedBox(height: widget.compact ? 10 : 12),
+                    ],
+                    _buildFaceSelectorControls(theme),
+                    if (widget.previewMessage.isNotEmpty) ...[
+                      SizedBox(height: widget.compact ? 10 : 12),
+                      Text(
+                        widget.previewMessage,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                    if (previewResult != null) ...[
+                      SizedBox(height: widget.compact ? 10 : 12),
+                      Wrap(
+                        spacing: widget.compact ? 8 : 10,
+                        runSpacing: widget.compact ? 8 : 10,
+                        children: [
+                          _PreviewMetaChip(
+                            label:
+                                '${previewResult.width}x${previewResult.height}',
+                          ),
+                          _PreviewMetaChip(
+                            label: previewResult.previewModeLabel,
+                          ),
+                          _PreviewMetaChip(
+                            label: previewResult.previewResolution,
+                          ),
+                          if (previewResult.targetMediaType == 'video')
+                            _PreviewMetaChip(
+                              label: previewResult.videoFrameTotal == null
+                                  ? '帧 ${previewResult.frameNumber}'
+                                  : '帧 ${previewResult.frameNumber} / ${previewResult.videoFrameTotal! - 1}',
+                            ),
+                          _PreviewMetaChip(
+                            label: previewResult.orientationLabel,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 控件按内容占用高度，画面使用剩余空间；矮窗口等比适配控件而不裁切。
+class _AdaptivePreviewBody extends StatelessWidget {
+  const _AdaptivePreviewBody({required this.media, required this.controls});
+
+  final Widget media;
+  final Widget controls;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const gap = 8.0;
+        final minMediaHeight = (constraints.maxHeight * 0.18).clamp(40.0, 80.0);
+        final maxControlsHeight = math.max(
+          0.0,
+          constraints.maxHeight - minMediaHeight - gap,
+        );
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: SizedBox(
+                key: const ValueKey('workspace-preview-media'),
+                child: media,
+              ),
+            ),
+            const SizedBox(height: gap),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: maxControlsHeight),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.topCenter,
+                child: SizedBox(
+                  key: const ValueKey('workspace-preview-controls'),
+                  width: constraints.maxWidth,
+                  child: controls,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
