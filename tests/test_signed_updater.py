@@ -44,6 +44,22 @@ def test_reject_unsafe_paths(relative):
         u.safe_path(relative)
 
 
+@pytest.mark.parametrize('current', [True, False])
+def test_restart_supports_new_brand_and_legacy_rollback(tmp_path, monkeypatch, current):
+    root, session = tmp_path / 'app', tmp_path / 'session'
+    root.mkdir(); session.mkdir()
+    legacy = root / '启动FaceSwap Studio.exe'; legacy.write_bytes(b'old')
+    preferred = root / '易容 Studio.exe'
+    if current:
+        preferred.write_bytes(b'new')
+    for name in (legacy.name, preferred.name):
+        assert u.safe_path(name) == name
+    calls = []
+    monkeypatch.setattr(u.subprocess, 'Popen', lambda command, **kwargs: calls.append(command))
+    u.restart(root, session, health=False)
+    assert calls == [[str(preferred if current else legacy)]]
+
+
 def test_install_and_rollback_preserves_data(tmp_path):
     root, session, settings = prepare(tmp_path)
     old = root / "faceswap studio/bridge/app_server.py"

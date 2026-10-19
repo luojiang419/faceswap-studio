@@ -1,9 +1,9 @@
-#define AppName "FaceSwap Studio"
+#define AppName "易容 Studio"
 #ifndef AppVersion
 #define AppVersion "0.1.0"
 #endif
-#define AppPublisher "FaceSwap Studio"
-#define AppExeName "启动FaceSwap Studio.exe"
+#define AppPublisher "易容 Studio"
+#define AppExeName "易容 Studio.exe"
 
 [Setup]
 AppId={{B19D9CFB-DB06-4DF1-81F1-0E12AA3A7A10}
@@ -14,7 +14,7 @@ DefaultDirName={code:GetDefaultInstallDir}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 OutputDir=..\dist\installer
-OutputBaseFilename=FaceSwapStudioSetup
+OutputBaseFilename=易容 Studio 安装器
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -28,8 +28,8 @@ UninstallDisplayIcon={app}\{#AppExeName}
 Source: "..\build\installer\app\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{commondesktop}\FaceSwap Studio"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\facefusion.ico"
-Name: "{group}\FaceSwap Studio"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\facefusion.ico"
+Name: "{commondesktop}\易容 Studio"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\facefusion.ico"
+Name: "{group}\易容 Studio"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\facefusion.ico"
 
 [Run]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\repair_runtime.ps1"""; Flags: runhidden waituntilterminated
@@ -93,7 +93,7 @@ end;
 function GetDefaultInstallDir(Param: String): String;
 begin
   if CachedDefaultInstallDir = '' then
-    CachedDefaultInstallDir := ResolveBestInstallDrive() + ':\Program Files\FaceSwap Studio';
+    CachedDefaultInstallDir := ResolveBestInstallDrive() + ':\Program Files\易容 Studio';
   Result := CachedDefaultInstallDir;
 end;
 

@@ -1,11 +1,11 @@
 {
-    "name": "FaceSwap Studio",
-    "short_name": "FaceSwap Studio",
+    "name": "易容 Studio",
+    "short_name": "易容 Studio",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#171716",
     "theme_color": "#B57A52",
-    "description": "FaceSwap Studio 本地 AI 人脸融合工作台",
+    "description": "易容 Studio 本地 AI 人脸融合工作台",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

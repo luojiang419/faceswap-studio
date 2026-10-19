@@ -85,7 +85,7 @@ class _StudioShellState extends State<StudioShell> {
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
-                            'FaceSwap\nStudio',
+                            '易容 Studio',
                             style: theme.textTheme.titleMedium?.copyWith(
                               height: 1.3,
                             ),

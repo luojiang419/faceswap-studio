@@ -30,7 +30,7 @@ def render() -> None:
 	])
 
 	METADATA_BUTTON = gradio.Button(
-		value = metadata.get('name') + ' ' + metadata.get('version'),
+		value = '易容 Studio',
 		variant = 'primary',
 		link = metadata.get('url')
 	)

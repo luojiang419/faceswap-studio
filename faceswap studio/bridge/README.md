@@ -1,4 +1,4 @@
-# FaceSwap Studio Bridge
+# 易容 Studio Bridge
 
 本目录用于承载 Flutter 与 FaceFusion 之间的本地 Python Bridge。
 

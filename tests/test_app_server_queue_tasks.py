@@ -221,7 +221,7 @@ def test_run_queue_worker_marks_cancelled_job_as_failed_without_last_error(tmp_p
 
 def test_normalize_job_payload_paths_keeps_installed_studio_output_path(tmp_path : Path) -> None:
 	runtime = create_runtime(tmp_path)
-	install_root = tmp_path / 'Program Files' / 'FaceSwap Studio'
+	install_root = tmp_path / 'Program Files' / '易容 Studio'
 	runtime._studio_root = install_root / 'faceswap studio'
 	output_path = runtime._studio_root / 'data' / 'output' / 'video' / 'queued.mp4'
 	payload = {
@@ -242,7 +242,7 @@ def test_normalize_job_payload_paths_keeps_installed_studio_output_path(tmp_path
 
 def test_normalize_job_payload_paths_collapses_repeated_installed_studio_output_path(tmp_path : Path) -> None:
 	runtime = create_runtime(tmp_path)
-	install_root = tmp_path / 'Program Files' / 'FaceSwap Studio'
+	install_root = tmp_path / 'Program Files' / '易容 Studio'
 	runtime._studio_root = install_root / 'faceswap studio'
 	output_path = runtime._studio_root / 'data' / 'output' / 'video' / 'queued.mp4'
 	repeated_output_path = (

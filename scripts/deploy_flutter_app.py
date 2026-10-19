@@ -22,7 +22,7 @@ def project_processes(root):
             if not exe.is_absolute() or not exe.resolve().is_relative_to(root):
                 continue
             args = process.info['cmdline'] or []
-            if exe.name.lower() in ('faceswap_studio.exe', '启动faceswap studio.exe') or any(
+            if exe.name.lower() in ('faceswap_studio.exe', '易容 studio.exe', '启动faceswap studio.exe') or any(
                     Path(arg).name in ('launch_faceswap_studio.py', 'facefusion.py') for arg in args) or (
                     'uvicorn' in args and 'app_server:app' in args):
                 matches.append(process)

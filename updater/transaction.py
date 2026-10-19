@@ -54,7 +54,7 @@ def safe_path(relative: str) -> str:
         raise ValueError(f"更新路径非法：{relative}")
     allowed = (
         relative.startswith(("facefusion/", "faceswap studio/bridge/", "faceswap studio/runtime/windows_app/current/", "faceswap studio/flutter_app/build/web/", "updater/")) or
-        relative in ("VERSION", "update-config.json", "facefusion.py", "facefusion.ico", "launch_faceswap_studio.py", "启动FaceSwap Studio.exe", "FaceSwapStudioUpdater.exe", "scripts/repair_runtime.ps1", "scripts/bootstrap_prepare.py")
+        relative in ("VERSION", "update-config.json", "facefusion.py", "facefusion.ico", "launch_faceswap_studio.py", "易容 Studio.exe", "启动FaceSwap Studio.exe", "FaceSwapStudioUpdater.exe", "scripts/repair_runtime.ps1", "scripts/bootstrap_prepare.py")
     )
     if not allowed or any(p.lower() in (".git", "__pycache__", "node_modules", ".env", ".assets", ".venv-win", ".python") for p in parts):
         raise ValueError(f"更新禁止覆盖此路径：{relative}")
@@ -250,7 +250,10 @@ def restart(root, session, health=True):
         env["FACESWAP_STUDIO_UPDATE_HEALTH_FILE"] = str(session / "healthy.json")
         env["FACESWAP_STUDIO_UPDATE_SESSION"] = str(session)
         env["FACESWAP_STUDIO_UPDATE_TOKEN"] = token
-    return subprocess.Popen([str(root / "启动FaceSwap Studio.exe")], cwd=root, env=env,
+    launcher = root / "易容 Studio.exe"
+    if not launcher.is_file():
+        launcher = root / "启动FaceSwap Studio.exe"  # 旧版本回滚后仍可正常启动。
+    return subprocess.Popen([str(launcher)], cwd=root, env=env,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 

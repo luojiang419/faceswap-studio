@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$SkipFlutterBuild,
     [switch]$SkipLauncherBuild,
     [switch]$SkipUpdaterBuild,
@@ -124,7 +124,7 @@ $flutterDeployment = Join-Path $repoRoot "faceswap studio\runtime\windows_app\cu
 $flutterWebDeployment = Join-Path $repoRoot "faceswap studio\flutter_app\build\web"
 $offlineModelManifest = Join-Path $repoRoot "installer\core-models.txt"
 $offlineModelSource = Join-Path $repoRoot ".assets\models"
-$launcherFileName = ([string][char]0x542F) + ([string][char]0x52A8) + "FaceSwap Studio.exe"
+$launcherFileName = "易容 Studio.exe"
 $launcherExe = Join-Path $repoRoot $launcherFileName
 $updaterExe = Join-Path $repoRoot "dist\FaceSwapStudioUpdater.exe"
 $appVersion = Get-AppVersion -RepoRoot $repoRoot

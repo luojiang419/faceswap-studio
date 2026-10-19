@@ -117,13 +117,13 @@ public static class BootstrapTests {
             Run("应用升级后保留新版并继续校验桌面核心", () => {
                 string directory = Path.Combine(root, "updated"); Directory.CreateDirectory(Path.Combine(directory, "faceswap studio/bridge"));
                 Directory.CreateDirectory(Path.Combine(directory, "updater")); Directory.CreateDirectory(Path.Combine(directory, "faceswap studio/runtime/windows_app/current"));
-                string executable = Path.Combine(directory, "启动FaceSwap Studio.exe"); File.WriteAllBytes(executable, content);
+                string executable = Path.Combine(directory, "易容 Studio.exe"); File.WriteAllBytes(executable, content);
                 File.WriteAllText(Path.Combine(directory, "VERSION"), "2.0.3");
                 File.WriteAllText(Path.Combine(directory, "update-config.json"), "{\"releaseId\":\"20261019000000\"}");
                 File.WriteAllText(Path.Combine(directory, "updater/transaction.py"), "new");
                 File.WriteAllText(Path.Combine(directory, "faceswap studio/bridge/app_server.py"), "new");
                 File.WriteAllText(Path.Combine(directory, "faceswap studio/runtime/windows_app/current/faceswap_studio.exe"), "new");
-                var asset = MakeAsset(content, "https://example.com"); asset.name = "启动FaceSwap Studio.exe";
+                var asset = MakeAsset(content, "https://example.com"); asset.name = "易容 Studio.exe";
                 var manifest = new Manifest { appVersion = "2.0.2", appReleaseId = "20261018000000", entry = asset.name, files = new[] { asset } };
                 Check(Core.DesktopReady(directory, manifest, CancellationToken.None), "不应还原成旧版");
                 File.WriteAllBytes(executable, new byte[content.Length]);

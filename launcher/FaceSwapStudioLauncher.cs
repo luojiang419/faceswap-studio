@@ -4,6 +4,9 @@ using System.IO;
 using System.Text;
 using System.Windows.Forms;
 
+[assembly: System.Reflection.AssemblyTitle("易容 Studio")]
+[assembly: System.Reflection.AssemblyProduct("易容 Studio")]
+
 internal static class FaceSwapStudioLauncher
 {
     [STAThread]
@@ -31,8 +34,8 @@ internal static class FaceSwapStudioLauncher
             if (exitCode != 0)
             {
                 ShowError(
-                    "FaceSwap Studio",
-                    "FaceSwap Studio 异常退出（退出码 0x" + exitCode.ToString("X8") + "）。\n" +
+                    "易容 Studio",
+                    "易容 Studio 异常退出（退出码 0x" + exitCode.ToString("X8") + "）。\n" +
                     "请查看 launcher.log、bridge.log 和以下日志：\n" + wrapperLogPath
                 );
             }
@@ -42,7 +45,7 @@ internal static class FaceSwapStudioLauncher
         {
             AppendLog(wrapperLogPath, "[wrapper] Fatal error: " + exception);
             ShowError(
-                "FaceSwap Studio",
+                "易容 Studio",
                 "Launcher failed to start.\n\n" + exception.Message + "\n\nSee:\n" + wrapperLogPath
             );
             return 1;

@@ -109,8 +109,8 @@ OFFICIAL_HUGGINGFACE_URL = "https://huggingface.co"
 OFFICIAL_GITHUB_URL = "https://github.com"
 LOCAL_NO_PROXY = "localhost,127.0.0.1,::1"
 CORE_MODEL_SCOPE = "core"
-CORE_MODEL_USER_AGENT = "FaceSwap Studio Model Bootstrap/1.0"
-UPDATE_USER_AGENT = "FaceSwap Studio Updater/1.0"
+CORE_MODEL_USER_AGENT = "Yirong-Studio-Model-Bootstrap/1.0"
+UPDATE_USER_AGENT = "Yirong-Studio-Updater/1.0"
 UPDATE_REPOSITORY = "luojiang419/faceswap-studio"
 UPDATE_MANIFEST_ASSET = "update-manifest.json"
 UPDATE_CACHE_DIRNAME = "FaceSwap Studio"
@@ -192,7 +192,7 @@ class FaceFusionRuntime:
         self._prepare_paths()
         self._model_bootstrap_state: dict[str, Any] = self._default_model_bootstrap_state()
         self._update_state: dict[str, Any] = self._default_update_state()
-        self._append_log("[bridge] FaceSwap Studio Bridge initialized.")
+        self._append_log("[bridge] 易容 Studio Bridge initialized.")
 
     @property
     def webui_bind_host(self) -> str:
@@ -6081,7 +6081,7 @@ async def bridge_lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(
-    title="FaceSwap Studio Bridge",
+    title="易容 Studio Bridge",
     version="0.4.0",
     lifespan=bridge_lifespan,
 )
@@ -6129,7 +6129,7 @@ def _studio_asset_response(asset_path: str):
     index_path = web_root / "index.html"
     if not index_path.exists():
         return HTMLResponse(
-            "FaceSwap Studio Web workbench has not been built yet.",
+            "易容 Studio Web workbench has not been built yet.",
             status_code=404,
         )
     if asset_path:

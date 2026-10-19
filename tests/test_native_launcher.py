@@ -13,7 +13,7 @@ pytestmark = pytest.mark.skipif(os.name != 'nt', reason='Windows launcher')
 
 @pytest.mark.parametrize('code', [0, 7, -1])
 def test_native_wrapper_drains_output_and_returns_failure(tmp_path, code):
-    exe = tmp_path / '启动FaceSwap Studio.exe'
+    exe = tmp_path / '易容 Studio.exe'
     shutil.copy2(ROOT / exe.name, exe)
     runtime = tmp_path / '.venv-win/Scripts'
     runtime.mkdir(parents=True)

@@ -437,7 +437,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     enabled: !_loading,
                     decoration: const InputDecoration(
                       border: OutlineInputBorder(),
-                      hintText: '选择 FaceSwap Studio 默认输出目录',
+                      hintText: '选择 易容 Studio 默认输出目录',
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -483,7 +483,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   Text(
                     _closeBehavior == _closeBehaviorMinimizeToTray
                         ? '点击窗口关闭按钮时会隐藏到系统托盘，可从托盘恢复或退出。'
-                        : '点击窗口关闭按钮时会直接退出 FaceSwap Studio。',
+                        : '点击窗口关闭按钮时会直接退出 易容 Studio。',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),

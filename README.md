@@ -1,6 +1,6 @@
-# FaceSwap Studio
+# 易容 Studio
 
-FaceSwap Studio 是基于 FaceFusion 推理引擎、Flutter 桌面前端和 Python Bridge 适配层构建的一体化桌面换脸工作台。它把原本分散的运行、参数调整、队列执行、作品管理和设置入口收拢到一个 Windows 桌面应用里，尽量降低实际使用门槛。
+易容 Studio 是基于 FaceFusion 推理引擎、Flutter 桌面前端和 Python Bridge 适配层构建的一体化桌面换脸工作台。它把原本分散的运行、参数调整、队列执行、作品管理和设置入口收拢到一个 Windows 桌面应用里，尽量降低实际使用门槛。
 
 ## 核心特点
 
@@ -18,7 +18,8 @@ FaceSwap Studio 是基于 FaceFusion 推理引擎、Flutter 桌面前端和 Pyth
 
 工作台采用浅灰浮雕浅色与暖黑深色主题，浅色模式使用柔和灰白卡片、灰蓝选中态，以及带轻微投影的标题和浅色按钮。新版支持魔搭 Ed25519 签名更新、独立更新窗口、事务备份与失败回滚，并提供约 1.4 MiB 的原生轻量安装器。首次安装联网下载 Python、常用模型和 FFmpeg，安装后更新只替换应用文件，保留配置与作品。
 
-- 本地安装器：`dist/modelscope/installer-final/FaceSwap安装器.exe`。
+- 本地安装器：`dist/modelscope/installer-yirong-20261019070325/易容 Studio 安装器.exe`。
+- [统一品牌与后续发行规范](docs/品牌与发行规范.md)。
 - [安装、更新与发布说明](docs/魔搭更新与轻量安装器.md)。
 - [魔搭分发仓库](https://modelscope.cn/models/jiangjiang419/facefusion-workbench-updates)。
 
@@ -28,10 +29,10 @@ FaceSwap Studio 是基于 FaceFusion 推理引擎、Flutter 桌面前端和 Pyth
 
 适合最终用户安装成普通桌面软件。
 
-1. 运行 `dist/installer/FaceSwapStudioSetup.exe`。
-2. 安装器会优先选择 `D:\Program Files\FaceSwap Studio`。
-3. 如果 D 盘空间不足，会自动选择其他可用磁盘下的 `Program Files\FaceSwap Studio`。
-4. 安装完成后，桌面会出现 `FaceSwap Studio` 快捷方式。
+1. 运行 `易容 Studio 安装器.exe`。
+2. 安装器会优先选择 `D:\Program Files\易容 Studio`。
+3. 如果 D 盘空间不足，会自动选择其他可用磁盘下的 `Program Files\易容 Studio`。
+4. 安装完成后，桌面会出现 `易容 Studio` 快捷方式。
 5. 完整安装包内置常用核心模型、Python 虚拟环境、FFmpeg 和 FFprobe，安装后可直接启动 FaceFusion。
 6. 只有选择安装包未包含的可选模型时，才需要联网下载对应文件。
 7. 启动后会检查魔搭签名更新；发现更新后可下载并安装，失败自动回滚。
@@ -73,7 +74,7 @@ FaceSwap Studio 是基于 FaceFusion 推理引擎、Flutter 桌面前端和 Pyth
 
 1. 克隆或下载当前仓库。
 2. 进入仓库根目录。
-3. 双击运行 `启动FaceSwap Studio.exe`。
+3. 双击运行 `易容 Studio.exe`。
 4. 启动器会拉起 Flutter 桌面应用和本地 Bridge。
 5. 首次运行后，首页可以看到运行状态、工作台和日志。
 
@@ -112,7 +113,7 @@ python .\launch_faceswap_studio.py
 或者直接运行：
 
 ```powershell
-./启动FaceSwap Studio.exe
+& ".\易容 Studio.exe"
 ```
 
 ### 方式四：开发者本地调试
@@ -149,7 +150,7 @@ Bridge 服务源码位于：
 
 ## 常用入口
 
-- `启动FaceSwap Studio.exe`
+- `易容 Studio.exe`
   适合最终用户，直接启动桌面软件。
 - `launch_faceswap_studio.py`
   启动桌面工作台链路。

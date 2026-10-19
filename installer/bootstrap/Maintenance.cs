@@ -339,6 +339,7 @@ namespace FaceSwapBootstrap {
                     var after=Inspect(root,manifest,token,progress,probe);
                     if(!after.Healthy) throw new IOException("修复后仍有问题："+String.Join("；",after.issues.Take(5)));
                     var state=Installer.ReadState(root); state.version=manifest.appVersion; state.releaseId=manifest.appReleaseId??manifest.releaseId; Installer.SaveState(state);
+                    Installer.RefreshBrand(root);
                     var result=new MaintenanceResult{status="repaired",message="修复完成，开始创作吧。",root=root,session=work,repaired=true,issues=before.issues.ToArray()};
                     Write(Path.Combine(work,"result.json"),result); return result;
                 } catch(Exception error) {

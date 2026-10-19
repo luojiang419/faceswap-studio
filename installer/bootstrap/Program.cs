@@ -15,6 +15,8 @@ using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8")]
+[assembly: AssemblyTitle("易容 Studio 安装器")]
+[assembly: AssemblyProduct("易容 Studio")]
 
 namespace FaceSwapBootstrap {
     public sealed class Asset { public string name; public long size; public string sha256; public string[] urls; }
@@ -75,7 +77,7 @@ namespace FaceSwapBootstrap {
                     long offset = File.Exists(part) ? new FileInfo(part).Length : 0;
                     if (offset >= asset.size) { File.Delete(part); offset = 0; }
                     var request = (HttpWebRequest)WebRequest.Create(url);
-                    request.Timeout = 30000; request.ReadWriteTimeout = 60000; request.UserAgent = "FaceSwap-Studio-Bootstrap";
+                    request.Timeout = 30000; request.ReadWriteTimeout = 60000; request.UserAgent = "Yirong-Studio-Bootstrap";
                     if (offset > 0) request.AddRange(offset);
                     using (token.Register(() => request.Abort()))
                     using (var response = (HttpWebResponse)request.GetResponse()) {
@@ -449,10 +451,10 @@ namespace FaceSwapBootstrap {
             diskPanel=new DiskStrip(dark) { Name="local-disks", TabIndex=0 };
             rootDetector = detectRoot ?? (() => Maintenance.FindInstallation() ?? Installer.DefaultRoot(!preview));
             driveSurvey = survey ?? Installer.SurveyDrives;
-            Text = "FaceSwap Studio" + (preview ? " · 安装演示" : " 安装程序"); ClientSize = new Size(720, 830);
+            Text = "易容 Studio" + (preview ? " · 安装演示" : " 安装程序"); ClientSize = new Size(720, 830);
             AutoScaleMode = AutoScaleMode.None; Font = new Font("Microsoft YaHei UI", 10); BackColor = Paper;
             StartPosition = FormStartPosition.CenterScreen; FormBorderStyle = FormBorderStyle.None; DoubleBuffered = true;
-            AccessibleName = "FaceSwap Studio 启动器"; MaximizeBox = false;
+            AccessibleName = "易容 Studio 启动器"; MaximizeBox = false;
             run.Text = "安装并运行  →"; run.AccessibleName = "安装并准备工作台"; run.TabIndex = 3;
             pause.Text = "暂停"; pause.AccessibleName = "暂停准备"; pause.Visible = false; pause.TabIndex = 1;
             close.Text = "×"; close.Name="close"; close.Glyph=ButtonGlyph.Close; close.AccessibleName = "关闭启动器"; close.TabIndex = 3;
@@ -479,9 +481,9 @@ namespace FaceSwapBootstrap {
             Controls.AddRange(new Control[] { installPath, desktopShortcut, startMenuShortcut });
             diskPanel.BackColor = Paper; Controls.Add(diskPanel);
             browse.Click += (sender, args) => {
-                using (var picker = new FolderBrowserDialog { Description = "选择安装位置，将在其中创建专用 FaceSwapStudio 文件夹", ShowNewFolderButton = true }) {
+                using (var picker = new FolderBrowserDialog { Description = "选择安装位置，将在其中创建专用 易容 Studio 文件夹", ShowNewFolderButton = true }) {
                     if (Directory.Exists(installPath.Text)) picker.SelectedPath = installPath.Text;
-                    if (picker.ShowDialog(this) == DialogResult.OK) installPath.Text = Path.GetFileName(picker.SelectedPath).Equals("FaceSwapStudio", StringComparison.OrdinalIgnoreCase) ? picker.SelectedPath : Path.Combine(picker.SelectedPath, "FaceSwapStudio");
+                    if (picker.ShowDialog(this) == DialogResult.OK) installPath.Text = Path.GetFileName(picker.SelectedPath).Equals("易容 Studio", StringComparison.OrdinalIgnoreCase) ? picker.SelectedPath : Path.Combine(picker.SelectedPath, "易容 Studio");
                 }
             };
             try {
@@ -555,7 +557,7 @@ namespace FaceSwapBootstrap {
                 string detail = current ? "继续安装 · " + space : problem == null ? space : !drive.ready ? "暂不可用" : drive.root.StartsWith("C:", StringComparison.OrdinalIgnoreCase) && drives.Length > 1 ? "系统盘 · 优先其他分区" : "空间不足 · " + space;
                 string resumableRoot = current ? installPath.Text : null;
                 var card = new DiskCard(drive, diskIcon, dark, detail) { Size = new Size(width,132), Margin = new Padding(0,0,drive == drives.Last() ? 0 : 12,0), Enabled = current || problem == null };
-                string folderHint = drive.root.StartsWith("C:",StringComparison.OrdinalIgnoreCase) ? "点击选择，应用将安装到无需提权的用户目录" : "点击选择，应用将安装到 Program Files\\FaceSwapStudio";
+                string folderHint = drive.root.StartsWith("C:",StringComparison.OrdinalIgnoreCase) ? "点击选择，应用将安装到无需提权的用户目录" : "点击选择，应用将安装到 Program Files\\易容 Studio";
                 driveTips.SetToolTip(card, drive.root + "\n" + space + "\n" + (current ? "继续当前安装" : problem ?? folderHint));
                 card.Click += (sender, args) => {
                     try {
@@ -612,7 +614,7 @@ namespace FaceSwapBootstrap {
             using (var shape = Round(new RectangleF(0.5f, .5f, 719, 829), 22)) using (var border = new Pen(dark ? Color.FromArgb(58, 61, 55) : Color.FromArgb(224, 225, 216))) g.DrawPath(border, shape);
             if (brandMark != null) g.DrawImage(brandMark, new Rectangle(36, 28, 50, 50));
             else TextAt(g, "F", 28, Accent, 48, 36, 32, true);
-            TextAt(g, "FACESWAP_STUDIO", 14, Ink, 92, 35, 160, true); TextAt(g, "STUDIO", 10, Muted, 93, 57, 140);
+            TextAt(g, "易容 Studio", 16, Ink, 92, 35, 200, true); TextAt(g, "AI 人脸融合工作台", 9, Muted, 93, 60, 200);
             TextAt(g, "本地 AI 换脸工作台", 11, Muted, 438, 43, 140);
             TextAt(g, maintenanceMode ? "让创作，保持顺畅。" : "新形象，从这里开始。", 31, Ink, 40, 133, 420);
             TextAt(g, maintenanceMode ? "先检查，按需修复；保留模型、配置与作品。" : "选择安装位置，剩下的交给我们。", 14, Muted, 43, 183, 400);
@@ -686,7 +688,7 @@ namespace FaceSwapBootstrap {
         }
         void StartDemo() { if (view == "ready") fraction = 0; demoStart = fraction; installPhase = fraction > .55 ? 1 : 0; SetPreview("downloading", fraction); }
         static void OpenWorkspace(string root) {
-            var start = new ProcessStartInfo(Path.Combine(root, "启动FaceSwap Studio.exe"), "--faceswap-run --faceswap-show") { WorkingDirectory = root, UseShellExecute = false };
+            var start = new ProcessStartInfo(Path.Combine(root, "易容 Studio.exe"), "--faceswap-run --faceswap-show") { WorkingDirectory = root, UseShellExecute = false };
             start.EnvironmentVariables.Remove("ELECTRON_RUN_AS_NODE"); start.EnvironmentVariables["FACESWAP_STUDIO_DATA_ROOT"] = Path.Combine(root, "data"); Process.Start(start);
         }
         async Task CheckInstallation(bool repair) {
@@ -793,14 +795,14 @@ namespace FaceSwapBootstrap {
                 string identity;
                 using (var hash = SHA256.Create()) identity = BitConverter.ToString(hash.ComputeHash(System.Text.Encoding.UTF8.GetBytes(AppDomain.CurrentDomain.BaseDirectory.ToUpperInvariant()))).Replace("-", "");
                 using (var mutex = new Mutex(false, "Local\\FaceSwap-Bootstrap-" + identity)) {
-                    if (!mutex.WaitOne(0)) { MessageBox.Show("启动器已在运行，请查看已有窗口。", "FaceSwap Studio"); return; }
+                    if (!mutex.WaitOne(0)) { MessageBox.Show("启动器已在运行，请查看已有窗口。", "易容 Studio"); return; }
                     bool demo = args.Contains("--demo");
 #if DEMO
                     demo = true;
 #endif
                     try { Application.Run(new Launcher(manifest, demo)); } finally { mutex.ReleaseMutex(); }
                 }
-            } catch (Exception error) { MessageBox.Show(error.Message, "FaceSwap Studio 启动未完成", MessageBoxButtons.OK, MessageBoxIcon.Error); Environment.ExitCode = 1; }
+            } catch (Exception error) { MessageBox.Show(error.Message, "易容 Studio 启动未完成", MessageBoxButtons.OK, MessageBoxIcon.Error); Environment.ExitCode = 1; }
         }
     }
 }

@@ -959,7 +959,7 @@ class FaceSwapStudioWebApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'FaceSwap Studio Web 工作台',
+      title: '易容 Studio Web 工作台',
       debugShowCheckedModeBanner: false,
       theme: StudioTheme.light(),
       darkTheme: StudioTheme.dark(),
@@ -2640,7 +2640,7 @@ class _Header extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'FaceSwap Studio Web',
+                '易容 Studio Web',
                 style: theme.textTheme.headlineMedium,
               ),
               const SizedBox(height: 4),

@@ -32,7 +32,7 @@ def validate_package(package):
                 target = stage / safe_path(entry.filename)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(archive.read(entry))
-        required = ('VERSION', 'update-config.json', 'launch_faceswap_studio.py', '启动FaceSwap Studio.exe',
+        required = ('VERSION', 'update-config.json', 'launch_faceswap_studio.py', '易容 Studio.exe',
                     'FaceSwapStudioUpdater.exe', 'updater/preflight.py',
                     'faceswap studio/runtime/windows_app/current/faceswap_studio.exe',
                     'faceswap studio/runtime/windows_app/current/flutter_windows.dll',
@@ -70,7 +70,7 @@ def keys():
 
 
 def sources():
-    for name in ("VERSION", "update-config.json", "facefusion.py", "facefusion.ico", "launch_faceswap_studio.py", "启动FaceSwap Studio.exe", "FaceSwapStudioUpdater.exe", "scripts/repair_runtime.ps1", "scripts/bootstrap_prepare.py"):
+    for name in ("VERSION", "update-config.json", "facefusion.py", "facefusion.ico", "launch_faceswap_studio.py", "易容 Studio.exe", "FaceSwapStudioUpdater.exe", "scripts/repair_runtime.ps1", "scripts/bootstrap_prepare.py"):
         yield ROOT / name, name
     for directory in ("facefusion", "faceswap studio/bridge", "faceswap studio/runtime/windows_app/current", "faceswap studio/flutter_app/build/web", "updater"):
         for file in sorted((ROOT / directory).rglob("*")):
@@ -92,7 +92,7 @@ def build(notes, min_version):
     if (output / "manifest.json").exists():
         raise ValueError(f"版本已构建，禁止覆盖不可变产物：{output}；请使用已有目录发布或修改正式版本")
     output.mkdir(parents=True, exist_ok=True)
-    package = output / f"FaceSwap-Studio-{version}.zip"
+    package = output / f"易容-Studio-{version}.zip"
     records = []
     with zipfile.ZipFile(package, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
         for file, relative in sources():
@@ -149,7 +149,7 @@ def publish(output):
             raise ValueError("远端已有同名不同内容版本，禁止覆盖")
     else:
         api.upload_file(path_or_fileobj=str(package), path_in_repo=remote_path, repo_id=repo,
-                        commit_message=f"release: FaceSwap Studio {manifest['version']}")
+                        commit_message=f"release: 易容 Studio {manifest['version']}")
     remote = read_remote(file_url(repo, remote_path))
     if len(remote) != manifest["package"]["size"] or hashlib.sha256(remote).hexdigest() != manifest["package"]["sha256"]:
         raise ValueError("魔搭匿名包回读校验失败，未激活更新")
@@ -169,11 +169,11 @@ def publish(output):
     (activation / "public/latest.json").write_bytes((output / "envelope.json").read_bytes())
     (activation / "configuration.json").write_text('{"framework":"pytorch","task":"face-generation","pipeline":{"type":"face-generation"}}', "utf-8")
     (activation / "README.md").write_text(
-        "---\nlicense: other\ntasks:\n- face-generation\n---\n# FaceSwap Studio 桌面更新\n\n"
-        "此仓库存放 FaceSwap Studio 桌面更新、运行包及内置可选模型镜像，不包含用户数据。\n\n"
+        "---\nlicense: other\ntasks:\n- face-generation\n---\n# 易容 Studio 桌面更新\n\n"
+        "此仓库存放 易容 Studio 桌面更新、运行包及内置可选模型镜像，不包含用户数据。\n\n"
         "客户端通过 public/latest.json 验证 Ed25519 签名，下载后校验 SHA-256。优先使用已验证的魔搭模型；尚无镜像的权重标记外网下载，自动使用系统代理。模型各自沿用上游许可，来源与许可见 models/facefusion-3.9.0-v1/catalog.json，不能将全部模型视为 Apache 授权。\n"
         "已有旧版首次接入请参阅源码仓库 docs/自动更新说明.md。\n", "utf-8")
-    api.upload_folder(repo_id=repo, folder_path=str(activation), commit_message=f"activate: FaceSwap Studio {manifest['version']}")
+    api.upload_folder(repo_id=repo, folder_path=str(activation), commit_message=f"activate: 易容 Studio {manifest['version']}")
     if json.loads(read_remote(latest_url)) != envelope:
         raise ValueError("魔搭最新入口匿名回读不一致")
     report = {"repository": repo, "version": manifest["version"], "releaseId": manifest.get("releaseId"), "sha256": manifest["package"]["sha256"],

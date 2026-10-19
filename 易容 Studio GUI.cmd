@@ -1,8 +1,9 @@
 @echo off
+chcp 65001 >nul
 setlocal
 set "APP_DIR=%~dp0faceswap studio\runtime\windows_app\current"
 if not exist "%APP_DIR%\faceswap_studio.exe" (
-  echo FaceSwap Studio GUI not found:
+  echo 易容 Studio GUI not found:
   echo %APP_DIR%\faceswap_studio.exe
   exit /b 1
 )

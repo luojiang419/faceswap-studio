@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$Version,
     [string]$Repository = "luojiang419/faceswap-studio",
     [switch]$Prerelease
@@ -53,7 +53,7 @@ foreach ($asset in $assets) {
 }
 
 $tag = "v$Version"
-$releaseArgs = @("release", "create", $tag, "--repo", $Repository, "--title", "FaceSwap Studio $Version", "--notes", "FaceSwap Studio $Version")
+$releaseArgs = @("release", "create", $tag, "--repo", $Repository, "--title", "易容 Studio $Version", "--notes", "易容 Studio $Version")
 if ($Prerelease) {
     $releaseArgs += "--prerelease"
 }

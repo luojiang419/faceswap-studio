@@ -16,7 +16,7 @@ public static class MaintenanceSmoke {
             var manifest=json.Deserialize<Manifest>(File.ReadAllText(args[0]));
             string root=Path.GetFullPath(args[3]);Directory.CreateDirectory(root);
             using(var lease=Installer.AcquireRoot(root)) {
-                var state=Installer.Begin(root,manifest,false,lockHeld:true);
+                var state=Installer.Begin(root,manifest,false,registryKey:Installer.UninstallKey+".Test."+Guid.NewGuid().ToString("N"),lockHeld:true);
                 string cache=Path.Combine(root,"data/cache/bootstrap"),package=Path.Combine(cache,manifest.package.name);
                 Directory.CreateDirectory(cache);
                 if(!CreateHardLink(package,Path.GetFullPath(args[1]),IntPtr.Zero)) File.Copy(args[1],package);

@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param()
 
 $ErrorActionPreference = 'Stop'
@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $launcherSource = Join-Path $PSScriptRoot 'FaceSwapStudioLauncher.cs'
 $iconPath = Join-Path $repoRoot 'facefusion.ico'
-$outputExe = Join-Path $repoRoot '启动FaceSwap Studio.exe'
+$outputExe = Join-Path $repoRoot '易容 Studio.exe'
 $cscExe = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 
 if (-not (Test-Path -LiteralPath $cscExe)) {

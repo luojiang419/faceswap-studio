@@ -1,10 +1,14 @@
 using System;
+
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Web.Script.Serialization;
 using System.Collections.Generic;
 using System.Windows.Forms;
+
+[assembly: System.Reflection.AssemblyTitle("易容 Studio 软件更新")]
+[assembly: System.Reflection.AssemblyProduct("易容 Studio")]
 
 internal sealed class UpdateWindow : Form {
     readonly Label title = new Label(), detail = new Label();
@@ -15,7 +19,7 @@ internal sealed class UpdateWindow : Form {
     string session, python;
     public UpdateWindow(string directory, string interpreter) {
         session = directory; python = interpreter;
-        Text = "FaceSwap Studio · 软件更新"; ClientSize = new Size(580, 255);
+        Text = "易容 Studio · 软件更新"; ClientSize = new Size(580, 255);
         StartPosition = FormStartPosition.CenterScreen; FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false; BackColor = Color.FromArgb(250,250,250);
         Font = new Font("Microsoft YaHei UI", 10); Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);

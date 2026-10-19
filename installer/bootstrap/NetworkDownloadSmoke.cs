@@ -13,7 +13,7 @@ public static class NetworkDownloadSmoke {
             var json=new JavaScriptSerializer();
             var publication=json.Deserialize<Dictionary<string,object>>(File.ReadAllText(args[0]));
             var record=(Dictionary<string,object>)publication["installer"];
-            var asset=new Asset { name="FaceSwap安装器.exe", size=Convert.ToInt64(record["size"]), sha256=Convert.ToString(record["sha256"]), urls=new[]{Convert.ToString(record["url"])} };
+            var asset=new Asset { name="易容 Studio 安装器.exe", size=Convert.ToInt64(record["size"]), sha256=Convert.ToString(record["sha256"]), urls=new[]{Convert.ToString(record["url"])} };
             Directory.CreateDirectory(args[1]);
             File.WriteAllBytes(Path.Combine(args[1],asset.name)+".part",File.ReadAllBytes(args[2]).Take(65536).ToArray());
             Core.Download(asset,args[1],CancellationToken.None,new Quiet());

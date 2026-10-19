@@ -11,7 +11,7 @@ class AboutPage extends StatefulWidget {
 
 class _AboutPageState extends State<AboutPage> {
   static const String _intro =
-      'FaceSwap Studio 采用 Flutter 作为正式跨平台前端，'
+      '易容 Studio 采用 Flutter 作为正式跨平台前端，'
       'FaceFusion 作为推理引擎，Python Bridge 作为中间适配层。';
   static const String _disclaimer =
       '本软件仅限合法、合规与经授权场景使用，不得用于侵犯他人肖像权、隐私权、'

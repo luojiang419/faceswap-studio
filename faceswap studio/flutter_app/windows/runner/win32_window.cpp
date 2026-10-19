@@ -30,8 +30,8 @@ constexpr UINT kTrayIconMessage = WM_APP + 1;
 constexpr UINT kTrayIconId = 1;
 constexpr UINT kTrayMenuShowWindow = 1001;
 constexpr UINT kTrayMenuExitApplication = 1002;
-constexpr wchar_t kTrayIconTooltip[] = L"FaceSwap Studio";
-constexpr wchar_t kWindowTitle[] = L"faceswap_studio";
+constexpr wchar_t kTrayIconTooltip[] = L"\u6613\u5BB9 Studio";
+constexpr wchar_t kWindowTitle[] = L"\u6613\u5BB9 Studio";
 constexpr wchar_t kActivateWindowMessageName[] =
     L"FaceSwapStudio.ActivateWindow";
 

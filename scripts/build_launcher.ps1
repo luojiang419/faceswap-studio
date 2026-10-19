@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$Clean
 )
 
@@ -9,7 +9,7 @@ $distDir = Join-Path $repoRoot "dist"
 $buildDir = Join-Path $repoRoot "build\launcher"
 $sourcePath = Join-Path $repoRoot "launcher\FaceSwapStudioLauncher.cs"
 $iconPath = Join-Path $repoRoot "facefusion.ico"
-$launcherFileName = ([string][char]0x542F) + ([string][char]0x52A8) + "FaceSwap Studio.exe"
+$launcherFileName = "易容 Studio.exe"
 $builtLauncher = Join-Path $distDir $launcherFileName
 $rootLauncher = Join-Path $repoRoot $launcherFileName
 

@@ -204,20 +204,20 @@ def build(directory, existing=None, refresh_from=None, windows_root=None):
     version = (ROOT / 'VERSION').read_text('utf-8-sig').strip()
     release = config['releaseId']
     directory.mkdir(parents=True, exist_ok=True)
-    package = existing or directory / f'FaceSwap-Studio-{version}-{release}-Runtime.zip'
+    package = existing or directory / f'易容-Studio-{version}-{release}-Runtime.zip'
     if refresh_from:
         refresh_payload(package, refresh_from, windows_root)
     records = read_json(package.with_suffix('.files.json')) if package.exists() else payload(package, windows_root)
     prefix = f'bootstrap/{version}/{release}'
     manifest = {'protocol': 1, 'componentProtocol': 0, 'releaseId': release, 'appVersion': version, 'appReleaseId': release, 'publicKey': config['publicKey'],
-                'entry': '启动FaceSwap Studio.exe', 'files': records,
+                'entry': '易容 Studio.exe', 'files': records,
                 'package': {'name': package.name, 'size': package.stat().st_size, 'sha256': sha256(package),
                             'urls': [file_url(config['repository'], prefix + '/' + package.name)]}}
     write_json(directory / 'bootstrap-manifest.json', manifest)
-    executable = compile_installer(manifest, directory / 'FaceSwap安装器.exe')
-    (directory / '使用说明.txt').write_text('双击 FaceSwap安装器.exe，首次选择专用安装目录后安装并运行。\n再次运行会识别已有安装并自动进行只读检查；正常时提示一切正常，可直接开始创作。\n发现问题后点击“开始修复”，正常关闭本目录工作台后按需恢复，保留作品、人物数据、配置与清单外模型。\n修复入口独立于目标 Python；修复失败会回滚本次修改，不把检查失败报告为正常。较新版本禁止被旧修复包覆盖。\n修复前请完成或取消生成任务；无法正常退出时请从托盘退出后重试，不会强杀正在生成的任务。\n检查与修复日志位于 %LOCALAPPDATA%/FaceSwapStudioMaintenance/sessions。\n安装器从魔搭下载固定 SHA-256 的完整运行包（包含 Python、常用模型和 FFmpeg），无需预装 Python。\n首次安装需要联网、至少 12 GiB 可用空间；中断后重新运行可续传。\n完成后从桌面快捷方式运行换脸工作台。软件自动检查魔搭签名更新，更新保留模型、配置与作品。\nWindows 应用列表可卸载，默认保留个人数据。\n', 'utf-8')
+    executable = compile_installer(manifest, directory / '易容 Studio 安装器.exe')
+    (directory / '使用说明.txt').write_text('双击 易容 Studio 安装器.exe，首次选择专用安装目录后安装并运行。\n再次运行会识别已有安装并自动进行只读检查；正常时提示一切正常，可直接开始创作。\n发现问题后点击“开始修复”，正常关闭本目录工作台后按需恢复，保留作品、人物数据、配置与清单外模型。\n修复入口独立于目标 Python；修复失败会回滚本次修改，不把检查失败报告为正常。较新版本禁止被旧修复包覆盖。\n修复前请完成或取消生成任务；无法正常退出时请从托盘退出后重试，不会强杀正在生成的任务。\n检查与修复日志位于 %LOCALAPPDATA%/FaceSwapStudioMaintenance/sessions。\n安装器从魔搭下载固定 SHA-256 的完整运行包（包含 Python、常用模型和 FFmpeg），无需预装 Python。\n首次安装需要联网、至少 12 GiB 可用空间；中断后重新运行可续传。\n完成后从桌面快捷方式运行换脸工作台。软件自动检查魔搭签名更新，更新保留模型、配置与作品。\nWindows 应用列表可卸载，默认保留个人数据。\n', 'utf-8')
     (directory / 'SHA256SUMS.txt').write_text(f'{sha256(executable)}  {executable.name}\n', 'utf-8')
-    distribution = directory / 'FaceSwap-Studio-轻量安装器.zip'
+    distribution = directory / '易容-Studio-轻量安装器.zip'
     with zipfile.ZipFile(distribution, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         for file in (executable, directory / '使用说明.txt', directory / 'SHA256SUMS.txt'):
             archive.write(file, file.name)

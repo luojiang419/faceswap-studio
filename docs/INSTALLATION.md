@@ -1,4 +1,4 @@
-# FaceSwap Studio 详细安装文档
+# 易容 Studio 详细安装文档
 
 本文档面向希望在当前仓库基础上完成安装、部署、调试和二次开发的用户。
 
@@ -14,7 +14,7 @@
   Flutter 桌面前端
 - `launch_faceswap_studio.py`
   桌面工作台启动入口
-- `启动FaceSwap Studio.exe`
+- `易容 Studio.exe`
   适合最终用户的桌面启动器
 - `FaceSwapStudioUpdater.exe`
   独立提权更新程序，由启动后的 Bridge 调用
@@ -27,14 +27,14 @@
 
 ### 2.1 最终用户方式：使用 Windows 安装包
 
-适合把 FaceSwap Studio 安装成桌面软件。
+适合把 易容 Studio 安装成桌面软件。
 
 步骤：
 
-1. 运行 `dist/installer/FaceSwapStudioSetup.exe`。
-2. 安装器默认选择 `D:\Program Files\FaceSwap Studio`。
-3. 如果 D 盘空间不足，安装器会选择其他可用磁盘下的 `Program Files\FaceSwap Studio`。
-4. 安装完成后，桌面会生成 `FaceSwap Studio` 快捷方式。
+1. 运行 `易容 Studio 安装器.exe`。
+2. 安装器默认选择 `D:\Program Files\易容 Studio`。
+3. 如果 D 盘空间不足，安装器会选择其他可用磁盘下的 `Program Files\易容 Studio`。
+4. 安装完成后，桌面会生成 `易容 Studio` 快捷方式。
 5. 首次启动时，按弹窗下载核心模型小包。
 6. 模型下载完成后，FaceFusion 会自动启动。
 7. 启动后如果 GitHub Release 有新版本，会弹窗确认增量更新。
@@ -78,7 +78,7 @@
 - `build_update_package.ps1` 会生成 `update-manifest.json`、`files-<version>.json` 和 `FaceSwapStudio-<old>-to-<new>.delta.zip`。
 - 使用 `-SkipDelta` 时，manifest 不会声明增量包，客户端会提示下载全量安装器。
 - 客户端启动后通过 Bridge 检查公开 GitHub Release，不内置 GitHub token。
-- 用户确认后，Bridge 下载 delta 到 `%LOCALAPPDATA%\FaceSwap Studio\updates` 并校验 SHA256。
+- 用户确认后，Bridge 下载 delta 到 `%LOCALAPPDATA%\易容 Studio\updates` 并校验 SHA256。
 - 安装时会复制 `FaceSwapStudioUpdater.exe` 到本地更新缓存，然后以管理员权限运行。
 - Updater 会停止安装目录下的 Flutter、Bridge、FaceFusion 进程，备份被替换或删除的文件，覆盖 delta，运行 `scripts/repair_runtime.ps1`，最后重启启动器。
 - 如果 delta 不适用于当前版本、校验失败或 GitHub 不可访问，正常启动不受影响；delta 不可用时会提示全量安装器地址。
@@ -91,7 +91,7 @@
 
 1. 下载或克隆仓库到本地。
 2. 进入仓库根目录。
-3. 双击 `启动FaceSwap Studio.exe`。
+3. 双击 `易容 Studio.exe`。
 4. 等待桌面界面出现。
 
 你会得到：
@@ -191,7 +191,7 @@ python .\launch_faceswap_studio.py
 ### 直接启动桌面应用
 
 ```powershell
-./启动FaceSwap Studio.exe
+./易容 Studio.exe
 ```
 
 ## 6. 首次启动建议顺序
@@ -209,7 +209,7 @@ python .\launch_faceswap_studio.py
 1. 安装依赖
 2. 预下载模型
 3. 启动 FaceFusion
-4. 启动 FaceSwap Studio
+4. 启动 易容 Studio
 5. 打开首页检查 Bridge 与 FaceFusion 状态
 6. 进入工作台选择源文件和目标文件
 
@@ -300,7 +300,7 @@ python .\launch_faceswap_studio.py
 1. 检查是否能访问当前 GitHub Release 页面。
 2. 确认 Release 里同时上传了 `update-manifest.json`、`files-<version>.json`、delta zip 和全量安装器。
 3. 确认本机版本与 delta 包的 `from_version` 一致。
-4. 检查 `%LOCALAPPDATA%\FaceSwap Studio\updates\updater.log`。
+4. 检查 `%LOCALAPPDATA%\易容 Studio\updates\updater.log`。
 5. 如果 delta 不可用或校验失败，下载全量安装器覆盖安装。
 
 ## 9. 开发者说明

@@ -40,7 +40,7 @@ namespace FaceSwapBootstrap {
             string file = Path.Combine(root, "data", "component-selection.json");
             if (File.Exists(file)) previous = new JavaScriptSerializer { MaxJsonLength = 32 * 1024 * 1024 }.Deserialize<ComponentSelection>(File.ReadAllText(file));
             previous = previous ?? new ComponentSelection { selected = value.components.Where(c => (c.id == "lipsync" || c.id == "ace-xl-turbo") && memory >= c.minMemoryMB).Select(c => c.id).ToArray() };
-            Text="FaceSwap Studio · 选择功能"; ClientSize=new Size(720,830); Font=new Font("Microsoft YaHei UI",10);
+            Text="易容 Studio · 选择功能"; ClientSize=new Size(720,830); Font=new Font("Microsoft YaHei UI",10);
             AutoScaleMode=AutoScaleMode.None; BackColor=Paper; DoubleBuffered=true;
             StartPosition=FormStartPosition.CenterParent; FormBorderStyle=FormBorderStyle.None; MaximizeBox=false; MinimizeBox=false;
             AccessibleName="选择安装功能与音乐模型";

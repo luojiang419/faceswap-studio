@@ -58,6 +58,10 @@ public static class InstallationSmoke {
                 Check(owned.state=="complete" && owned.shortcuts.Length==3,"安装登记或快捷方式验收失败");
                 bool visible=Process.GetProcessesByName("faceswap_studio").Any(p=>{try{return Installer.SamePath(p.MainModule.FileName,Path.Combine(root,"faceswap studio/runtime/windows_app/current/faceswap_studio.exe".Replace('/',Path.DirectorySeparatorChar)))&&p.MainWindowHandle!=IntPtr.Zero;}catch{return false;}finally{p.Dispose();}});
                 Check(visible,"真实桌面窗口未打开");
+                bool brandedWindow=Process.GetProcessesByName("faceswap_studio").Any(p=>{try{return Installer.SamePath(p.MainModule.FileName,Path.Combine(root,"faceswap studio/runtime/windows_app/current/faceswap_studio.exe".Replace('/',Path.DirectorySeparatorChar)))&&p.MainWindowTitle=="易容 Studio";}catch{return false;}finally{p.Dispose();}});
+                Check(brandedWindow,"真实窗口标题未改为易容 Studio");
+                Check(owned.shortcuts.All(p=>!Path.GetFileName(p).Contains("FaceSwap")),"快捷方式仍包含旧品牌");
+                using(var entry=Registry.CurrentUser.OpenSubKey(registry)) Check(Convert.ToString(entry.GetValue("DisplayName"))=="易容 Studio","卸载登记仍包含旧品牌");
                 bool coreReady=false;
                 using(var web=new System.Net.WebClient()) {
                     web.Proxy=null;
@@ -72,7 +76,7 @@ public static class InstallationSmoke {
                 }
                 File.WriteAllText(Path.Combine(output,"installation-result.json"),json.Serialize(new {
                     root, sourceArchiveReused=true, fullArchiveSha256=Core.Hash(args[1]),
-                    realPythonAndModels=true, rendererAcknowledged=true, visibleWindow=true, coreReady, bridgePort, corePort,
+                    realPythonAndModels=true, rendererAcknowledged=true, visibleWindow=true, brandedWindow, coreReady, bridgePort, corePort,
                     shortcutsAndIsolatedRegistry=true, ready=json.DeserializeObject(File.ReadAllText(report)),
                     testRegistry=registry, installId=owned.id, bootstrapPid=child.Id
                 }));

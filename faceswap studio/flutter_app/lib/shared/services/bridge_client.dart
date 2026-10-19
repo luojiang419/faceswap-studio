@@ -323,7 +323,7 @@ class BridgeClient {
   }
 
   http.Response _handleTimeout() {
-    throw BridgeClientException('Bridge 请求超时，请确认 FaceSwap Studio Bridge 正在运行。');
+    throw BridgeClientException('Bridge 请求超时，请确认 易容 Studio Bridge 正在运行。');
   }
 
   void _ensureSuccess(http.Response response) {

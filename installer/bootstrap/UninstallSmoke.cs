@@ -16,7 +16,7 @@ public static class UninstallSmoke {
             string content=File.ReadAllText(personal);
             Installer.Remove(root,id,false);
             if(File.ReadAllText(personal)!=content || !File.Exists(config)) throw new IOException("卸载未保留个人数据或配置");
-            if(Directory.Exists(Path.Combine(root,".venv-win")) || Directory.Exists(Path.Combine(root,".assets")) || File.Exists(Path.Combine(root,"启动FaceSwap Studio.exe"))) throw new IOException("卸载残留应用文件");
+            if(Directory.Exists(Path.Combine(root,".venv-win")) || Directory.Exists(Path.Combine(root,".assets")) || File.Exists(Path.Combine(root,"易容 Studio.exe"))) throw new IOException("卸载残留应用文件");
             using(var entry=Registry.CurrentUser.OpenSubKey(key)) if(entry!=null) throw new IOException("测试卸载登记未清理");
             File.WriteAllText(args[1],json.Serialize(new { root, personalDataPreserved=true, configurationPreserved=true, applicationRemoved=true, isolatedRegistryRemoved=true }));
             Console.WriteLine("PASS 真实卸载、个人作品与配置保留、隔离登记清理");return 0;

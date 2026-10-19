@@ -41,7 +41,7 @@ internal static class FaceSwapStudioLauncher
                 process.WaitForExit();
                 if (process.ExitCode != 0)
                 {
-                    ShowError("FaceSwap Studio 启动失败", "启动脚本已退出，退出码: " + process.ExitCode);
+                    ShowError("易容 Studio 启动失败", "启动脚本已退出，退出码: " + process.ExitCode);
                 }
                 return process.ExitCode;
             }

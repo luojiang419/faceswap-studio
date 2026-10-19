@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$FromManifest,
     [string]$FromVersion,
     [string]$ToVersion,
@@ -106,7 +106,7 @@ foreach ($path in $previousByPath.Keys) {
 
 $fileManifest = [pscustomobject]@{
     schema_version = 1
-    app_name = "FaceSwap Studio"
+    app_name = "易容 Studio"
     version = $ToVersion
     generated_at = (Get-Date).ToUniversalTime().ToString("o")
     files = $currentFiles
@@ -122,7 +122,7 @@ if ($SkipDelta) {
 else {
     $deltaManifest = [pscustomobject]@{
         schema_version = 1
-        app_name = "FaceSwap Studio"
+        app_name = "易容 Studio"
         from_version = $FromVersion
         to_version = $ToVersion
         generated_at = (Get-Date).ToUniversalTime().ToString("o")
@@ -178,7 +178,7 @@ if ($deltaPackage) {
 
 $updateManifest = [pscustomobject]@{
     schema_version = 1
-    app_name = "FaceSwap Studio"
+    app_name = "易容 Studio"
     version = $ToVersion
     minimum_delta_version = $FromVersion
     generated_at = (Get-Date).ToUniversalTime().ToString("o")
@@ -193,7 +193,7 @@ $updateManifest = [pscustomobject]@{
         size = $fileManifestSize
     }
     delta_packages = $deltaPackages
-    notes = "FaceSwap Studio $ToVersion"
+    notes = "易容 Studio $ToVersion"
 }
 $updateManifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $updateManifestPath -Encoding UTF8
 

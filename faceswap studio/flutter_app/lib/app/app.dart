@@ -78,7 +78,7 @@ class _FaceSwapStudioAppState extends State<FaceSwapStudioApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'FaceSwap Studio',
+      title: '易容 Studio',
       debugShowCheckedModeBanner: false,
       themeMode: _themeMode,
       theme: StudioTheme.light(),

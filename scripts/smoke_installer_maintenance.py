@@ -16,7 +16,7 @@ def main():
     distribution = args.distribution.resolve(strict=True)
     manifest_path = distribution / 'bootstrap-manifest.json'
     manifest = json.loads(manifest_path.read_text('utf-8'))
-    installer = distribution / 'FaceSwap安装器.exe'
+    installer = distribution / '易容 Studio 安装器.exe'
     package = distribution / manifest['package']['name']
     output = ROOT / 'build/installer-maintenance' / ('real-' + uuid.uuid4().hex[:8])
     output.mkdir()

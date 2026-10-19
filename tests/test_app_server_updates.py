@@ -22,7 +22,7 @@ def create_runtime(tmp_path : Path) -> FaceFusionRuntime:
 	repo_root = tmp_path / 'repo'
 	repo_root.mkdir(parents = True, exist_ok = True)
 	(repo_root / 'VERSION').write_text('0.1.1', encoding = 'utf-8')
-	(repo_root / '启动FaceSwap Studio.exe').write_bytes(b'launcher')
+	(repo_root / '易容 Studio.exe').write_bytes(b'launcher')
 
 	runtime._repo_root = repo_root
 	runtime._update_lock = threading.RLock()

@@ -17,7 +17,7 @@ class StudioBrandMark extends StatelessWidget {
       width: size,
       height: size,
       fit: BoxFit.contain,
-      semanticLabel: 'FaceSwap Studio',
+      semanticLabel: '易容 Studio',
       gaplessPlayback: true,
       filterQuality: FilterQuality.medium,
     );
