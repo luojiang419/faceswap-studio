@@ -21,12 +21,14 @@ class FlutterWindow : public Win32Window {
   // Win32Window:
   bool OnCreate() override;
   void OnDestroy() override;
+  bool OnCloseRequested() override;
   LRESULT MessageHandler(HWND window, UINT const message, WPARAM const wparam,
                          LPARAM const lparam) noexcept override;
 
  private:
   // The project to run.
   flutter::DartProject project_;
+  bool ask_before_close_ = true;
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;

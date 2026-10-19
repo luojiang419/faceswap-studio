@@ -1,5 +1,6 @@
 import 'package:faceswap_studio/app/theme/studio_theme.dart';
 import 'package:faceswap_studio/app/widgets/studio_shell.dart';
+import 'package:faceswap_studio/app/widgets/studio_window_lifecycle.dart';
 import 'package:faceswap_studio/shared/services/bridge_client.dart';
 import 'package:flutter/material.dart';
 
@@ -83,11 +84,14 @@ class _FaceSwapStudioAppState extends State<FaceSwapStudioApp> {
       themeMode: _themeMode,
       theme: StudioTheme.light(),
       darkTheme: StudioTheme.dark(),
-      home: StudioShell(
-        themeMode: _themeMode,
-        onToggleTheme: _toggleTheme,
-        sidebarExpanded: _sidebarExpanded,
-        onSidebarExpandedChanged: _setSidebarExpanded,
+      home: StudioWindowLifecycle(
+        client: _client,
+        child: StudioShell(
+          themeMode: _themeMode,
+          onToggleTheme: _toggleTheme,
+          sidebarExpanded: _sidebarExpanded,
+          onSidebarExpandedChanged: _setSidebarExpanded,
+        ),
       ),
     );
   }

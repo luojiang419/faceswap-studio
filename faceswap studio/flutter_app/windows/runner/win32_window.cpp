@@ -204,6 +204,9 @@ Win32Window::MessageHandler(HWND hwnd,
       }
       break;
     case WM_CLOSE:
+      if (!force_quit_ && OnCloseRequested()) {
+        return 0;
+      }
       if (close_to_tray_ && !force_quit_) {
         if (HideToTray()) {
           return 0;
@@ -277,6 +280,10 @@ Win32Window::MessageHandler(HWND hwnd,
   }
 
   return DefWindowProc(window_handle_, message, wparam, lparam);
+}
+
+bool Win32Window::OnCloseRequested() {
+  return false;
 }
 
 bool Win32Window::HideToTray() {

@@ -24,6 +24,7 @@ class _SettingsPageState extends State<SettingsPage> {
   static const String _customProxyMode = 'custom_proxy';
   static const String _closeBehaviorMinimizeToTray = 'minimize_to_tray';
   static const String _closeBehaviorExit = 'exit';
+  static const String _closeBehaviorAsk = 'ask';
   static const String _defaultCustomProxyUrl = 'http://127.0.0.1:7890';
   static const double _defaultContentAnalyserScore = 100;
   static const double _minContentAnalyserScore = 100;
@@ -35,6 +36,7 @@ class _SettingsPageState extends State<SettingsPage> {
     _customProxyMode,
   };
   static const Set<String> _closeBehaviors = <String>{
+    _closeBehaviorAsk,
     _closeBehaviorMinimizeToTray,
     _closeBehaviorExit,
   };
@@ -48,13 +50,13 @@ class _SettingsPageState extends State<SettingsPage> {
 
   bool _loading = true;
   String _downloadMode = _domesticMirrorMode;
-  String _closeBehavior = _closeBehaviorMinimizeToTray;
+  String _closeBehavior = _closeBehaviorAsk;
   double _contentAnalyserScore = _defaultContentAnalyserScore;
   String _statusMessage = '正在读取设置...';
   String _savedOutputDir = '';
   String _savedDownloadMode = _domesticMirrorMode;
   String _savedCustomProxyUrl = '';
-  String _savedCloseBehavior = _closeBehaviorMinimizeToTray;
+  String _savedCloseBehavior = _closeBehaviorAsk;
   double _savedContentAnalyserScore = _defaultContentAnalyserScore;
   bool _studioStatusLoading = true;
   bool _studioAvailable = false;
@@ -153,7 +155,7 @@ class _SettingsPageState extends State<SettingsPage> {
         '${settings['model_download_mode'] ?? _domesticMirrorMode}',
       );
       final closeBehavior = _normalizeCloseBehavior(
-        '${settings['close_behavior'] ?? _closeBehaviorMinimizeToTray}',
+        '${settings['close_behavior'] ?? _closeBehaviorAsk}',
       );
       final customProxyUrl =
           '${settings['custom_proxy_url'] ?? _defaultCustomProxyUrl}';
@@ -174,7 +176,7 @@ class _SettingsPageState extends State<SettingsPage> {
         contentAnalyserScore: contentAnalyserScore,
       );
       _statusMessage =
-          '修改输出目录、模型下载方式、自定义代理、关闭行为或 NSFW 阈值后保存。新设置会在下次启动 FaceFusion 时生效。';
+          '修改后请保存。关闭行为立即生效，输出目录、模型下载和 NSFW 设置在下次启动 FaceFusion 时生效。';
     } catch (error) {
       _statusMessage = '读取设置失败: $error';
     } finally {
@@ -280,7 +282,7 @@ class _SettingsPageState extends State<SettingsPage> {
         '${settings['model_download_mode'] ?? _domesticMirrorMode}',
       );
       final closeBehavior = _normalizeCloseBehavior(
-        '${settings['close_behavior'] ?? _closeBehaviorMinimizeToTray}',
+        '${settings['close_behavior'] ?? _closeBehaviorAsk}',
       );
       final customProxyUrl =
           '${settings['custom_proxy_url'] ?? _defaultCustomProxyUrl}';
@@ -318,9 +320,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   String _normalizeCloseBehavior(String value) {
-    return _closeBehaviors.contains(value)
-        ? value
-        : _closeBehaviorMinimizeToTray;
+    return _closeBehaviors.contains(value) ? value : _closeBehaviorAsk;
   }
 
   double _normalizeContentAnalyserScore(Object? value) {
@@ -453,37 +453,48 @@ class _SettingsPageState extends State<SettingsPage> {
                   const Divider(height: 28),
                   Text('关闭行为', style: theme.textTheme.titleMedium),
                   const SizedBox(height: 10),
-                  SegmentedButton<String>(
-                    showSelectedIcon: false,
-                    segments: const <ButtonSegment<String>>[
-                      ButtonSegment<String>(
-                        value: _closeBehaviorMinimizeToTray,
-                        icon: Icon(Icons.minimize_rounded),
-                        label: Text('最小化到托盘'),
-                      ),
-                      ButtonSegment<String>(
-                        value: _closeBehaviorExit,
-                        icon: Icon(Icons.close_rounded),
-                        label: Text('关闭程序'),
-                      ),
-                    ],
-                    selected: <String>{_closeBehavior},
-                    onSelectionChanged: _loading
-                        ? null
-                        : (selection) {
-                            if (selection.isEmpty) {
-                              return;
-                            }
-                            setState(() {
-                              _closeBehavior = selection.first;
-                            });
-                          },
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: SegmentedButton<String>(
+                      showSelectedIcon: false,
+                      segments: const <ButtonSegment<String>>[
+                        ButtonSegment<String>(
+                          value: _closeBehaviorExit,
+                          icon: Icon(Icons.close_rounded),
+                          label: Text('关闭软件'),
+                        ),
+                        ButtonSegment<String>(
+                          value: _closeBehaviorMinimizeToTray,
+                          icon: Icon(Icons.minimize_rounded),
+                          label: Text('后台运行'),
+                        ),
+                        ButtonSegment<String>(
+                          value: _closeBehaviorAsk,
+                          icon: Icon(Icons.help_outline_rounded),
+                          label: Text('每次询问'),
+                        ),
+                      ],
+                      selected: <String>{_closeBehavior},
+                      onSelectionChanged: _loading
+                          ? null
+                          : (selection) {
+                              if (selection.isEmpty) {
+                                return;
+                              }
+                              setState(() {
+                                _closeBehavior = selection.first;
+                              });
+                            },
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    _closeBehavior == _closeBehaviorMinimizeToTray
-                        ? '点击窗口关闭按钮时会隐藏到系统托盘，可从托盘恢复或退出。'
-                        : '点击窗口关闭按钮时会直接退出 易容 Studio。',
+                    switch (_closeBehavior) {
+                      _closeBehaviorMinimizeToTray =>
+                        '点击窗口关闭按钮时收起到系统托盘，任务继续运行。',
+                      _closeBehaviorExit => '点击窗口关闭按钮时直接退出易容 Studio。',
+                      _ => '点击窗口关闭按钮时弹出确认，可选择关闭软件或后台运行。',
+                    },
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),

@@ -2,6 +2,7 @@ import importlib.util
 import json
 from pathlib import Path
 import threading
+import pytest
 
 
 APP_SERVER_PATH = Path(__file__).resolve().parents[1] / 'faceswap studio' / 'bridge' / 'app_server.py'
@@ -81,6 +82,44 @@ def create_runtime(tmp_path : Path) -> FaceFusionRuntime:
 	return runtime
 
 
+def test_close_behavior_defaults_to_first_prompt_and_persists_all_choices(tmp_path : Path) -> None:
+
+	runtime = create_runtime(tmp_path)
+	runtime._settings_template_path.parent.mkdir(parents = True)
+	runtime._settings = runtime._load_settings()
+	assert runtime.get_settings()['close_behavior'] == 'ask'
+	assert runtime.get_settings()['close_behavior_configured'] is False
+	for behavior in ('exit', 'minimize_to_tray', 'ask'):
+		runtime.update_settings({ 'close_behavior': behavior })
+		runtime._settings = runtime._load_settings()
+		assert runtime.get_settings()['close_behavior'] == behavior
+		assert runtime.get_settings()['close_behavior_configured'] is True
+		assert json.loads(runtime._settings_path.read_text(encoding = 'utf-8'))['close_behavior'] == behavior
+
+
+def test_close_behavior_save_failure_does_not_claim_preference_was_remembered(tmp_path, monkeypatch):
+
+	runtime = create_runtime(tmp_path)
+	runtime._settings = runtime._default_settings()
+	def fail_save():
+		raise OSError('disk full')
+	monkeypatch.setattr(runtime, '_save_settings', fail_save)
+	with pytest.raises(OSError):
+		runtime.update_settings({ 'close_behavior': 'exit' })
+	assert runtime.get_settings()['close_behavior'] == 'ask'
+	assert runtime.get_settings()['close_behavior_configured'] is False
+
+
+def test_close_behavior_preserves_legacy_choice_and_falls_back_to_ask(tmp_path : Path) -> None:
+
+	runtime = create_runtime(tmp_path)
+	for behavior in ('exit', 'minimize_to_tray'):
+		assert runtime._normalize_settings({ 'close_behavior': behavior })['close_behavior'] == behavior
+	for invalid in (None, '', 'unknown', False):
+		assert runtime._normalize_settings({ 'close_behavior': invalid })['close_behavior'] == 'ask'
+	assert runtime._normalize_settings({ 'close_behavior_configured': 'true' })['close_behavior_configured'] is False
+
+
 def test_default_workspace_options_use_video_quality_100(tmp_path : Path) -> None:
 	runtime = create_runtime(tmp_path)
 
@@ -127,7 +166,10 @@ def test_webui_env_binds_gradio_to_configured_address(tmp_path : Path, monkeypat
 	assert env['GRADIO_NUM_PORTS'] == '1'
 
 
-def test_external_model_label_and_domestic_env_allow_system_proxy(tmp_path):
+def test_external_model_label_and_domestic_env_allow_system_proxy(tmp_path, monkeypatch):
+    from facefusion import modelscope_assets
+    # 标签路由使用固定夹具，不依赖不断补齐的实际魔搭镜像清单。
+    monkeypatch.setattr(modelscope_assets, 'model_download_labels', lambda: {'deoldify_stable': '外网下载'})
     runtime = create_runtime(tmp_path)
     schema = runtime.workspace_options_schema()
     assert '外网下载' in schema['fields']['frame_colorizer_model']['choice_labels']['deoldify_stable']

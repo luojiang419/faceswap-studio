@@ -95,7 +95,9 @@ MODEL_DOWNLOAD_MODES = {
 }
 WINDOW_CLOSE_BEHAVIOR_MINIMIZE_TO_TRAY = "minimize_to_tray"
 WINDOW_CLOSE_BEHAVIOR_EXIT = "exit"
+WINDOW_CLOSE_BEHAVIOR_ASK = "ask"
 WINDOW_CLOSE_BEHAVIORS = {
+    WINDOW_CLOSE_BEHAVIOR_ASK,
     WINDOW_CLOSE_BEHAVIOR_MINIMIZE_TO_TRAY,
     WINDOW_CLOSE_BEHAVIOR_EXIT,
 }
@@ -442,7 +444,8 @@ class FaceFusionRuntime:
             "default_output_dir": self._default_output_dir(),
             "model_download_mode": MODEL_DOWNLOAD_MODE_DOMESTIC,
             "custom_proxy_url": DEFAULT_CUSTOM_PROXY_URL,
-            "close_behavior": WINDOW_CLOSE_BEHAVIOR_MINIMIZE_TO_TRAY,
+            "close_behavior": WINDOW_CLOSE_BEHAVIOR_ASK,
+            "close_behavior_configured": False,
             "sidebar_expanded": False,
             "persona_grid_scale": 100.0,
             "auto_check_updates": True,
@@ -470,6 +473,7 @@ class FaceFusionRuntime:
             "model_download_mode": self._normalize_model_download_mode(payload.get("model_download_mode")),
             "custom_proxy_url": self._normalize_proxy_url(payload.get("custom_proxy_url")),
             "close_behavior": self._normalize_close_behavior(payload.get("close_behavior")),
+            "close_behavior_configured": payload.get("close_behavior_configured") is True,
             "sidebar_expanded": payload.get("sidebar_expanded") is True,
             "persona_grid_scale": self._normalize_persona_grid_scale(payload.get("persona_grid_scale")),
             "auto_check_updates": payload.get("auto_check_updates", True) is True,
@@ -531,10 +535,10 @@ class FaceFusionRuntime:
         return proxy_url or DEFAULT_CUSTOM_PROXY_URL
 
     def _normalize_close_behavior(self, value: Any) -> str:
-        behavior = str(value or WINDOW_CLOSE_BEHAVIOR_MINIMIZE_TO_TRAY).strip()
+        behavior = str(value or WINDOW_CLOSE_BEHAVIOR_ASK).strip()
         if behavior in WINDOW_CLOSE_BEHAVIORS:
             return behavior
-        return WINDOW_CLOSE_BEHAVIOR_MINIMIZE_TO_TRAY
+        return WINDOW_CLOSE_BEHAVIOR_ASK
 
     def _normalize_content_analyser_score(self, value: Any) -> float:
         if not hasattr(facefusion_choices, "content_analyser_score_range"):
@@ -5793,6 +5797,10 @@ class FaceFusionRuntime:
         return dict(self._settings)
 
     def update_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
+        previous_close = {
+            "close_behavior": self._settings.get("close_behavior", WINDOW_CLOSE_BEHAVIOR_ASK),
+            "close_behavior_configured": self._settings.get("close_behavior_configured", False),
+        }
         if "theme" in payload and payload["theme"] in {"dark", "light"}:
             self._settings["theme"] = payload["theme"]
         if "default_output_dir" in payload and payload["default_output_dir"]:
@@ -5806,6 +5814,7 @@ class FaceFusionRuntime:
             self._settings["custom_proxy_url"] = self._normalize_proxy_url(payload["custom_proxy_url"])
         if "close_behavior" in payload:
             self._settings["close_behavior"] = self._normalize_close_behavior(payload["close_behavior"])
+            self._settings["close_behavior_configured"] = True
         if "auto_check_updates" in payload:
             self._settings["auto_check_updates"] = payload["auto_check_updates"] is True
         if "sidebar_expanded" in payload:
@@ -5822,7 +5831,12 @@ class FaceFusionRuntime:
                     payload["workspace_options_panel_width"],
                 )
             )
-        self._save_settings()
+        try:
+            self._save_settings()
+        except OSError:
+            if "close_behavior" in payload:
+                self._settings.update(previous_close)
+            raise
         self._append_log("[bridge] Settings updated.")
         return self.get_settings()
 

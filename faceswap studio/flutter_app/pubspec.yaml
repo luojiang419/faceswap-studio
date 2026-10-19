@@ -21,6 +21,9 @@ dependencies:
   webview_all: ^1.0.3
 
 dev_dependencies:
+  integration_test:
+    sdk: flutter
+  ffi: ^2.2.0
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0

@@ -38,11 +38,13 @@ bool FlutterWindow::OnCreate() {
                  result) {
         if (call.method_name() == "exitForUpdate") {
           result->Success();
+          SetForceQuit(true);
           SetCloseToTray(false);
           PostMessage(GetHandle(), WM_CLOSE, 0, 0);
           return;
         }
-        if (call.method_name() != "setCloseBehavior") {
+        if (call.method_name() != "setCloseBehavior" &&
+            call.method_name() != "applyCloseAction") {
           result->NotImplemented();
           return;
         }
@@ -67,7 +69,24 @@ bool FlutterWindow::OnCreate() {
           return;
         }
 
-        SetCloseToTray(*behavior != "exit");
+        if (call.method_name() == "applyCloseAction") {
+          if (*behavior == "minimize_to_tray") {
+            if (!HideToTray()) {
+              result->Error("tray_unavailable", "Could not create the tray icon.");
+              return;
+            }
+            result->Success();
+          } else if (*behavior == "exit") {
+            result->Success();
+            SetForceQuit(true);
+            PostMessage(GetHandle(), WM_CLOSE, 0, 0);
+          } else {
+            result->Error("bad_args", "Unknown close action.");
+          }
+          return;
+        }
+        ask_before_close_ = *behavior != "exit" && *behavior != "minimize_to_tray";
+        SetCloseToTray(*behavior == "minimize_to_tray");
         result->Success();
       });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
@@ -91,6 +110,14 @@ void FlutterWindow::OnDestroy() {
   }
 
   Win32Window::OnDestroy();
+}
+
+bool FlutterWindow::OnCloseRequested() {
+  if (ask_before_close_ && window_channel_) {
+    window_channel_->InvokeMethod("closeRequested", nullptr);
+    return true;
+  }
+  return false;
 }
 
 LRESULT

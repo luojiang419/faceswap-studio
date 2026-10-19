@@ -78,6 +78,10 @@ class Win32Window {
   // Called when Destroy is called.
   virtual void OnDestroy();
 
+  // Returns true when the subclass handles an ordinary close request.
+  virtual bool OnCloseRequested();
+  bool HideToTray();
+
  private:
   friend class WindowClassRegistrar;
 
@@ -97,7 +101,6 @@ class Win32Window {
   // Update the window frame's theme to match the system theme.
   static void UpdateTheme(HWND const window);
 
-  bool HideToTray();
   bool RestoreFromTray();
   void ExitFromTray();
   void DestroyTrayIcon();
