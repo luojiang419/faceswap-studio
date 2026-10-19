@@ -15,7 +15,7 @@ using Microsoft.Win32;
 
 namespace FaceSwapBootstrap {
     public sealed class InstallState {
-        public string product = "faceswap-studio", id, root, state, version, registryKey;
+        public string product = "faceswap-studio", id, root, state, version, releaseId, registryKey;
         public string[] files = new string[0], shortcuts = new string[0];
     }
     public sealed class IntegrationPaths {
@@ -196,7 +196,7 @@ namespace FaceSwapBootstrap {
             using (File.Create(probe)) { } File.Delete(probe);
             if (state == null) state = new InstallState { root = root, id = Guid.NewGuid().ToString("N") };
             else if (state.state == "uninstalled") state.id = Guid.NewGuid().ToString("N");
-            state.state = "preparing"; state.version = manifest.appVersion;
+            state.state = "preparing"; state.version = manifest.appVersion; state.releaseId = manifest.appReleaseId ?? manifest.releaseId;
             state.files = manifest.files.Select(a => a.name).Concat(new[] { "uninstall.exe", "faceswap.ico", "faceswap-installer.ico" }).Distinct().ToArray();
             SaveState(state);
             if (remember) using (var key = Registry.CurrentUser.CreateSubKey(SettingsKey)) key.SetValue("InstallLocation", root);

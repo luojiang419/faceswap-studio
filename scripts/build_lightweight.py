@@ -127,8 +127,8 @@ def compile_installer(manifest, output, demo=False):
             '/resource:' + str(descriptor) + ',bootstrap-manifest.json']
     if demo:
         args.append('/define:DEMO')
-    args.extend('/reference:' + name + '.dll' for name in ('System.Windows.Forms', 'System.Drawing', 'Accessibility', 'System.Web.Extensions', 'System.IO.Compression', 'System.IO.Compression.FileSystem'))
-    args.extend(str(ROOT / 'installer/bootstrap' / name) for name in ('Program.cs', 'Installation.cs', 'Components.cs', 'DiskCard.cs'))
+    args.extend('/reference:' + name + '.dll' for name in ('System.Windows.Forms', 'System.Drawing', 'Accessibility', 'System.Web.Extensions', 'System.IO.Compression', 'System.IO.Compression.FileSystem', 'System.Management'))
+    args.extend(str(ROOT / 'installer/bootstrap' / name) for name in ('Program.cs', 'Installation.cs', 'Components.cs', 'DiskCard.cs', 'Maintenance.cs'))
     subprocess.run(args, check=True)
     return output
 
@@ -209,7 +209,7 @@ def build(directory, existing=None, refresh_from=None, windows_root=None):
         refresh_payload(package, refresh_from, windows_root)
     records = read_json(package.with_suffix('.files.json')) if package.exists() else payload(package, windows_root)
     prefix = f'bootstrap/{version}/{release}'
-    manifest = {'protocol': 1, 'componentProtocol': 0, 'releaseId': release, 'appVersion': version, 'appReleaseId': release,
+    manifest = {'protocol': 1, 'componentProtocol': 0, 'releaseId': release, 'appVersion': version, 'appReleaseId': release, 'publicKey': config['publicKey'],
                 'entry': '启动FaceSwap Studio.exe', 'files': records,
                 'package': {'name': package.name, 'size': package.stat().st_size, 'sha256': sha256(package),
                             'urls': [file_url(config['repository'], prefix + '/' + package.name)]}}

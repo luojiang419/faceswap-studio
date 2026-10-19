@@ -19,7 +19,7 @@ using System.Windows.Forms;
 namespace FaceSwapBootstrap {
     public sealed class Asset { public string name; public long size; public string sha256; public string[] urls; }
     public sealed class ComponentChoice { public string id, label; public long size; public int minMemoryMB; public Asset[] files; }
-    public sealed class Manifest { public int protocol; public int componentProtocol; public ComponentChoice[] components; public long musicRuntimeSize, musicArchiveSize; public string musicRuntimeVersion; public string releaseId; public string appVersion; public string appReleaseId; public string entry; public Asset package; public Asset[] files; }
+    public sealed class Manifest { public int protocol; public int componentProtocol; public ComponentChoice[] components; public long musicRuntimeSize, musicArchiveSize; public string musicRuntimeVersion; public string releaseId; public string appVersion; public string appReleaseId; public string publicKey; public string entry; public Asset package; public Asset[] files; }
     public sealed class Status { public string text; public long done; public long total; }
 
     public static class Core {
@@ -433,6 +433,7 @@ namespace FaceSwapBootstrap {
         long downloaded, total;
         int installPhase;
         string completedRoot;
+        bool maintenanceMode, maintenanceNeedsRepair;
         bool destinationBlocked;
         public static GraphicsPath Round(RectangleF r, float radius) {
             var p = new GraphicsPath(); float d = Math.Min(radius * 2, Math.Min(r.Width, r.Height));
@@ -446,7 +447,7 @@ namespace FaceSwapBootstrap {
         public Launcher(Manifest value, bool demonstration = false, bool? darkMode = null, Func<string> detectRoot = null, Func<InstallDrive[]> survey = null) {
             manifest = value; preview = demonstration; dark = darkMode ?? false;
             diskPanel=new DiskStrip(dark) { Name="local-disks", TabIndex=0 };
-            rootDetector = detectRoot ?? (() => Installer.DefaultRoot(!preview));
+            rootDetector = detectRoot ?? (() => Maintenance.FindInstallation() ?? Installer.DefaultRoot(!preview));
             driveSurvey = survey ?? Installer.SurveyDrives;
             Text = "FaceSwap Studio" + (preview ? " · 安装演示" : " 安装程序"); ClientSize = new Size(720, 830);
             AutoScaleMode = AutoScaleMode.None; Font = new Font("Microsoft YaHei UI", 10); BackColor = Paper;
@@ -468,6 +469,7 @@ namespace FaceSwapBootstrap {
             detect.Click += (sender, args) => DetectDestination();
             installPath.TextChanged += (sender, args) => {
                 if (cancellation != null || completedRoot != null) return;
+                maintenanceMode = maintenanceNeedsRepair = false;
                 if (!String.IsNullOrWhiteSpace(installPath.Text)) { destinationBlocked = false; SetPreview("idle", 0); }
                 run.Enabled = !String.IsNullOrWhiteSpace(installPath.Text);
                 SyncDriveSelection();
@@ -490,6 +492,7 @@ namespace FaceSwapBootstrap {
             run.Click += async (sender, args) => {
                 if (preview) StartDemo();
                 else if (completedRoot != null) { OpenWorkspace(completedRoot); Close(); }
+                else if (Maintenance.IsInstalled(installPath.Text.Trim())) await CheckInstallation(maintenanceNeedsRepair);
                 else try { await Start(); } catch (Exception error) { MessageBox.Show(this,error.Message,"组件选择未完成",MessageBoxButtons.OK,MessageBoxIcon.Warning); }
             };
             pause.Click += (sender, args) => { if (preview) SetPreview("paused", fraction); else if (cancellation != null) cancellation.Cancel(); };
@@ -506,7 +509,10 @@ namespace FaceSwapBootstrap {
                 if(view=="downloading" || view=="working") Invalidate();
                 else Invalidate(new Rectangle((int)(438*ClientSize.Width/720f),(int)(103*ClientSize.Height/830f),(int)(244*ClientSize.Width/720f)+1,(int)(140*ClientSize.Height/830f)+1));
             };
-            Shown += (sender,args) => { artworkClock.Start(); if(view=="idle") animation.Start(); };
+            Shown += async (sender,args) => {
+                artworkClock.Start(); if(view=="idle") animation.Start();
+                if(!preview && Maintenance.IsInstalled(installPath.Text.Trim())) await CheckInstallation(false);
+            };
             Resize += (sender,args) => {
                 if(WindowState==FormWindowState.Minimized) { animation.Stop(); artworkClock.Stop(); }
                 else if(view=="idle" || view=="downloading" || view=="working") { artworkClock.Start(); animation.Start(); }
@@ -608,8 +614,8 @@ namespace FaceSwapBootstrap {
             else TextAt(g, "F", 28, Accent, 48, 36, 32, true);
             TextAt(g, "FACESWAP_STUDIO", 14, Ink, 92, 35, 160, true); TextAt(g, "STUDIO", 10, Muted, 93, 57, 140);
             TextAt(g, "本地 AI 换脸工作台", 11, Muted, 438, 43, 140);
-            TextAt(g, "新形象，从这里开始。", 31, Ink, 40, 133, 420);
-            TextAt(g, "选择安装位置，剩下的交给我们。", 14, Muted, 43, 183, 400);
+            TextAt(g, maintenanceMode ? "让创作，保持顺畅。" : "新形象，从这里开始。", 31, Ink, 40, 133, 420);
+            TextAt(g, maintenanceMode ? "先检查，按需修复；保留模型、配置与作品。" : "选择安装位置，剩下的交给我们。", 14, Muted, 43, 183, 400);
             FaceFusionArtwork.Draw(g,dark,ArtworkPreviewSeconds ?? artworkClock.Elapsed.TotalSeconds,view);
             TextAt(g, "安装位置", 12, Muted, 43, 240, 130);
             TextAt(g, "非 C 盘优先 · 至少 12 GiB", 11, Muted, 480, 242, 210);
@@ -629,9 +635,9 @@ namespace FaceSwapBootstrap {
             float filled = (float)(594 * fraction);
             if (filled > 2) using (var shape = Round(new RectangleF(textLayout.Bar.X,textLayout.Bar.Y,filled,5), 2.5f)) using (var brush = new SolidBrush(Accent)) g.FillPath(brush, shape);
             if (total == 0 && view == "working") using (var brush = new SolidBrush(Accent)) g.FillRectangle(brush,textLayout.Bar.X+(float)(pulse*464),textLayout.Bar.Y,130,5);
-            DrawStatusText(g,total > 0 ? String.Format("{0:F1} MB / {1:F1} MB", downloaded / 1048576.0, total / 1048576.0) : "首次联网准备 · 已有资源自动复用",10,Muted,textLayout.Footnote,false);
+            DrawStatusText(g,maintenanceMode ? "程序、环境与模型按可信清单核验" : total > 0 ? String.Format("{0:F1} MB / {1:F1} MB", downloaded / 1048576.0, total / 1048576.0) : "首次联网准备 · 已有资源自动复用",10,Muted,textLayout.Footnote,false);
             }
-            string[] steps = { "安装应用", "准备环境", "完成安装" };
+            string[] steps = maintenanceMode ? new[] { "检查安装", "按需修复", "完成复检" } : new[] { "安装应用", "准备环境", "完成安装" };
             for (int i = 0; i < 3; i++) {
                 int x = 44 + i * 211; bool active = i == installPhase;
                 using (var brush = new SolidBrush(active ? Accent : (dark ? Color.FromArgb(58, 62, 53) : Color.FromArgb(232, 234, 225)))) g.FillEllipse(brush, x, 422, 20, 20);
@@ -640,7 +646,7 @@ namespace FaceSwapBootstrap {
                 if (i < 2) using (var pen = new Pen(dark ? Color.FromArgb(55, 60, 49) : Color.FromArgb(226, 229, 217))) g.DrawLine(pen, x + 126, 432, x + 190, 432);
             }
             using (var brush = new SolidBrush(Accent)) g.FillEllipse(brush, 44, 455, 5, 5);
-            TextAt(g, preview ? "安装演示 · 不会下载或修改系统" : "当前用户安装 · 无需管理员权限", 11, Muted, 56, 449, 325);
+            TextAt(g, preview ? "安装演示 · 不会下载或修改系统" : maintenanceMode ? "健康检查不关闭工作台 · 修复保留个人数据" : "当前用户安装 · 无需管理员权限", 11, Muted, 56, 449, 430);
         }
         static void DrawStatusText(Graphics graphics,string text,float size,Color color,RectangleF bounds,bool bold) {
             var state=graphics.Save(); graphics.SetClip(bounds);
@@ -669,10 +675,57 @@ namespace FaceSwapBootstrap {
             else { animation.Stop(); animationClock.Stop(); artworkClock.Stop(); }
             AccessibleDescription = statusTitle + statusDetail; Invalidate();
         }
+        public void SetMaintenancePreview(string state) {
+            if(!preview) throw new InvalidOperationException("仅用于演示渲染");
+            SetPreview(state=="healthy" ? "ready" : state=="error" ? "error" : state=="damaged" ? "paused" : "working",state=="healthy"?1:.42);
+            maintenanceMode=true; installPhase=state=="healthy"?2:state=="repairing"?1:0;
+            statusTitle=state=="healthy"?"检查完成，一切正常。":state=="damaged"?"发现需要修复的内容。":state=="repairing"?"正在修复安装。":state=="error"?"检查或修复未能完成。":"正在检查安装。";
+            statusDetail=state=="healthy"?Maintenance.HealthyMessage:state=="damaged"?"发现 2 项问题；修复将正常关闭本目录工作台并保留个人数据。":state=="repairing"?"正在恢复缺失的运行环境，模型、配置与作品保持原样。":state=="error"?"修复后复检未通过，已回滚本次修改。请保留检查日志后重试。":"正在校验程序、Python 环境及模型；不会关闭已运行的工作台。";
+            run.Text=state=="healthy"?"开始创作  →":state=="damaged"?"开始修复  →":state=="error"?"重新检查  →":"正在检查…";
+            Invalidate();
+        }
         void StartDemo() { if (view == "ready") fraction = 0; demoStart = fraction; installPhase = fraction > .55 ? 1 : 0; SetPreview("downloading", fraction); }
         static void OpenWorkspace(string root) {
             var start = new ProcessStartInfo(Path.Combine(root, "启动FaceSwap Studio.exe"), "--faceswap-run --faceswap-show") { WorkingDirectory = root, UseShellExecute = false };
             start.EnvironmentVariables.Remove("ELECTRON_RUN_AS_NODE"); start.EnvironmentVariables["FACESWAP_STUDIO_DATA_ROOT"] = Path.Combine(root, "data"); Process.Start(start);
+        }
+        async Task CheckInstallation(bool repair) {
+            if(cancellation != null) return;
+            string root = Installer.Canonical(installPath.Text.Trim());
+            maintenanceMode = true; maintenanceNeedsRepair = false;
+            installPhase = repair ? 1 : 0;
+            cancellation = new CancellationTokenSource(); view="working"; fraction=0;
+            statusTitle=repair ? "正在修复安装。" : "正在检查安装。";
+            statusDetail=repair ? "仅处理缺失或损坏的文件，个人数据保持原样。" : "检查不会关闭已运行的工作台。";
+            run.Enabled=false; pause.Visible=true;
+            installPath.Enabled=browse.Enabled=detect.Enabled=diskPanel.Enabled=desktopShortcut.Enabled=startMenuShortcut.Enabled=false;
+            animation.Start(); Invalidate();
+            var reporter=new Progress<Status>(value=> {
+                if(IsDisposed) return;
+                statusDetail=value.text; downloaded=value.done; total=value.total;
+                fraction=total>0 ? Math.Max(0,Math.Min(1,(double)downloaded/total)) : 0;
+                Invalidate();
+            });
+            try {
+                var result=await Task.Run(()=>Maintenance.Run(root,manifest,repair,cancellation.Token,reporter));
+                if(IsDisposed) return;
+                if(result.status=="damaged") {
+                    view="paused"; statusTitle="发现需要修复的内容。";
+                    statusDetail=result.message+"\n"+String.Join("；",result.issues.Take(2));
+                    maintenanceNeedsRepair=true; run.Text="开始修复  →";
+                } else {
+                    completedRoot=root; view="ready"; fraction=1; installPhase=2;
+                    statusTitle=result.repaired ? "修复完成，开始创作吧。" : "检查完成，一切正常。";
+                    statusDetail=result.message; run.Text="开始创作  →";
+                }
+            } catch(OperationCanceledException) {
+                if(!IsDisposed) { view="paused";statusTitle="检查或修复已取消。";statusDetail="已完成的替换会回滚，原数据保留。";run.Text="重新检查  →"; }
+            } catch(Exception error) {
+                if(!IsDisposed) { view="error";statusTitle="检查或修复未能完成。";statusDetail=error.Message;run.Text="重新检查  →"; }
+            } finally {
+                cancellation.Dispose(); cancellation=null;
+                if(!IsDisposed) { animation.Stop();pause.Visible=false;run.Enabled=true;Invalidate(); }
+            }
         }
         async Task Start() {
             ComponentSelection selection = null;
@@ -736,6 +789,7 @@ namespace FaceSwapBootstrap {
                 using (var unpack = new GZipStream(stream, CompressionMode.Decompress))
                 using (var reader = new StreamReader(unpack)) manifest = new JavaScriptSerializer { MaxJsonLength = 32 * 1024 * 1024 }.Deserialize<Manifest>(reader.ReadToEnd());
                 Core.Validate(manifest);
+                if(Maintenance.Route(args,manifest)) return;
                 string identity;
                 using (var hash = SHA256.Create()) identity = BitConverter.ToString(hash.ComputeHash(System.Text.Encoding.UTF8.GetBytes(AppDomain.CurrentDomain.BaseDirectory.ToUpperInvariant()))).Replace("-", "");
                 using (var mutex = new Mutex(false, "Local\\FaceSwap-Bootstrap-" + identity)) {

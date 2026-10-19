@@ -13,6 +13,19 @@ public static class BootstrapPreview {
         Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
         var manifest = new JavaScriptSerializer { MaxJsonLength = 32 * 1024 * 1024 }.Deserialize<Manifest>(File.ReadAllText(args[0], Encoding.UTF8));
         string output = Path.GetFullPath(args[1]); Directory.CreateDirectory(output);
+        if(args.Length>2 && args[2]=="--maintenance-only") {
+            foreach(bool dark in new[]{false,true}) foreach(string state in new[]{"checking","healthy","damaged","repairing","error"})
+                using(var form=new Launcher(manifest,true,dark)) {
+                    form.ShowInTaskbar=false;form.Opacity=0;form.Show();Application.DoEvents();
+                    form.SetMaintenancePreview(state);form.ArtworkPreviewSeconds=2.4;
+                    using(var bitmap=new Bitmap(form.ClientSize.Width,form.ClientSize.Height)) {
+                        form.DrawToBitmap(bitmap,form.ClientRectangle);
+                        bitmap.Save(Path.Combine(output,"maintenance-"+state+(dark?"-dark.png":"-light.png")),ImageFormat.Png);
+                    }
+                    form.Close();
+                }
+            return 0;
+        }
         if (manifest.components != null) foreach(bool darkMode in new[] { false,true }) using (var picker = new ComponentPicker(manifest, Path.Combine(output,"preview-selection"),16384,darkMode)) {
             picker.ShowInTaskbar=false; picker.Opacity=0; picker.Show(); Application.DoEvents(); picker.Update();
             using(var bitmap=new Bitmap(picker.Width,picker.Height)) {
