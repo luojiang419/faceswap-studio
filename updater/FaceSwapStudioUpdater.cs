@@ -33,7 +33,7 @@ internal sealed class UpdateWindow : StudioUpdateSurface {
         Shown += (s,e) => {StartUpdate();SyncSurface();};
     }
     void SyncSurface() {StatusTitle=title.Text;StatusDetail=detail.Text;Fraction=progress.Value/100d;View=complete?(progress.Value==100?"ready":"error"):"working";IsBusy=!complete;RefreshSurface();}
-    void Dispatch(Action action) { if (!IsDisposed && IsHandleCreated) BeginInvoke((Action)(()=>{action();SyncSurface();})); }
+    void Dispatch(Action action) { if (!IsDisposed && IsHandleCreated) BeginInvoke((Action)(()=>{action();if(!IsDisposed) SyncSurface();})); }
     void StartUpdate() {
         try {
             var start = new ProcessStartInfo(python, "\"" + Path.Combine(session,"transaction.py") + "\" \"" + session + "\"") {
@@ -51,12 +51,15 @@ internal sealed class UpdateWindow : StudioUpdateSurface {
                 } catch { }
             };
             child.ErrorDataReceived += (s,e) => { if(e.Data != null) File.AppendAllText(Path.Combine(session,"updater.log"),e.Data+Environment.NewLine); };
-            child.Exited += (s,e) => Dispatch(() => {
-                complete = true; close.Enabled = true;
-                if(child.ExitCode == 0) { title.Text="更新完成"; detail.Text="工作台已重启，并通过启动检查。"; progress.Value=100; }
-                else { title.Text="更新未完成"; detail.Text="已尝试恢复原版本。请查看更新日志后重试。\n"+session; }
-            });
             child.Start(); child.BeginOutputReadLine(); child.BeginErrorReadLine();
+            ThreadPool.QueueUserWorkItem(_=>{
+                child.WaitForExit();int code=child.ExitCode;
+                Dispatch(() => {
+                    complete = true; close.Enabled = true;
+                    if(code == 0) { Close();return; }
+                    title.Text="更新未完成"; detail.Text="已尝试恢复原版本。请查看更新日志后重试。\n"+session;
+                });
+            });
         } catch (Exception error) { complete=true; close.Enabled=true; title.Text="无法启动更新"; detail.Text=error.Message; }
     }
     [STAThread] static int Main(string[] args) {
@@ -113,7 +116,7 @@ internal sealed class UpdateOfferWindow : StudioUpdateSurface {
         SyncSurface();
     }
     void SyncSurface() {StatusTitle=title.Text;StatusDetail=detail.Text;Fraction=progress.Value/100d;View=busy?(progress.Value>=28?"working":"downloading"):updated||current?"ready":close.Visible?"error":"idle";IsBusy=busy;RefreshSurface();}
-    void Dispatch(Action action) {if(!IsDisposed && IsHandleCreated) BeginInvoke((Action)(()=>{action();SyncSurface();}));}
+    void Dispatch(Action action) {if(!IsDisposed && IsHandleCreated) BeginInvoke((Action)(()=>{action();if(!IsDisposed) SyncSurface();}));}
     void ReturnToStudio() {
         string executable=Path.Combine(root,"易容 Studio.exe");
         if(!File.Exists(executable)) executable=Path.Combine(root,"启动FaceSwap Studio.exe");
@@ -149,7 +152,7 @@ internal sealed class UpdateOfferWindow : StudioUpdateSurface {
                 Dispatch(()=>{
                     busy=false;
                     if(code==0 && action=="later") {Close();return;}
-                    if(code==0) {updated=true;title.Text="更新完成";detail.Text="易容 Studio 已重启，并通过启动检查。";progress.Value=100;close.Text="关闭";close.Visible=true;}
+                    if(code==0) {updated=true;Close();return;}
                     else if(code==2) {current=true;title.Text="当前已是最新版本";close.Visible=true;}
                     else {title.Text="更新未完成";now.Text="重试更新";now.Enabled=later.Enabled=true;close.Visible=true;}
                 });
