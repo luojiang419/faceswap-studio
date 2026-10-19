@@ -1,10 +1,14 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:faceswap_studio/shared/services/bridge_client.dart';
 import 'package:faceswap_studio/shared/widgets/studio_media_viewer.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
 
 const Set<String> _personaImageExtensions = {
   'jpg',
@@ -34,6 +38,14 @@ class PersonasPage extends StatefulWidget {
 
 class _PersonasPageState extends State<PersonasPage> {
   final BridgeClient _client = BridgeClient();
+  final ScrollController _horizontalScroll = ScrollController();
+  final ScrollController _verticalScroll = ScrollController();
+  static Future<void>? _settingsWrites;
+  Timer? _saveScaleTimer;
+  double _gridScale = 100;
+  int _scaleRevision = 0;
+  bool _zoomHovered = false;
+  bool _zoomPinned = false;
 
   bool _loading = true;
   bool _requestInFlight = false;
@@ -44,6 +56,85 @@ class _PersonasPageState extends State<PersonasPage> {
   void initState() {
     super.initState();
     _refresh();
+    _loadGridScale();
+  }
+
+  @override
+  void dispose() {
+    if (_saveScaleTimer?.isActive ?? false) {
+      _persistGridScale();
+    }
+    _horizontalScroll.dispose();
+    _verticalScroll.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadGridScale() async {
+    final revision = _scaleRevision;
+    try {
+      // 新页面读取前等待上一页面的最后一次写入。
+      await _settingsWrites;
+      final settings = await _client.getSettings();
+      final value = settings['persona_grid_scale'];
+      if (!mounted || revision != _scaleRevision) return;
+      if (value is num && value.isFinite) {
+        setState(() => _gridScale = value.toDouble().clamp(10, 800));
+      }
+    } catch (error) {
+      _showMessage('读取人物尺寸设置失败：$error');
+    }
+  }
+
+  void _setGridScale(double value) {
+    final next = value.roundToDouble().clamp(10.0, 800.0);
+    if (next == _gridScale) return;
+    setState(() {
+      _gridScale = next;
+      _scaleRevision++;
+    });
+    _saveScaleTimer?.cancel();
+    _saveScaleTimer = Timer(
+      const Duration(milliseconds: 250),
+      _persistGridScale,
+    );
+  }
+
+  void _persistGridScale() {
+    _saveScaleTimer?.cancel();
+    final value = _gridScale;
+    // 串行写入，防止旧请求晚返回覆盖最新倍率。
+    late final Future<void> write;
+    write = (_settingsWrites ?? Future<void>.value())
+        .then((_) async {
+          try {
+            final saved = await _client.updateSettings({
+              'persona_grid_scale': value,
+            });
+            if (saved['persona_grid_scale'] != value) {
+              throw StateError('服务未保存尺寸设置，请重启应用后重试。');
+            }
+          } catch (error) {
+            _showMessage('保存人物尺寸设置失败：$error');
+          }
+        })
+        .whenComplete(() {
+          if (identical(_settingsWrites, write)) _settingsWrites = null;
+        });
+    _settingsWrites = write;
+  }
+
+  void _handlePointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent ||
+        !HardwareKeyboard.instance.isControlPressed) {
+      return;
+    }
+    final delta = event.scrollDelta.dy != 0
+        ? event.scrollDelta.dy
+        : event.scrollDelta.dx;
+    if (delta == 0) return;
+    GestureBinding.instance.pointerSignalResolver.register(event, (_) {
+      _setGridScale(_gridScale - delta.sign * 10);
+    });
   }
 
   void _showMessage(String message) {
@@ -206,46 +297,121 @@ class _PersonasPageState extends State<PersonasPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Stack(
-      children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    return LayoutBuilder(
+      builder: (context, constraints) => Listener(
+        onPointerSignal: _handlePointerSignal,
+        behavior: HitTestBehavior.opaque,
+        child: Stack(
           children: [
-            Row(
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Text('人物形象', style: theme.textTheme.headlineMedium),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '人物形象',
+                        style: theme.textTheme.headlineMedium,
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: _refresh,
+                      icon: const Icon(Icons.refresh_rounded),
+                      tooltip: '刷新人物形象',
+                    ),
+                  ],
                 ),
-                IconButton(
-                  onPressed: _refresh,
-                  icon: const Icon(Icons.refresh_rounded),
-                  tooltip: '刷新人物形象',
+                const SizedBox(height: 8),
+                Text(
+                  _root.isEmpty ? '人物形象库' : _root,
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
+                const SizedBox(height: 18),
+                Expanded(child: _buildGrid(theme)),
               ],
             ),
-            const SizedBox(height: 8),
-            Text(
-              _root.isEmpty ? '人物形象库' : _root,
-              style: theme.textTheme.bodyLarge?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+            Positioned(
+              right: 0,
+              bottom: 72,
+              child: MouseRegion(
+                onEnter: (_) => setState(() => _zoomHovered = true),
+                onExit: (_) => setState(() => _zoomHovered = false),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_zoomHovered || _zoomPinned)
+                      Container(
+                        width: math.min(320, constraints.maxWidth),
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: Card(
+                          elevation: 6,
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Expanded(child: Text('人物格子尺寸')),
+                                    Text('${_gridScale.round()}%'),
+                                    IconButton(
+                                      tooltip: '恢复 100%',
+                                      onPressed: () => _setGridScale(100),
+                                      icon: const Icon(
+                                        Icons.restart_alt_rounded,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                Slider(
+                                  key: const ValueKey(
+                                    'persona-grid-scale-slider',
+                                  ),
+                                  value: _gridScale,
+                                  min: 10,
+                                  max: 800,
+                                  divisions: 79,
+                                  label: '${_gridScale.round()}%',
+                                  onChanged: _setGridScale,
+                                  onChangeEnd: (_) => _persistGridScale(),
+                                ),
+                                Text(
+                                  '10%–800% · Ctrl＋滚轮',
+                                  style: theme.textTheme.bodySmall,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    FloatingActionButton.small(
+                      heroTag: 'persona-grid-scale',
+                      tooltip: '调节人物格子尺寸（Ctrl＋滚轮）',
+                      onPressed: () =>
+                          setState(() => _zoomPinned = !_zoomPinned),
+                      child: const Icon(Icons.photo_size_select_large_rounded),
+                    ),
+                  ],
+                ),
               ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
             ),
-            const SizedBox(height: 18),
-            Expanded(child: _buildGrid(theme)),
+            Positioned(
+              right: 0,
+              bottom: 0,
+              child: FloatingActionButton.extended(
+                onPressed: _addPersona,
+                icon: const Icon(Icons.person_add_alt_1_outlined),
+                label: const Text('添加人物'),
+              ),
+            ),
           ],
         ),
-        Positioned(
-          right: 0,
-          bottom: 0,
-          child: FloatingActionButton.extended(
-            onPressed: _addPersona,
-            icon: const Icon(Icons.person_add_alt_1_outlined),
-            label: const Text('添加人物'),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
@@ -263,34 +429,81 @@ class _PersonasPageState extends State<PersonasPage> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final crossAxisCount = constraints.maxWidth >= 1280
-            ? 4
-            : constraints.maxWidth >= 860
-            ? 3
-            : constraints.maxWidth >= 560
-            ? 2
-            : 1;
-        return GridView.builder(
-          padding: const EdgeInsets.only(bottom: 96),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: crossAxisCount,
-            crossAxisSpacing: 14,
-            mainAxisSpacing: 14,
-            childAspectRatio: crossAxisCount == 1 ? 1.28 : 0.86,
+        const cardWidth = 344.0;
+        const cardHeight = 400.0;
+        const gap = 14.0;
+        final scale = _gridScale / 100;
+        final width = cardWidth * scale;
+        final height = cardHeight * scale;
+        final columns = math.max(
+          1,
+          ((constraints.maxWidth + gap) / (width + gap)).floor(),
+        );
+        final gridWidth = width * columns + gap * (columns - 1);
+        return Scrollbar(
+          controller: _horizontalScroll,
+          thumbVisibility: gridWidth > constraints.maxWidth,
+          notificationPredicate: (notification) =>
+              notification.metrics.axis == Axis.horizontal,
+          child: SingleChildScrollView(
+            controller: _horizontalScroll,
+            scrollDirection: Axis.horizontal,
+            physics: const _PersonaScrollPhysics(),
+            child: SizedBox(
+              width: math.max(constraints.maxWidth, gridWidth),
+              child: Align(
+                alignment: Alignment.topLeft,
+                child: SizedBox(
+                  width: gridWidth,
+                  child: GridView.builder(
+                    key: const ValueKey('persona-grid'),
+                    controller: _verticalScroll,
+                    physics: const _PersonaScrollPhysics(),
+                    padding: const EdgeInsets.only(bottom: 152),
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: columns,
+                      crossAxisSpacing: gap,
+                      mainAxisSpacing: gap,
+                      mainAxisExtent: height,
+                    ),
+                    itemCount: _items.length,
+                    itemBuilder: (context, index) {
+                      final item = _items[index];
+                      return FittedBox(
+                        fit: BoxFit.fill,
+                        child: SizedBox(
+                          width: cardWidth,
+                          height: cardHeight,
+                          child: _PersonaCard(
+                            item: item,
+                            onTap: () => _openPersonaGallery(item),
+                            onAction: (action) => _handleAction(action, item),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
           ),
-          itemCount: _items.length,
-          itemBuilder: (context, index) {
-            final item = _items[index];
-            return _PersonaCard(
-              item: item,
-              onTap: () => _openPersonaGallery(item),
-              onAction: (action) => _handleAction(action, item),
-            );
-          },
         );
       },
     );
   }
+}
+
+class _PersonaScrollPhysics extends ClampingScrollPhysics {
+  const _PersonaScrollPhysics({super.parent});
+
+  @override
+  _PersonaScrollPhysics applyTo(ScrollPhysics? ancestor) =>
+      _PersonaScrollPhysics(parent: buildParent(ancestor));
+
+  @override
+  bool shouldAcceptUserOffset(ScrollMetrics position) =>
+      !HardwareKeyboard.instance.isControlPressed &&
+      super.shouldAcceptUserOffset(position);
 }
 
 class _PersonaCard extends StatelessWidget {

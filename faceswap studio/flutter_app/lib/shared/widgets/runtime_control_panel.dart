@@ -11,7 +11,6 @@ class RuntimeControlPanel extends StatelessWidget {
     required this.facefusionPid,
     required this.onStart,
     required this.onStop,
-    required this.onOpenBrowser,
     super.key,
   });
 
@@ -24,7 +23,6 @@ class RuntimeControlPanel extends StatelessWidget {
   final int? facefusionPid;
   final VoidCallback? onStart;
   final VoidCallback? onStop;
-  final VoidCallback? onOpenBrowser;
 
   bool get _isFaceFusionRunning =>
       serviceLabel == '在线' || serviceLabel == '启动中' || serviceLabel == '停止中';
@@ -75,10 +73,6 @@ class RuntimeControlPanel extends StatelessWidget {
                               ),
                     ),
                   ],
-                ),
-                _InlineStatusBadge(
-                  active: bridgeOnline,
-                  label: bridgeOnline ? 'Bridge 在线' : 'Bridge 离线',
                 ),
               ],
             ),
@@ -161,66 +155,11 @@ class RuntimeControlPanel extends StatelessWidget {
                     ),
                   ),
                 ),
-                OutlinedButton.icon(
-                  onPressed: bridgeOnline && !busy ? onOpenBrowser : null,
-                  icon: const Icon(Icons.open_in_new_rounded, size: 16),
-                  label: const Text('浏览器打开'),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(126, 38),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 12,
-                    ),
-                    textStyle: TextStyle(
-                      fontFamily: theme.textTheme.labelLarge?.fontFamily,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
               ],
             ),
           ],
         );
       },
-    );
-  }
-}
-
-class _InlineStatusBadge extends StatelessWidget {
-  const _InlineStatusBadge({required this.active, required this.label});
-
-  final bool active;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color:
-            (active
-                    ? theme.colorScheme.primary
-                    : theme.colorScheme.surfaceContainerHighest)
-                .withValues(alpha: active ? 0.14 : 0.72),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: active
-              ? theme.colorScheme.primary.withValues(alpha: 0.24)
-              : theme.colorScheme.outlineVariant,
-        ),
-      ),
-      child: Text(
-        label,
-        style: theme.textTheme.bodySmall?.copyWith(
-          color: active
-              ? theme.colorScheme.primary
-              : theme.colorScheme.onSurfaceVariant,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
     );
   }
 }

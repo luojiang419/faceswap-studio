@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -443,6 +444,7 @@ class FaceFusionRuntime:
             "custom_proxy_url": DEFAULT_CUSTOM_PROXY_URL,
             "close_behavior": WINDOW_CLOSE_BEHAVIOR_MINIMIZE_TO_TRAY,
             "sidebar_expanded": False,
+            "persona_grid_scale": 100.0,
             "auto_check_updates": True,
             "content_analyser_score": DEFAULT_CONTENT_ANALYSER_SCORE,
             "workspace_options_panel_width": DEFAULT_WORKSPACE_OPTIONS_PANEL_WIDTH,
@@ -469,6 +471,7 @@ class FaceFusionRuntime:
             "custom_proxy_url": self._normalize_proxy_url(payload.get("custom_proxy_url")),
             "close_behavior": self._normalize_close_behavior(payload.get("close_behavior")),
             "sidebar_expanded": payload.get("sidebar_expanded") is True,
+            "persona_grid_scale": self._normalize_persona_grid_scale(payload.get("persona_grid_scale")),
             "auto_check_updates": payload.get("auto_check_updates", True) is True,
             "content_analyser_score": self._normalize_content_analyser_score(payload.get("content_analyser_score")),
             "workspace_options_panel_width": self._normalize_workspace_options_panel_width(
@@ -506,6 +509,16 @@ class FaceFusionRuntime:
 
     def _save_settings(self) -> None:
         self._write_settings(self._settings)
+
+    @staticmethod
+    def _normalize_persona_grid_scale(value: Any) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return 100.0
+        try:
+            scale = float(value)
+        except (ValueError, OverflowError):
+            return 100.0
+        return min(800.0, max(10.0, scale)) if math.isfinite(scale) else 100.0
 
     def _normalize_model_download_mode(self, value: Any) -> str:
         mode = str(value or MODEL_DOWNLOAD_MODE_DOMESTIC).strip()
@@ -5794,6 +5807,8 @@ class FaceFusionRuntime:
             self._settings["auto_check_updates"] = payload["auto_check_updates"] is True
         if "sidebar_expanded" in payload:
             self._settings["sidebar_expanded"] = payload["sidebar_expanded"] is True
+        if "persona_grid_scale" in payload:
+            self._settings["persona_grid_scale"] = self._normalize_persona_grid_scale(payload["persona_grid_scale"])
         if "content_analyser_score" in payload:
             self._settings["content_analyser_score"] = self._normalize_content_analyser_score(
                 payload["content_analyser_score"],

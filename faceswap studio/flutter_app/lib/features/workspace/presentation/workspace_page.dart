@@ -17,35 +17,22 @@ class WorkspacePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('工作台', style: theme.textTheme.headlineMedium),
-        const SizedBox(height: 14),
-        const Expanded(
-          child: DefaultTabController(
-            length: 2,
-            child: Column(
-              children: [
-                TabBar(
-                  tabs: [
-                    Tab(text: '操作台'),
-                    Tab(text: '生成队列'),
-                  ],
-                ),
-                SizedBox(height: 12),
-                Expanded(
-                  child: TabBarView(
-                    children: [_OperationWorkbench(), _QueueBoard()],
-                  ),
-                ),
-              ],
-            ),
+    return const DefaultTabController(
+      length: 2,
+      child: Column(
+        children: [
+          TabBar(
+            tabs: [
+              Tab(text: '操作台'),
+              Tab(text: '生成队列'),
+            ],
           ),
-        ),
-      ],
+          SizedBox(height: 8),
+          Expanded(
+            child: TabBarView(children: [_OperationWorkbench(), _QueueBoard()]),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -191,10 +178,9 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
     final parsedValue = value is num
         ? value.toDouble()
         : double.tryParse('$value') ?? _defaultWorkspaceOptionsPanelWidth;
-    return parsedValue.clamp(
-      _minWorkspaceOptionsPanelWidth,
-      _maxWorkspaceOptionsPanelWidth,
-    ).toDouble();
+    return parsedValue
+        .clamp(_minWorkspaceOptionsPanelWidth, _maxWorkspaceOptionsPanelWidth)
+        .toDouble();
   }
 
   Future<void> _loadWorkspacePanelWidth() async {
@@ -545,20 +531,6 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
     }
   }
 
-  Future<void> _reloadWebUi() async {
-    if (_useNativeWorkbenchMode) {
-      await _refresh();
-      return;
-    }
-    if (!_bridgeOnline) {
-      return;
-    }
-    setState(() {
-      _lastLoadedUrl = null;
-    });
-    await _loadWebUiIfNeeded(force: true, showError: true);
-  }
-
   Future<void> _openBrowser() async {
     try {
       final result = await _client.openBrowser();
@@ -881,17 +853,6 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
     }
   }
 
-  String get _serviceLabel {
-    return switch (_serviceState) {
-      'ready' => '在线',
-      'starting' => '启动中',
-      'stopping' => '停止中',
-      'stopped' => '离线',
-      'bridge_offline' => 'Bridge 离线',
-      _ => _serviceState,
-    };
-  }
-
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -904,86 +865,28 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
 
         return Card(
           child: Padding(
-            padding: EdgeInsets.all(compactHeader ? 16 : 18),
+            padding: EdgeInsets.all(compactHeader ? 10 : 18),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Wrap(
-                  spacing: compactHeader ? 8 : 10,
-                  runSpacing: compactHeader ? 8 : 10,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          '操作台',
-                          style: compactHeader
-                              ? theme.textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                )
-                              : theme.textTheme.titleLarge,
-                        ),
-                        if (!_useNativeWorkbenchMode) ...[
-                          const SizedBox(width: 8),
-                          IconButton(
-                            onPressed: _isWebUiReady
-                                ? _togglePinnedPreview
-                                : null,
-                            tooltip: _isPinned
-                                ? '取消顶部固定'
-                                : '固定 SOURCE / TARGET / PREVIEW',
-                            icon: Icon(
-                              _isPinned
-                                  ? Icons.push_pin_rounded
-                                  : Icons.push_pin_outlined,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                    _WorkspacePill(
-                      compact: compactHeader,
-                      active: _bridgeOnline,
-                      label: _bridgeOnline ? 'Bridge 在线' : 'Bridge 离线',
-                    ),
-                    _WorkspacePill(
-                      compact: compactHeader,
-                      active: _isWebUiReady,
-                      label: 'FaceFusion $_serviceLabel',
-                    ),
-                    FilledButton.tonalIcon(
-                      onPressed: _bridgeOnline ? _reloadWebUi : null,
+                if (!_useNativeWorkbenchMode)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: IconButton(
+                      onPressed: _isWebUiReady ? _togglePinnedPreview : null,
+                      tooltip: _isPinned
+                          ? '取消顶部固定'
+                          : '固定 SOURCE / TARGET / PREVIEW',
                       icon: Icon(
-                        Icons.refresh_rounded,
-                        size: compactHeader ? 18 : 20,
-                      ),
-                      label: const Text('重新加载'),
-                      style: FilledButton.styleFrom(
-                        minimumSize: Size(0, compactHeader ? 36 : 40),
-                        padding: EdgeInsets.symmetric(
-                          horizontal: compactHeader ? 14 : 16,
-                        ),
+                        _isPinned
+                            ? Icons.push_pin_rounded
+                            : Icons.push_pin_outlined,
                       ),
                     ),
-                    FilledButton.tonalIcon(
-                      onPressed: _bridgeOnline ? _openBrowser : null,
-                      icon: Icon(
-                        Icons.open_in_browser_rounded,
-                        size: compactHeader ? 18 : 20,
-                      ),
-                      label: const Text('浏览器打开'),
-                      style: FilledButton.styleFrom(
-                        minimumSize: Size(0, compactHeader ? 36 : 40),
-                        padding: EdgeInsets.symmetric(
-                          horizontal: compactHeader ? 14 : 16,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                SizedBox(height: compactHeader ? 12 : 14),
-                if (_isWebUiReady && _pageProgress < 100)
+                  ),
+                if (!_useNativeWorkbenchMode &&
+                    _isWebUiReady &&
+                    _pageProgress < 100)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: LinearProgressIndicator(value: _pageProgress / 100),
@@ -1158,34 +1061,18 @@ class _NativeWorkbenchPane extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final currentDraft = draft ?? const _WorkspaceDraft.empty();
 
     return LayoutBuilder(
       builder: (context, constraints) {
         final compact =
             constraints.maxHeight <= 640 || constraints.maxWidth <= 1220;
-        final useSingleColumn = constraints.maxWidth <= 1100;
-        final useWideTopRow = constraints.maxWidth >= 1480;
-        final outerPadding = compact ? 18.0 : 24.0;
-        final sectionGap = compact ? 14.0 : 22.0;
-        final cardGap = compact ? 12.0 : 18.0;
-        final buttonGap = compact ? 10.0 : 12.0;
-        final draftPreviewHeight = compact
-            ? 148.0
-            : useWideTopRow
-            ? 212.0
-            : 188.0;
-        final nativePreviewHeight = compact
-            ? 248.0
-            : useWideTopRow
-            ? 264.0
-            : 300.0;
-        final collapsedOptionsRailWidth = compact ? 44.0 : 48.0;
-        final collapsedOptionsRailGap = compact ? 10.0 : 12.0;
-        final contentWidth = constraints.maxWidth > 1760
-            ? 1760.0
-            : constraints.maxWidth;
+        final useSingleColumn = constraints.maxWidth < 760;
+        final outerPadding = compact ? 10.0 : 16.0;
+        final cardGap = compact ? 10.0 : 16.0;
+        final buttonGap = compact ? 8.0 : 12.0;
+        final collapsedOptionsRailWidth = compact ? 40.0 : 44.0;
+        final collapsedOptionsRailGap = 8.0;
         final panelMinWidth = compact
             ? (constraints.maxWidth - 64.0).clamp(220.0, 320.0).toDouble()
             : 320.0;
@@ -1196,10 +1083,7 @@ class _NativeWorkbenchPane extends StatelessWidget {
             constraints.maxWidth - (compact ? 84.0 : 240.0);
         final panelMaxWidth = math.max(
           panelMinWidth,
-          math.min(
-            760.0,
-            math.min(panelViewportLimit, panelAvailableLimit),
-          ),
+          math.min(760.0, math.min(panelViewportLimit, panelAvailableLimit)),
         );
         final resolvedPanelWidth = workspaceOptionsPanelWidth
             .clamp(panelMinWidth, panelMaxWidth)
@@ -1209,7 +1093,6 @@ class _NativeWorkbenchPane extends StatelessWidget {
 
         final sourceCard = _WorkspaceDraftCard(
           compact: compact,
-          previewHeight: draftPreviewHeight,
           title: 'SOURCE',
           subtitle: currentDraft.sourcePaths.isEmpty
               ? '支持图片和音频，可一次选择多个源文件。'
@@ -1246,7 +1129,6 @@ class _NativeWorkbenchPane extends StatelessWidget {
 
         final targetCard = _WorkspaceDraftCard(
           compact: compact,
-          previewHeight: draftPreviewHeight,
           title: 'TARGET',
           subtitle: currentDraft.targetPath == null
               ? '支持目标图片或目标视频。'
@@ -1268,10 +1150,8 @@ class _NativeWorkbenchPane extends StatelessWidget {
 
         final previewPanel = _WorkspacePreviewPanel(
           compact: compact,
-          previewHeight: nativePreviewHeight,
           previewBusy: previewBusy,
           bridgeOnline: bridgeOnline,
-          canPreview: currentDraft.canSubmit && !busy,
           previewResult: previewResult,
           previewMessage: previewMessage,
           workspaceOptionsSchema: workspaceOptionsSchema,
@@ -1285,10 +1165,6 @@ class _NativeWorkbenchPane extends StatelessWidget {
           lastVideoFrameTotal: lastVideoFrameTotal,
           onOpenPreviewResult: previewResult != null
               ? () => onOpenPreviewResult()
-              : null,
-          onPreview:
-              bridgeOnline && currentDraft.canSubmit && !busy && !previewBusy
-              ? onPreviewWorkspace
               : null,
           onUpdateOptions: onUpdateOptions,
           onPreviewFrameSelected:
@@ -1319,56 +1195,48 @@ class _NativeWorkbenchPane extends StatelessWidget {
           webUiReady: webUiReady,
           busy: busy,
           draft: currentDraft,
+          previewBusy: previewBusy,
+          hasPreview: previewResult != null,
+          onPreviewWorkspace: onPreviewWorkspace,
           onQueueWorkspace: onQueueWorkspace,
           onRunWorkspace: onRunWorkspace,
           onOpenBrowser: onOpenBrowser,
         );
 
-        late final Widget workspaceSections;
-        if (useSingleColumn) {
-          workspaceSections = Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              sourceCard,
-              SizedBox(height: cardGap),
-              targetCard,
-              SizedBox(height: cardGap),
-              previewPanel,
-            ],
-          );
-        } else if (useWideTopRow) {
-          workspaceSections = Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        // 三个预览共用视口的剩余空间，媒体内部按 contain 缩放。
+        final workspaceSections = LayoutBuilder(
+          builder: (context, viewport) {
+            if (useSingleColumn && viewport.maxHeight >= 520) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(flex: 5, child: sourceCard),
-                  SizedBox(width: cardGap),
-                  Expanded(flex: 5, child: targetCard),
-                  SizedBox(width: cardGap),
-                  Expanded(flex: 6, child: previewPanel),
+                  Expanded(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(child: sourceCard),
+                        SizedBox(width: cardGap),
+                        Expanded(child: targetCard),
+                      ],
+                    ),
+                  ),
+                  SizedBox(height: cardGap),
+                  Expanded(child: previewPanel),
                 ],
-              ),
-            ],
-          );
-        } else {
-          workspaceSections = Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(child: sourceCard),
-                  SizedBox(width: cardGap),
-                  Expanded(child: targetCard),
-                ],
-              ),
-              SizedBox(height: cardGap),
-              previewPanel,
-            ],
-          );
-        }
+              );
+            }
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(child: sourceCard),
+                SizedBox(width: cardGap),
+                Expanded(child: targetCard),
+                SizedBox(width: cardGap),
+                Expanded(flex: useSingleColumn ? 2 : 1, child: previewPanel),
+              ],
+            );
+          },
+        );
 
         final workspaceContent = Padding(
           padding: EdgeInsets.fromLTRB(
@@ -1377,50 +1245,13 @@ class _NativeWorkbenchPane extends StatelessWidget {
             outerPadding + collapsedOptionsRailWidth + collapsedOptionsRailGap,
             outerPadding,
           ),
-          child: Align(
-            alignment: Alignment.topCenter,
-            child: SizedBox(
-              width: contentWidth,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(
-                    child: SingleChildScrollView(
-                      padding: EdgeInsets.only(
-                        right: compact ? 2 : 4,
-                        bottom: compact ? 10 : 12,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Text(
-                            'Windows 原生工作台',
-                            style:
-                                (compact
-                                        ? theme.textTheme.titleLarge
-                                        : theme.textTheme.headlineSmall)
-                                    ?.copyWith(fontWeight: FontWeight.w700),
-                          ),
-                          SizedBox(height: compact ? 8 : 10),
-                          Text(
-                            '使用 Flutter 原生文件选择器准备 SOURCE / TARGET，参数从右侧浮层入口打开，预览后可提交本地队列。',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                              height: compact ? 1.25 : 1.4,
-                              fontSize: compact ? 13 : null,
-                            ),
-                          ),
-                          SizedBox(height: sectionGap),
-                          workspaceSections,
-                        ],
-                      ),
-                    ),
-                  ),
-                  SizedBox(height: compact ? 12 : 16),
-                  submitPanel,
-                ],
-              ),
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(child: workspaceSections),
+              SizedBox(height: compact ? 10 : 16),
+              submitPanel,
+            ],
           ),
         );
 
@@ -1447,7 +1278,6 @@ class _NativeWorkbenchPane extends StatelessWidget {
 class _WorkspaceDraftCard extends StatelessWidget {
   const _WorkspaceDraftCard({
     this.compact = false,
-    this.previewHeight = 180,
     required this.title,
     required this.subtitle,
     required this.filePath,
@@ -1461,7 +1291,6 @@ class _WorkspaceDraftCard extends StatelessWidget {
   });
 
   final bool compact;
-  final double previewHeight;
   final String title;
   final String subtitle;
   final String? filePath;
@@ -1478,7 +1307,7 @@ class _WorkspaceDraftCard extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Container(
-      padding: EdgeInsets.all(compact ? 14 : 18),
+      padding: EdgeInsets.all(compact ? 10 : 14),
       decoration: BoxDecoration(
         color: theme.cardTheme.color,
         borderRadius: BorderRadius.circular(22),
@@ -1500,6 +1329,8 @@ class _WorkspaceDraftCard extends StatelessWidget {
           SizedBox(height: compact ? 4 : 6),
           Text(
             subtitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
               height: compact ? 1.22 : 1.35,
@@ -1507,67 +1338,72 @@ class _WorkspaceDraftCard extends StatelessWidget {
             ),
           ),
           SizedBox(height: compact ? 10 : 14),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(18),
-            child: Material(
-              color: theme.brightness == Brightness.dark
-                  ? const Color(0xFF20201E)
-                  : const Color(0xFFF5F5F5),
-              child: InkWell(
-                onTap: mediaType == 'video' ? null : onOpenPreview,
-                child: SizedBox(
-                  height: previewHeight,
-                  width: double.infinity,
-                  child: mediaType == 'video' && filePath != null
-                      ? StudioInlineVideoPlayer(
-                          filePath: filePath!,
-                          thumbnailPath: thumbnailPath,
-                          fit: BoxFit.contain,
-                          onOpenFullscreen: onOpenPreview,
-                        )
-                      : Stack(
-                          children: [
-                            Positioned.fill(
-                              child: thumbnailPath != null
-                                  ? Padding(
-                                      padding: EdgeInsets.all(compact ? 8 : 10),
-                                      child: Image.file(
-                                        File(thumbnailPath!),
-                                        fit: BoxFit.contain,
-                                        errorBuilder: (_, _, _) =>
-                                            _MediaPlaceholder(
-                                              compact: compact,
-                                              mediaType: mediaType,
-                                            ),
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(18),
+              child: Material(
+                color: theme.brightness == Brightness.dark
+                    ? const Color(0xFF20201E)
+                    : const Color(0xFFF5F5F5),
+                child: InkWell(
+                  onTap: mediaType == 'video' ? null : onOpenPreview,
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: mediaType == 'video' && filePath != null
+                        ? StudioInlineVideoPlayer(
+                            filePath: filePath!,
+                            thumbnailPath: thumbnailPath,
+                            fit: BoxFit.contain,
+                            onOpenFullscreen: onOpenPreview,
+                          )
+                        : Stack(
+                            children: [
+                              Positioned.fill(
+                                child: thumbnailPath != null
+                                    ? Padding(
+                                        padding: EdgeInsets.all(
+                                          compact ? 8 : 10,
+                                        ),
+                                        child: Image.file(
+                                          File(thumbnailPath!),
+                                          fit: BoxFit.contain,
+                                          errorBuilder: (_, _, _) =>
+                                              _MediaPlaceholder(
+                                                compact: compact,
+                                                mediaType: mediaType,
+                                              ),
+                                        ),
+                                      )
+                                    : _MediaPlaceholder(
+                                        compact: compact,
+                                        mediaType: mediaType,
                                       ),
-                                    )
-                                  : _MediaPlaceholder(
-                                      compact: compact,
-                                      mediaType: mediaType,
-                                    ),
-                            ),
-                            if (onOpenPreview != null)
-                              Positioned(
-                                right: compact ? 8 : 10,
-                                bottom: compact ? 8 : 10,
-                                child: _PreviewActionBadge(
-                                  label: mediaType == 'video' ? '点击播放' : '点击查看',
-                                ),
                               ),
-                          ],
-                        ),
+                              if (onOpenPreview != null)
+                                Positioned(
+                                  right: compact ? 8 : 10,
+                                  bottom: compact ? 8 : 10,
+                                  child: _PreviewActionBadge(
+                                    label: mediaType == 'video'
+                                        ? '点击播放'
+                                        : '点击查看',
+                                  ),
+                                ),
+                            ],
+                          ),
+                  ),
                 ),
               ),
             ),
           ),
-          SizedBox(height: compact ? 10 : 12),
+          SizedBox(height: compact ? 8 : 10),
           Text(
-            filePath ?? '未选择文件',
+            filePath == null ? '未选择文件' : filePath!.split(RegExp(r'[/\\]')).last,
             style: theme.textTheme.bodyMedium?.copyWith(
               fontSize: compact ? 13 : null,
               height: compact ? 1.2 : null,
             ),
-            maxLines: compact ? 1 : 2,
+            maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
           SizedBox(height: compact ? 10 : 14),
@@ -1620,6 +1456,45 @@ class _WorkspaceDraftActionsBar extends StatelessWidget {
     final minActionWidth = compact ? 132.0 : 150.0;
     return LayoutBuilder(
       builder: (context, constraints) {
+        if (constraints.maxWidth < 520) {
+          final primary = actions.first;
+          return Row(
+            children: [
+              Expanded(
+                child: FilledButton.tonalIcon(
+                  onPressed: primary.onPressed,
+                  icon: Icon(primary.icon, size: 18),
+                  label: Text(
+                    primary.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 36),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
+                ),
+              ),
+              PopupMenuButton<_WorkspaceDraftAction>(
+                tooltip: '更多素材操作',
+                icon: const Icon(Icons.more_horiz_rounded),
+                onSelected: (action) => action.onPressed?.call(),
+                itemBuilder: (context) => [
+                  for (final action in actions.skip(1))
+                    PopupMenuItem(
+                      value: action,
+                      enabled: action.onPressed != null,
+                      child: ListTile(
+                        dense: true,
+                        leading: Icon(action.icon, size: 18),
+                        title: Text(action.label),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          );
+        }
         final maxColumns = actions.length.clamp(1, 4).toInt();
         var columns = maxColumns;
         while (columns > 1 &&
@@ -1986,10 +1861,8 @@ class _WorkspaceDraft {
 class _WorkspacePreviewPanel extends StatefulWidget {
   const _WorkspacePreviewPanel({
     this.compact = false,
-    required this.previewHeight,
     required this.previewBusy,
     required this.bridgeOnline,
-    required this.canPreview,
     required this.previewResult,
     required this.previewMessage,
     required this.workspaceOptionsSchema,
@@ -1999,16 +1872,13 @@ class _WorkspacePreviewPanel extends StatefulWidget {
     required this.targetVideoFrameTotal,
     required this.lastVideoFrameTotal,
     required this.onOpenPreviewResult,
-    required this.onPreview,
     required this.onUpdateOptions,
     required this.onPreviewFrameSelected,
   });
 
   final bool compact;
-  final double previewHeight;
   final bool previewBusy;
   final bool bridgeOnline;
-  final bool canPreview;
   final _WorkspacePreviewResult? previewResult;
   final String previewMessage;
   final WorkspaceOptionsSchema? workspaceOptionsSchema;
@@ -2018,7 +1888,6 @@ class _WorkspacePreviewPanel extends StatefulWidget {
   final int? targetVideoFrameTotal;
   final int? lastVideoFrameTotal;
   final VoidCallback? onOpenPreviewResult;
-  final Future<void> Function()? onPreview;
   final Future<void> Function(Map<String, dynamic> payload, {bool clearPreview})
   onUpdateOptions;
   final Future<void> Function(int frameNumber)? onPreviewFrameSelected;
@@ -2028,7 +1897,15 @@ class _WorkspacePreviewPanel extends StatefulWidget {
 }
 
 class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
+  final ScrollController _detailsScrollController = ScrollController();
   double? _sliderFrameValue;
+
+  @override
+  void dispose() {
+    _detailsScrollController.dispose();
+    super.dispose();
+  }
+
   StudioComparisonMode _comparisonMode = StudioComparisonMode.wipe;
   bool _comparisonEnabled = true;
   double _comparisonDivider = 0.5;
@@ -2187,14 +2064,14 @@ class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
-              Expanded(
-                child: Text(
-                  '参考脸缩略图',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
+              Text(
+                '参考脸缩略图',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
                 ),
               ),
               _PreviewMetaChip(
@@ -2254,251 +2131,249 @@ class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
     final sliderMaxFrame = _showVideoSlider ? videoFrameTotal! - 1 : 1;
     final sliderValue = currentFrame.clamp(0, sliderMaxFrame).toDouble();
 
-    return Container(
-      padding: EdgeInsets.all(widget.compact ? 14 : 18),
-      decoration: BoxDecoration(
-        color: theme.cardTheme.color,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.35),
+    return LayoutBuilder(
+      builder: (context, constraints) => Container(
+        padding: EdgeInsets.all(widget.compact ? 10 : 14),
+        decoration: BoxDecoration(
+          color: theme.cardTheme.color,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(
+            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.35),
+          ),
         ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Wrap(
-            spacing: widget.compact ? 8 : 10,
-            runSpacing: widget.compact ? 8 : 10,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              Text(
-                '原生预览',
-                style:
-                    (widget.compact
-                            ? theme.textTheme.titleSmall
-                            : theme.textTheme.titleMedium)
-                        ?.copyWith(fontWeight: FontWeight.w800),
-              ),
-              _WorkspacePill(
-                compact: widget.compact,
-                active: previewResult != null,
-                label: previewResult == null ? '未生成' : '已生成',
-              ),
-              if (widget.targetMediaType != null)
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(
+              spacing: widget.compact ? 8 : 10,
+              runSpacing: widget.compact ? 8 : 10,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Text(
+                  '原生预览',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
                 _WorkspacePill(
-                  compact: widget.compact,
-                  active: true,
-                  label: widget.targetMediaType == 'video' ? '视频目标' : '图片目标',
+                  compact: true,
+                  active: previewResult != null,
+                  label: previewResult == null ? '未生成' : '已生成',
                 ),
-              FilledButton.icon(
-                onPressed:
-                    widget.bridgeOnline &&
-                        widget.canPreview &&
-                        !widget.previewBusy &&
-                        widget.onPreview != null
-                    ? () => widget.onPreview!()
-                    : null,
-                icon: Icon(
-                  Icons.preview_outlined,
-                  size: widget.compact ? 18 : 20,
-                ),
-                label: Text(previewResult == null ? '生成预览' : '重新生成预览'),
-                style: FilledButton.styleFrom(
-                  minimumSize: Size(0, widget.compact ? 36 : 40),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Expanded(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(18),
+                child: Material(
+                  color: theme.brightness == Brightness.dark
+                      ? const Color(0xFF20201E)
+                      : const Color(0xFFF5F5F5),
+                  child: InkWell(
+                    onTap: widget.onOpenPreviewResult,
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: widget.previewBusy
+                                ? Center(
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const SizedBox(
+                                          width: 28,
+                                          height: 28,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2.4,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 12),
+                                        Text(
+                                          '正在生成预览',
+                                          style: theme.textTheme.bodyMedium,
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                : previewResult != null
+                                ? previewResult.canCompare
+                                      ? StudioImageComparisonFrame(
+                                          beforeImage: MemoryImage(
+                                            previewResult.beforeImageBytes,
+                                          ),
+                                          afterImage: MemoryImage(
+                                            previewResult.afterImageBytes,
+                                          ),
+                                          singleImage: MemoryImage(
+                                            previewResult.imageBytes,
+                                          ),
+                                          mode: _comparisonEnabled
+                                              ? _comparisonMode
+                                              : StudioComparisonMode.single,
+                                          divider: _comparisonDivider,
+                                          onDividerChanged: (value) {
+                                            setState(() {
+                                              _comparisonDivider = value;
+                                            });
+                                          },
+                                          followPointer:
+                                              _comparisonEnabled &&
+                                              _comparisonMode ==
+                                                  StudioComparisonMode.wipe,
+                                          beforeLabel:
+                                              previewResult.targetMediaType ==
+                                                  'video'
+                                              ? '原视频帧'
+                                              : '原图',
+                                          afterLabel: '换脸结果',
+                                        )
+                                      : Image.memory(
+                                          previewResult.imageBytes,
+                                          fit: BoxFit.contain,
+                                          gaplessPlayback: true,
+                                          errorBuilder: (_, _, _) =>
+                                              _MediaPlaceholder(
+                                                compact: widget.compact,
+                                                mediaType:
+                                                    widget.targetMediaType,
+                                              ),
+                                        )
+                                : _MediaPlaceholder(
+                                    compact: widget.compact,
+                                    mediaType: widget.targetMediaType,
+                                  ),
+                          ),
+                          if (widget.onOpenPreviewResult != null)
+                            Positioned(
+                              right: widget.compact ? 8 : 10,
+                              bottom: widget.compact ? 8 : 10,
+                              child: const _PreviewActionBadge(label: '点击全屏查看'),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
               ),
-            ],
-          ),
-          SizedBox(height: widget.compact ? 8 : 10),
-          Text(
-            '使用当前参数草稿生成单帧 PNG 预览，确认效果后再入队。',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-              height: 1.35,
             ),
-          ),
-          if (previewResult != null) ...[
-            SizedBox(height: widget.compact ? 10 : 12),
-            _buildComparisonControls(canCompare: canCompare),
-            if (!canCompare) ...[
-              SizedBox(height: widget.compact ? 8 : 10),
-              _PreviewMetaChip(label: '当前预览缺少原始静帧，请重新生成预览'),
-            ],
-          ],
-          SizedBox(height: widget.compact ? 12 : 14),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(18),
-            child: Material(
-              color: theme.brightness == Brightness.dark
-                  ? const Color(0xFF20201E)
-                  : const Color(0xFFF5F5F5),
-              child: InkWell(
-                onTap: widget.onOpenPreviewResult,
-                child: SizedBox(
-                  height: widget.previewHeight,
-                  width: double.infinity,
-                  child: Stack(
+            const SizedBox(height: 8),
+            SizedBox(
+              height: (constraints.maxHeight * 0.30).clamp(60.0, 160.0),
+              child: Scrollbar(
+                controller: _detailsScrollController,
+                thumbVisibility: true,
+                child: SingleChildScrollView(
+                  controller: _detailsScrollController,
+                  primary: false,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Positioned.fill(
-                        child: widget.previewBusy
-                            ? Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const SizedBox(
-                                      width: 28,
-                                      height: 28,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2.4,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 12),
-                                    Text(
-                                      '正在生成预览',
-                                      style: theme.textTheme.bodyMedium,
-                                    ),
-                                  ],
-                                ),
-                              )
-                            : previewResult != null
-                            ? previewResult.canCompare
-                                  ? StudioImageComparisonFrame(
-                                      beforeImage: MemoryImage(
-                                        previewResult.beforeImageBytes,
-                                      ),
-                                      afterImage: MemoryImage(
-                                        previewResult.afterImageBytes,
-                                      ),
-                                      singleImage: MemoryImage(
-                                        previewResult.imageBytes,
-                                      ),
-                                      mode: _comparisonEnabled
-                                          ? _comparisonMode
-                                          : StudioComparisonMode.single,
-                                      divider: _comparisonDivider,
-                                      onDividerChanged: (value) {
-                                        setState(() {
-                                          _comparisonDivider = value;
-                                        });
-                                      },
-                                      followPointer:
-                                          _comparisonEnabled &&
-                                          _comparisonMode ==
-                                              StudioComparisonMode.wipe,
-                                      beforeLabel:
-                                          previewResult.targetMediaType ==
-                                              'video'
-                                          ? '原视频帧'
-                                          : '原图',
-                                      afterLabel: '换脸结果',
-                                    )
-                                  : Image.memory(
-                                      previewResult.imageBytes,
-                                      fit: BoxFit.contain,
-                                      gaplessPlayback: true,
-                                      errorBuilder: (_, _, _) =>
-                                          _MediaPlaceholder(
-                                            compact: widget.compact,
-                                            mediaType: widget.targetMediaType,
-                                          ),
-                                    )
-                            : _MediaPlaceholder(
-                                compact: widget.compact,
-                                mediaType: widget.targetMediaType,
+                      if (previewResult != null) ...[
+                        _buildComparisonControls(canCompare: canCompare),
+                        const SizedBox(height: 8),
+                      ],
+                      SizedBox(height: widget.compact ? 12 : 14),
+                      if (widget.targetMediaType == 'video') ...[
+                        Row(
+                          children: [
+                            Text(
+                              '预览帧',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
                               ),
-                      ),
-                      if (widget.onOpenPreviewResult != null)
-                        Positioned(
-                          right: widget.compact ? 8 : 10,
-                          bottom: widget.compact ? 8 : 10,
-                          child: const _PreviewActionBadge(label: '点击全屏查看'),
+                            ),
+                            const Spacer(),
+                            Text(
+                              _frameSliderLabel(currentFrame, videoFrameTotal),
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
                         ),
+                        Slider(
+                          value: sliderValue,
+                          min: 0,
+                          max: sliderMaxFrame.toDouble(),
+                          divisions: _showVideoSlider ? sliderMaxFrame : 1,
+                          label: '$currentFrame',
+                          onChanged:
+                              !_canScrubVideo ||
+                                  widget.onPreviewFrameSelected == null
+                              ? null
+                              : (nextValue) {
+                                  setState(() {
+                                    _sliderFrameValue = nextValue;
+                                  });
+                                },
+                          onChangeEnd:
+                              !_canScrubVideo ||
+                                  widget.onPreviewFrameSelected == null
+                              ? null
+                              : (nextValue) async {
+                                  final nextFrame = nextValue.round();
+                                  setState(() {
+                                    _sliderFrameValue = nextFrame.toDouble();
+                                  });
+                                  await widget.onPreviewFrameSelected!(
+                                    nextFrame,
+                                  );
+                                  if (!mounted) {
+                                    return;
+                                  }
+                                  setState(() {
+                                    _sliderFrameValue = null;
+                                  });
+                                },
+                        ),
+                        SizedBox(height: widget.compact ? 10 : 12),
+                      ],
+                      _buildFaceSelectorControls(theme),
+                      SizedBox(height: widget.compact ? 10 : 12),
+                      Text(
+                        widget.previewMessage,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          height: 1.35,
+                        ),
+                      ),
+                      if (previewResult != null) ...[
+                        SizedBox(height: widget.compact ? 10 : 12),
+                        Wrap(
+                          spacing: widget.compact ? 8 : 10,
+                          runSpacing: widget.compact ? 8 : 10,
+                          children: [
+                            _PreviewMetaChip(
+                              label:
+                                  '${previewResult.width}x${previewResult.height}',
+                            ),
+                            _PreviewMetaChip(
+                              label: previewResult.previewModeLabel,
+                            ),
+                            _PreviewMetaChip(
+                              label: previewResult.previewResolution,
+                            ),
+                            if (previewResult.targetMediaType == 'video')
+                              _PreviewMetaChip(
+                                label: previewResult.videoFrameTotal == null
+                                    ? '帧 ${previewResult.frameNumber}'
+                                    : '帧 ${previewResult.frameNumber} / ${previewResult.videoFrameTotal! - 1}',
+                              ),
+                            _PreviewMetaChip(
+                              label: previewResult.orientationLabel,
+                            ),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),
               ),
             ),
-          ),
-          SizedBox(height: widget.compact ? 12 : 14),
-          Row(
-            children: [
-              Text(
-                '预览帧',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const Spacer(),
-              Text(
-                _frameSliderLabel(currentFrame, videoFrameTotal),
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-          Slider(
-            value: sliderValue,
-            min: 0,
-            max: sliderMaxFrame.toDouble(),
-            divisions: _showVideoSlider ? sliderMaxFrame : 1,
-            label: '$currentFrame',
-            onChanged: !_canScrubVideo || widget.onPreviewFrameSelected == null
-                ? null
-                : (nextValue) {
-                    setState(() {
-                      _sliderFrameValue = nextValue;
-                    });
-                  },
-            onChangeEnd:
-                !_canScrubVideo || widget.onPreviewFrameSelected == null
-                ? null
-                : (nextValue) async {
-                    final nextFrame = nextValue.round();
-                    setState(() {
-                      _sliderFrameValue = nextFrame.toDouble();
-                    });
-                    await widget.onPreviewFrameSelected!(nextFrame);
-                    if (!mounted) {
-                      return;
-                    }
-                    setState(() {
-                      _sliderFrameValue = null;
-                    });
-                  },
-          ),
-          SizedBox(height: widget.compact ? 10 : 12),
-          _buildFaceSelectorControls(theme),
-          SizedBox(height: widget.compact ? 10 : 12),
-          Text(
-            widget.previewMessage,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-              height: 1.35,
-            ),
-          ),
-          if (previewResult != null) ...[
-            SizedBox(height: widget.compact ? 10 : 12),
-            Wrap(
-              spacing: widget.compact ? 8 : 10,
-              runSpacing: widget.compact ? 8 : 10,
-              children: [
-                _PreviewMetaChip(
-                  label: '${previewResult.width}x${previewResult.height}',
-                ),
-                _PreviewMetaChip(label: previewResult.previewModeLabel),
-                _PreviewMetaChip(label: previewResult.previewResolution),
-                if (previewResult.targetMediaType == 'video')
-                  _PreviewMetaChip(
-                    label: previewResult.videoFrameTotal == null
-                        ? '帧 ${previewResult.frameNumber}'
-                        : '帧 ${previewResult.frameNumber} / ${previewResult.videoFrameTotal! - 1}',
-                  ),
-                _PreviewMetaChip(label: previewResult.orientationLabel),
-              ],
-            ),
           ],
-        ],
+        ),
       ),
     );
   }
@@ -2684,6 +2559,9 @@ class _WorkspaceSubmitPanel extends StatelessWidget {
     required this.webUiReady,
     required this.busy,
     required this.draft,
+    required this.previewBusy,
+    required this.hasPreview,
+    required this.onPreviewWorkspace,
     required this.onQueueWorkspace,
     required this.onRunWorkspace,
     required this.onOpenBrowser,
@@ -2696,6 +2574,9 @@ class _WorkspaceSubmitPanel extends StatelessWidget {
   final bool webUiReady;
   final bool busy;
   final _WorkspaceDraft draft;
+  final bool previewBusy;
+  final bool hasPreview;
+  final Future<void> Function() onPreviewWorkspace;
   final VoidCallback onQueueWorkspace;
   final VoidCallback onRunWorkspace;
   final VoidCallback onOpenBrowser;
@@ -2722,6 +2603,35 @@ class _WorkspaceSubmitPanel extends StatelessWidget {
               icon: Icon(Icons.playlist_add_rounded, size: compact ? 18 : 20),
               label: const Text('添加到队列'),
               style: FilledButton.styleFrom(minimumSize: Size(0, buttonHeight)),
+            ),
+          ),
+          SizedBox(
+            width: secondaryWidth,
+            child: OutlinedButton.icon(
+              onPressed:
+                  bridgeOnline && draft.canSubmit && !busy && !previewBusy
+                  ? onPreviewWorkspace
+                  : null,
+              icon: previewBusy
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.preview_outlined, size: 18),
+              label: Text(
+                previewBusy
+                    ? '正在预览'
+                    : hasPreview
+                    ? '重新生成预览'
+                    : '生成预览',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              style: OutlinedButton.styleFrom(
+                minimumSize: Size(0, buttonHeight),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+              ),
             ),
           ),
           SizedBox(

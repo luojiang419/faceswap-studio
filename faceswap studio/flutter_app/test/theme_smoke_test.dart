@@ -65,7 +65,6 @@ void main() {
                         facefusionPid: null,
                         onStart: () {},
                         onStop: () {},
-                        onOpenBrowser: () {},
                       ),
                     ),
                   ),

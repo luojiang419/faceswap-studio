@@ -212,7 +212,7 @@ class _HomePageState extends State<HomePage> {
       'starting' => '启动中',
       'stopping' => '停止中',
       'stopped' => '离线',
-      'bridge_offline' => 'Bridge 离线',
+      'bridge_offline' => '未连接',
       _ => _serviceState,
     };
   }
@@ -234,6 +234,7 @@ class _HomePageState extends State<HomePage> {
           busy: _actionInFlight,
           onStart: _startFaceFusion,
           onStop: _stopFaceFusion,
+          onReload: _refresh,
           onOpenBrowser: _openBrowser,
         );
       },
@@ -476,6 +477,7 @@ class _HomeDashboard extends StatelessWidget {
     required this.busy,
     required this.onStart,
     required this.onStop,
+    required this.onReload,
     required this.onOpenBrowser,
   });
 
@@ -491,11 +493,8 @@ class _HomeDashboard extends StatelessWidget {
   final bool busy;
   final VoidCallback onStart;
   final VoidCallback onStop;
+  final VoidCallback onReload;
   final VoidCallback onOpenBrowser;
-
-  bool get _useTwoPaneLayout => maxWidth >= 960;
-  bool get _useStableDefaultWindowLayout =>
-      _useTwoPaneLayout && (maxWidth <= 1040 || maxHeight <= 660);
 
   @override
   Widget build(BuildContext context) {
@@ -562,141 +561,124 @@ class _HomeDashboard extends StatelessWidget {
       ),
     ];
 
-    final mainPane = _HomeMainPane(
+    final compact = maxHeight < 820 || maxWidth < 1200;
+    final overview = _HomeOverviewCard(
+      compact: true,
       bridgeOnline: bridgeOnline,
       serviceLabel: serviceLabel,
-      serviceMessage: serviceMessage,
       webuiUrl: webuiUrl,
       facefusionPid: facefusionPid,
-      metricsCards: metricsCards,
       busy: busy,
-      onStart: onStart,
-      onStop: onStop,
+      onReload: onReload,
       onOpenBrowser: onOpenBrowser,
     );
-    final logPane = _HomeLogCard(bridgeOnline: bridgeOnline, logs: logs);
-
-    if (_useStableDefaultWindowLayout) {
-      return _StableHomeThreePane(
-        maxWidth: maxWidth,
-        maxHeight: maxHeight,
-        bridgeOnline: bridgeOnline,
-        serviceLabel: serviceLabel,
-        serviceMessage: serviceMessage,
-        webuiUrl: webuiUrl,
-        facefusionPid: facefusionPid,
-        metricsCards: metricsCards,
-        logs: logs,
-        busy: busy,
-        onStart: onStart,
-        onStop: onStop,
-        onOpenBrowser: onOpenBrowser,
-      );
-    }
-
-    if (_useTwoPaneLayout) {
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Flexible(
-            flex: 64,
-            child: LayoutBuilder(
-              builder: (context, paneConstraints) {
-                return SingleChildScrollView(
-                  padding: const EdgeInsets.only(right: 4),
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      minWidth: paneConstraints.maxWidth,
-                      minHeight: maxHeight,
-                    ),
-                    child: mainPane,
-                  ),
-                );
-              },
-            ),
-          ),
-          const SizedBox(width: 16),
-          Flexible(flex: 36, child: logPane),
-        ],
-      );
-    }
-
-    var logHeight = maxHeight * 0.52;
-    if (logHeight < 360) {
-      logHeight = 360;
-    }
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.only(right: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          mainPane,
-          const SizedBox(height: 16),
-          SizedBox(height: logHeight, child: logPane),
-        ],
+    final controls = _DashboardSurface(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: RuntimeControlPanel(
+          compact: compact,
+          bridgeOnline: bridgeOnline,
+          busy: busy,
+          serviceLabel: serviceLabel,
+          serviceMessage: serviceMessage,
+          webuiUrl: webuiUrl,
+          facefusionPid: facefusionPid,
+          onStart: onStart,
+          onStop: onStop,
+        ),
       ),
+    );
+    final resources = _MetricsGrid(cards: metricsCards, compact: compact);
+    final logsPanel = _HomeLogCard(logs: logs);
+    const gap = 16.0;
+
+    if (maxWidth < 850 || maxHeight < 540) {
+      return SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            overview,
+            const SizedBox(height: gap),
+            controls,
+            const SizedBox(height: gap),
+            resources,
+            const SizedBox(height: gap),
+            SizedBox(height: 320, child: logsPanel),
+          ],
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        overview,
+        const SizedBox(height: gap),
+        Expanded(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                flex: 6,
+                child: LayoutBuilder(
+                  builder: (context, constraints) => SingleChildScrollView(
+                    child: SizedBox(
+                      height: constraints.maxHeight.clamp(
+                        constraints.maxWidth < 600 ? 570.0 : 470.0,
+                        double.infinity,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          controls,
+                          const SizedBox(height: gap),
+                          Expanded(child: resources),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: gap),
+              Expanded(flex: 4, child: logsPanel),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
 
-class _HomeMainPane extends StatelessWidget {
-  const _HomeMainPane({
-    required this.bridgeOnline,
-    required this.serviceLabel,
-    required this.serviceMessage,
-    required this.webuiUrl,
-    required this.facefusionPid,
-    required this.metricsCards,
-    required this.busy,
-    required this.onStart,
-    required this.onStop,
-    required this.onOpenBrowser,
-  });
+/// 首页模块统一的边框、圆角与双层柔和投影。
+class _DashboardSurface extends StatelessWidget {
+  const _DashboardSurface({required this.child});
 
-  final bool bridgeOnline;
-  final String serviceLabel;
-  final String serviceMessage;
-  final String webuiUrl;
-  final int? facefusionPid;
-  final List<_MetricCardData> metricsCards;
-  final bool busy;
-  final VoidCallback onStart;
-  final VoidCallback onStop;
-  final VoidCallback onOpenBrowser;
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _HomeOverviewCard(
-          bridgeOnline: bridgeOnline,
-          serviceLabel: serviceLabel,
-          webuiUrl: webuiUrl,
-          facefusionPid: facefusionPid,
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.65),
         ),
-        const SizedBox(height: 16),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(18),
-            child: RuntimeControlPanel(
-              compact: false,
-              bridgeOnline: bridgeOnline,
-              busy: busy,
-              serviceLabel: serviceLabel,
-              serviceMessage: serviceMessage,
-              webuiUrl: webuiUrl,
-              facefusionPid: facefusionPid,
-              onStart: onStart,
-              onStop: onStop,
-              onOpenBrowser: onOpenBrowser,
-            ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: dark ? 0.18 : 0.035),
+            blurRadius: 24,
+            offset: const Offset(0, 8),
           ),
-        ),
-        const SizedBox(height: 16),
-        _MetricsGrid(cards: metricsCards),
-      ],
+          BoxShadow(
+            color: Colors.black.withValues(alpha: dark ? 0.10 : 0.02),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: child,
     );
   }
 }
@@ -708,6 +690,9 @@ class _HomeOverviewCard extends StatelessWidget {
     required this.serviceLabel,
     required this.webuiUrl,
     required this.facefusionPid,
+    required this.busy,
+    required this.onReload,
+    required this.onOpenBrowser,
   });
 
   final bool compact;
@@ -715,16 +700,14 @@ class _HomeOverviewCard extends StatelessWidget {
   final String serviceLabel;
   final String webuiUrl;
   final int? facefusionPid;
+  final bool busy;
+  final VoidCallback onReload;
+  final VoidCallback onOpenBrowser;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final summaryCards = <_SummaryCardData>[
-      _SummaryCardData(
-        title: 'Bridge',
-        value: bridgeOnline ? '在线' : '离线',
-        detail: '本地桥接',
-      ),
       _SummaryCardData(
         title: '控制链路',
         value: bridgeOnline ? '已接管' : '等待连接',
@@ -742,13 +725,13 @@ class _HomeOverviewCard extends StatelessWidget {
       ),
     ];
 
-    return Card(
+    return _DashboardSurface(
       child: Padding(
         padding: EdgeInsets.all(compact ? 14 : 18),
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final columns = constraints.maxWidth >= (compact ? 620 : 760)
-                ? 4
+            final columns = constraints.maxWidth >= 700
+                ? 3
                 : constraints.maxWidth >= 460
                 ? 2
                 : 1;
@@ -762,45 +745,29 @@ class _HomeOverviewCard extends StatelessWidget {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  '首页',
-                  style: compact
-                      ? theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        )
-                      : theme.textTheme.headlineMedium,
-                ),
-                SizedBox(height: compact ? 6 : 8),
-                Text(
-                  bridgeOnline
-                      ? '左侧主区聚合运行概览、控制与资源监控，右侧整列持续显示运行日志。'
-                      : 'Bridge 当前离线，请先恢复本地桥接环境后再启动 FaceFusion。',
-                  style:
-                      (compact
-                              ? theme.textTheme.bodyMedium
-                              : theme.textTheme.bodyLarge)
-                          ?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                            height: compact ? 1.18 : 1.4,
-                            fontSize: compact ? 13 : null,
-                          ),
-                  maxLines: compact ? 1 : null,
-                  overflow: compact ? TextOverflow.ellipsis : null,
-                ),
-                SizedBox(height: compact ? 10 : 14),
                 Wrap(
-                  spacing: summarySpacing,
-                  runSpacing: summarySpacing,
+                  spacing: 12,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    _StatusPill(
-                      compact: compact,
-                      active: bridgeOnline,
-                      label: bridgeOnline ? 'Bridge 在线' : 'Bridge 离线',
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: Text('首页', style: theme.textTheme.titleLarge),
                     ),
                     _StatusPill(
-                      compact: compact,
+                      compact: true,
                       active: serviceLabel == '在线' || serviceLabel == '启动中',
                       label: 'FaceFusion $serviceLabel',
+                    ),
+                    FilledButton.tonalIcon(
+                      onPressed: bridgeOnline && !busy ? onReload : null,
+                      icon: const Icon(Icons.refresh_rounded, size: 18),
+                      label: const Text('重新加载'),
+                    ),
+                    FilledButton.tonalIcon(
+                      onPressed: bridgeOnline && !busy ? onOpenBrowser : null,
+                      icon: const Icon(Icons.open_in_browser_rounded, size: 18),
+                      label: const Text('浏览器打开'),
                     ),
                   ],
                 ),
@@ -836,12 +803,12 @@ class _MetricsGrid extends StatelessWidget {
     final theme = Theme.of(context);
     final gridSpacing = compact ? 10.0 : 12.0;
 
-    return Card(
+    return _DashboardSurface(
       child: Padding(
         padding: EdgeInsets.all(compact ? 14 : 18),
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final columns = constraints.maxWidth >= (compact ? 620 : 760)
+            final columns = constraints.maxWidth >= 520
                 ? 3
                 : constraints.maxWidth >= 460
                 ? 2
@@ -865,7 +832,7 @@ class _MetricsGrid extends StatelessWidget {
                 ),
                 SizedBox(height: compact ? 3 : 6),
                 Text(
-                  '关键系统指标与 FaceFusion 进程占用会持续刷新，宽度不足时会自动换列。',
+                  '实时查看设备负载与推理进程占用',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                     height: compact ? 1.15 : 1.35,
@@ -875,17 +842,43 @@ class _MetricsGrid extends StatelessWidget {
                   overflow: compact ? TextOverflow.ellipsis : null,
                 ),
                 SizedBox(height: compact ? 8 : 14),
-                Wrap(
-                  spacing: gridSpacing,
-                  runSpacing: gridSpacing,
-                  children: [
-                    for (final card in cards)
-                      SizedBox(
-                        width: itemWidth,
-                        child: _MetricCard(card: card, compact: compact),
-                      ),
-                  ],
-                ),
+                if (constraints.hasBoundedHeight)
+                  Expanded(
+                    child: LayoutBuilder(
+                      builder: (context, grid) {
+                        final rows = (cards.length / columns).ceil();
+                        final height =
+                            (grid.maxHeight - gridSpacing * (rows - 1)) / rows;
+                        return Wrap(
+                          spacing: gridSpacing,
+                          runSpacing: gridSpacing,
+                          children: [
+                            for (final card in cards)
+                              SizedBox(
+                                width: itemWidth,
+                                height: height,
+                                child: _MetricCard(
+                                  card: card,
+                                  compact: compact,
+                                ),
+                              ),
+                          ],
+                        );
+                      },
+                    ),
+                  )
+                else
+                  Wrap(
+                    spacing: gridSpacing,
+                    runSpacing: gridSpacing,
+                    children: [
+                      for (final card in cards)
+                        SizedBox(
+                          width: itemWidth,
+                          child: _MetricCard(card: card, compact: compact),
+                        ),
+                    ],
+                  ),
               ],
             );
           },
@@ -906,7 +899,7 @@ class _MetricCard extends StatelessWidget {
     final theme = Theme.of(context);
 
     return ConstrainedBox(
-      constraints: BoxConstraints(minHeight: compact ? 80 : 108),
+      constraints: BoxConstraints(minHeight: compact ? 94 : 120),
       child: Container(
         padding: EdgeInsets.all(compact ? 10 : 14),
         decoration: BoxDecoration(
@@ -917,6 +910,7 @@ class _MetricCard extends StatelessWidget {
           ),
         ),
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
@@ -946,7 +940,11 @@ class _MetricCard extends StatelessWidget {
                   (compact
                           ? theme.textTheme.titleMedium
                           : theme.textTheme.titleLarge)
-                      ?.copyWith(fontWeight: FontWeight.w800, height: 1.0),
+                      ?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        height: 1.0,
+                        fontSize: compact ? 22 : 32,
+                      ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -968,16 +966,14 @@ class _MetricCard extends StatelessWidget {
 }
 
 class _HomeLogCard extends StatelessWidget {
-  const _HomeLogCard({required this.bridgeOnline, required this.logs});
-
-  final bool bridgeOnline;
+  const _HomeLogCard({required this.logs});
   final List<_LogEntry> logs;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Card(
+    return _DashboardSurface(
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Column(
@@ -987,17 +983,11 @@ class _HomeLogCard extends StatelessWidget {
               spacing: 10,
               runSpacing: 10,
               crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                Text('运行日志', style: theme.textTheme.titleMedium),
-                _StatusPill(
-                  active: bridgeOnline,
-                  label: bridgeOnline ? 'Bridge 在线' : 'Bridge 离线',
-                ),
-              ],
+              children: [Text('运行日志', style: theme.textTheme.titleMedium)],
             ),
             const SizedBox(height: 6),
             Text(
-              'Bridge 与 FaceFusion 的日志会持续汇总到这里，最新日志显示在最前面。',
+              'Bridge / FaceFusion · 最新日志在前',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
                 height: 1.35,
@@ -1066,8 +1056,8 @@ class _SummaryMiniCard extends StatelessWidget {
       ),
       decoration: BoxDecoration(
         color: theme.brightness == Brightness.dark
-            ? const Color(0x24F6AA75)
-            : const Color(0x14303030),
+            ? const Color(0xFF282724)
+            : const Color(0xFFF7F7F7),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: theme.colorScheme.outlineVariant.withValues(alpha: 0.22),
@@ -1283,116 +1273,4 @@ double _itemWidthFor({
 
 String _compactUrl(String value) {
   return value.replaceFirst(RegExp(r'^https?://'), '');
-}
-
-class _StableHomeThreePane extends StatelessWidget {
-  const _StableHomeThreePane({
-    required this.maxWidth,
-    required this.maxHeight,
-    required this.bridgeOnline,
-    required this.serviceLabel,
-    required this.serviceMessage,
-    required this.webuiUrl,
-    required this.facefusionPid,
-    required this.metricsCards,
-    required this.logs,
-    required this.busy,
-    required this.onStart,
-    required this.onStop,
-    required this.onOpenBrowser,
-  });
-
-  final double maxWidth;
-  final double maxHeight;
-  final bool bridgeOnline;
-  final String serviceLabel;
-  final String serviceMessage;
-  final String webuiUrl;
-  final int? facefusionPid;
-  final List<_MetricCardData> metricsCards;
-  final List<_LogEntry> logs;
-  final bool busy;
-  final VoidCallback onStart;
-  final VoidCallback onStop;
-  final VoidCallback onOpenBrowser;
-
-  @override
-  Widget build(BuildContext context) {
-    const gap = 12.0;
-    const designWidth = 1046.0;
-    const designHeight = 748.0;
-    const logWidth = 272.0;
-    const overviewHeight = 224.0;
-    const controlHeight = 196.0;
-    const sectionGap = 12.0;
-
-    final leftWidth = designWidth - logWidth - gap;
-    final metricsHeight =
-        designHeight - overviewHeight - controlHeight - (sectionGap * 2);
-
-    return Center(
-      child: FittedBox(
-        fit: BoxFit.contain,
-        alignment: Alignment.topCenter,
-        child: SizedBox(
-          width: designWidth,
-          height: designHeight,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              SizedBox(
-                width: leftWidth,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    SizedBox(
-                      height: overviewHeight,
-                      child: _HomeOverviewCard(
-                        compact: true,
-                        bridgeOnline: bridgeOnline,
-                        serviceLabel: serviceLabel,
-                        webuiUrl: webuiUrl,
-                        facefusionPid: facefusionPid,
-                      ),
-                    ),
-                    const SizedBox(height: sectionGap),
-                    SizedBox(
-                      height: controlHeight,
-                      child: Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(14),
-                          child: RuntimeControlPanel(
-                            compact: true,
-                            bridgeOnline: bridgeOnline,
-                            busy: busy,
-                            serviceLabel: serviceLabel,
-                            serviceMessage: serviceMessage,
-                            webuiUrl: webuiUrl,
-                            facefusionPid: facefusionPid,
-                            onStart: onStart,
-                            onStop: onStop,
-                            onOpenBrowser: onOpenBrowser,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: sectionGap),
-                    SizedBox(
-                      height: metricsHeight,
-                      child: _MetricsGrid(cards: metricsCards, compact: true),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: gap),
-              SizedBox(
-                width: logWidth,
-                child: _HomeLogCard(bridgeOnline: bridgeOnline, logs: logs),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }
