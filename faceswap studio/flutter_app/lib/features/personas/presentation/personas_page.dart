@@ -358,37 +358,27 @@ class _PersonasPageState extends State<PersonasPage> {
                 onEnter: (_) => setState(() => _zoomHovered = true),
                 onExit: (_) => setState(() => _zoomHovered = false),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (_zoomHovered || _zoomPinned)
-                      Container(
-                        width: math.min(
-                          320,
-                          math.max(0, constraints.maxWidth - 32),
-                        ),
-                        margin: const EdgeInsets.only(bottom: 8),
-                        child: Card(
-                          elevation: 6,
-                          child: Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Row(
-                                  children: [
-                                    const Expanded(child: Text('人物格子尺寸')),
-                                    Text('${_gridScale.round()}%'),
-                                    IconButton(
-                                      tooltip: '恢复 100%',
-                                      onPressed: () => _setGridScale(100),
-                                      icon: const Icon(
-                                        Icons.restart_alt_rounded,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                Slider(
+                      SizedBox(
+                        width: 48,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '${_gridScale.round()}%',
+                              style: theme.textTheme.labelMedium,
+                            ),
+                            SizedBox(
+                              height: math.min(
+                                180,
+                                math.max(80, constraints.maxHeight - 240),
+                              ),
+                              child: RotatedBox(
+                                quarterTurns: 3,
+                                child: Slider(
                                   key: const ValueKey(
                                     'persona-grid-scale-slider',
                                   ),
@@ -396,17 +386,18 @@ class _PersonasPageState extends State<PersonasPage> {
                                   min: 10,
                                   max: 800,
                                   divisions: 79,
-                                  label: '${_gridScale.round()}%',
                                   onChanged: _setGridScale,
                                   onChangeEnd: (_) => _persistGridScale(),
                                 ),
-                                Text(
-                                  '10%–800% · Ctrl＋滚轮',
-                                  style: theme.textTheme.bodySmall,
-                                ),
-                              ],
+                              ),
                             ),
-                          ),
+                            IconButton(
+                              tooltip: '恢复 100%',
+                              onPressed: () => _setGridScale(100),
+                              icon: const Icon(Icons.restart_alt_rounded),
+                            ),
+                            const SizedBox(height: 8),
+                          ],
                         ),
                       ),
                     FloatingActionButton.small(

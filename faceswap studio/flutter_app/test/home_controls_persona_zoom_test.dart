@@ -295,6 +295,29 @@ void main() {
     await mouse.moveTo(tester.getCenter(find.byTooltip(zoomTooltip)));
     await tester.pump();
     expect(slider, findsOneWidget);
+    final buttonRect = tester.getRect(find.byTooltip(zoomTooltip));
+    final sliderRect = tester.getRect(
+      find.ancestor(of: slider, matching: find.byType(RotatedBox)),
+    );
+    expect(sliderRect.center.dx, closeTo(buttonRect.center.dx, .01));
+    expect(sliderRect.bottom, lessThan(buttonRect.top));
+    expect(
+      find.ancestor(of: slider, matching: find.byType(Card)),
+      findsNothing,
+    );
+    await mouse.moveTo(Offset(buttonRect.center.dx, buttonRect.top - 4));
+    await tester.pump();
+    expect(slider, findsOneWidget);
+    await mouse.moveTo(sliderRect.center);
+    await tester.pump();
+    expect(slider, findsOneWidget);
+    await capture(tester, 'personas-hover-slider');
+    // 竖向轨道上半部对应更大的尺寸，使用真实拖动检查旋转后的方向。
+    await tester.dragFrom(sliderRect.center, const Offset(0, -30));
+    await flush(tester);
+    expect(tester.widget<Slider>(slider).value, greaterThan(100));
+    await tester.tap(find.byTooltip('恢复 100%'));
+    await flush(tester);
     await mouse.moveTo(const Offset(1, 1));
     await tester.pump();
     expect(slider, findsNothing);
