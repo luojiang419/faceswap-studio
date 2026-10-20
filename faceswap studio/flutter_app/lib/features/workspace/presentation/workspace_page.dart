@@ -3029,22 +3029,22 @@ class _WorkspaceSubmitPanel extends StatelessWidget {
               SizedBox(
                 width: buttonWidth,
                 child: FilledButton.tonalIcon(
-                  onPressed: bridgeOnline && draft.canSubmit && !busy
-                      ? onRunWorkspace
+                  onPressed: bridgeOnline && webUiReady && !busy
+                      ? onOpenBrowser
                       : null,
-                  icon: Icon(Icons.rocket_launch_rounded, size: 22),
-                  label: const Text('立即生成'),
+                  icon: Icon(Icons.open_in_browser_rounded, size: 22),
+                  label: const Text('浏览器高级参数'),
                   style: buttonStyle,
                 ),
               ),
               SizedBox(
                 width: buttonWidth,
                 child: FilledButton.tonalIcon(
-                  onPressed: bridgeOnline && webUiReady && !busy
-                      ? onOpenBrowser
+                  onPressed: bridgeOnline && draft.canSubmit && !busy
+                      ? onRunWorkspace
                       : null,
-                  icon: Icon(Icons.open_in_browser_rounded, size: 22),
-                  label: const Text('浏览器高级参数'),
+                  icon: Icon(Icons.rocket_launch_rounded, size: 22),
+                  label: const Text('立即生成'),
                   style: buttonStyle,
                 ),
               ),
