@@ -9,6 +9,7 @@ import 'package:faceswap_studio/shared/services/bridge_client.dart';
 import 'package:faceswap_studio/shared/services/studio_file_picker.dart';
 import 'package:faceswap_studio/shared/widgets/studio_media_viewer.dart';
 import 'package:faceswap_studio/shared/widgets/studio_media_loading.dart';
+import 'package:faceswap_studio/shared/widgets/studio_hover_focus.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_all/webview_all.dart';
@@ -2167,6 +2168,22 @@ class _WorkspacePreviewPanel extends StatefulWidget {
 
 class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
   double? _sliderFrameValue;
+  int? _inspectedFaceIndex;
+  final Object _inspectionOwner = Object();
+  ValueChanged<bool>? _pageFocus;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _pageFocus = StudioHoverFocus.handlerOf(context, _inspectionOwner);
+  }
+
+  @override
+  void dispose() {
+    final focus = _pageFocus;
+    WidgetsBinding.instance.addPostFrameCallback((_) => focus?.call(false));
+    super.dispose();
+  }
 
   StudioComparisonMode _comparisonMode = StudioComparisonMode.wipe;
   bool _comparisonEnabled = true;
@@ -2175,6 +2192,13 @@ class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
   @override
   void didUpdateWidget(covariant _WorkspacePreviewPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.previewBusy || oldWidget.previewResult != widget.previewResult) {
+      _inspectedFaceIndex = null;
+      final focus = _pageFocus;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _inspectedFaceIndex == null) focus?.call(false);
+      });
+    }
     final displayedFrame = _displayedFrameNumber;
     if (_sliderFrameValue != null &&
         oldWidget.previewResult?.frameNumber !=
@@ -2314,6 +2338,17 @@ class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
 
   bool get _faceControlsEnabled => widget.bridgeOnline && !widget.busy;
 
+  void _setFaceInspection(int index, bool visible) {
+    if (!mounted) return;
+    final next = visible
+        ? index
+        : (_inspectedFaceIndex == index ? null : _inspectedFaceIndex);
+    if (next != _inspectedFaceIndex) {
+      _inspectedFaceIndex = next;
+      _pageFocus?.call(next != null);
+    }
+  }
+
   Widget _buildFaceModeShortcut(ThemeData theme) {
     final mode = _faceSelectorMode;
     return PopupMenuButton<String>(
@@ -2427,6 +2462,8 @@ class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
                             selectedMode == 'reference' &&
                             face.index == selectedPosition,
                         enabled: _faceControlsEnabled,
+                        onInspectChanged: (visible) =>
+                            _setFaceInspection(face.index, visible),
                         onSelected: () => _selectReferenceFace(face),
                       );
                     },
@@ -2722,6 +2759,44 @@ class _PreviewActionBadge extends StatelessWidget {
   }
 }
 
+/// Tooltip 的鼠标悬停不会触发 onTriggered，以浮层的真实生命周期同步背景。
+class _FaceInspectionOverlay extends StatefulWidget {
+  const _FaceInspectionOverlay({
+    required this.onVisibilityChanged,
+    required this.child,
+  });
+
+  final ValueChanged<bool> onVisibilityChanged;
+  final Widget child;
+
+  @override
+  State<_FaceInspectionOverlay> createState() => _FaceInspectionOverlayState();
+}
+
+class _FaceInspectionOverlayState extends State<_FaceInspectionOverlay> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onVisibilityChanged(true);
+    });
+  }
+
+  @override
+  void dispose() {
+    final notify = widget.onVisibilityChanged;
+    WidgetsBinding.instance.addPostFrameCallback((_) => notify(false));
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+    onEnter: (_) => widget.onVisibilityChanged(true),
+    onExit: (_) => widget.onVisibilityChanged(false),
+    child: widget.child,
+  );
+}
+
 class _FaceChoiceTile extends StatelessWidget {
   const _FaceChoiceTile({
     super.key,
@@ -2729,12 +2804,14 @@ class _FaceChoiceTile extends StatelessWidget {
     required this.selected,
     required this.enabled,
     required this.onSelected,
+    required this.onInspectChanged,
   });
 
   final _PreviewFaceChoice face;
   final bool selected;
   final bool enabled;
   final VoidCallback onSelected;
+  final ValueChanged<bool> onInspectChanged;
 
   Widget _image(double size, {Key? key}) => SizedBox.square(
     key: key,
@@ -2756,70 +2833,100 @@ class _FaceChoiceTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Tooltip(
-      richMessage: TextSpan(
-        children: [
-          WidgetSpan(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _image(72, key: ValueKey('reference-face-hover-${face.index}')),
-                const SizedBox(height: 4),
-                Text('人脸 #${face.index}', style: theme.textTheme.labelSmall),
-              ],
+    return MouseRegion(
+      onExit: (_) => onInspectChanged(false),
+      child: Tooltip(
+        onTriggered: () => onInspectChanged(true),
+        richMessage: TextSpan(
+          children: [
+            WidgetSpan(
+              child: _FaceInspectionOverlay(
+                onVisibilityChanged: onInspectChanged,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TweenAnimationBuilder<double>(
+                      tween: Tween(begin: .94, end: 1),
+                      duration: MediaQuery.disableAnimationsOf(context)
+                          ? Duration.zero
+                          : const Duration(milliseconds: 240),
+                      curve: studioHoverFocusCurve,
+                      child: _image(
+                        72,
+                        key: ValueKey('reference-face-hover-${face.index}'),
+                      ),
+                      builder: (_, scale, child) =>
+                          Transform.scale(scale: scale, child: child),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '人脸 #${face.index}',
+                      style: theme.textTheme.labelSmall,
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ),
-        ],
-      ),
-      excludeFromSemantics: true,
-      waitDuration: const Duration(milliseconds: 250),
-      preferBelow: false,
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: StudioDepth.borderColor(context)),
-        boxShadow: StudioDepth.shadows(context, floating: true),
-      ),
-      child: Semantics(
-        label: '人脸 #${face.index}',
-        selected: selected,
-        button: true,
-        enabled: enabled,
-        child: InkWell(
-          onTap: enabled ? onSelected : null,
-          borderRadius: BorderRadius.circular(8),
-          child: SizedBox.square(
-            dimension: 36,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                _image(36, key: ValueKey('reference-face-image-${face.index}')),
-                if (selected)
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: theme.colorScheme.primary,
-                        width: 2,
-                      ),
-                    ),
-                    child: Align(
-                      alignment: Alignment.topRight,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.primary,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          Icons.check_rounded,
-                          size: 12,
-                          color: theme.colorScheme.onPrimary,
-                        ),
-                      ),
-                    ),
+          ],
+        ),
+        excludeFromSemantics: true,
+        waitDuration: const Duration(milliseconds: 250),
+        preferBelow: false,
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: StudioDepth.borderColor(context)),
+          boxShadow: StudioDepth.shadows(context, floating: true),
+        ),
+        child: Semantics(
+          label: '人脸 #${face.index}',
+          selected: selected,
+          button: true,
+          enabled: enabled,
+          child: InkWell(
+            onTap: enabled
+                ? () {
+                    onInspectChanged(false);
+                    onSelected();
+                  }
+                : null,
+            borderRadius: BorderRadius.circular(8),
+            child: SizedBox.square(
+              dimension: 36,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  _image(
+                    36,
+                    key: ValueKey('reference-face-image-${face.index}'),
                   ),
-              ],
+                  if (selected)
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: theme.colorScheme.primary,
+                          width: 2,
+                        ),
+                      ),
+                      child: Align(
+                        alignment: Alignment.topRight,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.primary,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.check_rounded,
+                            size: 12,
+                            color: theme.colorScheme.onPrimary,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         ),

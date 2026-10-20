@@ -7,6 +7,7 @@ import 'package:faceswap_studio/app/theme/studio_theme.dart';
 import 'package:faceswap_studio/app/widgets/studio_shell.dart';
 import 'package:faceswap_studio/features/home/presentation/home_page.dart';
 import 'package:faceswap_studio/features/workspace/presentation/workspace_page.dart';
+import 'package:faceswap_studio/shared/widgets/studio_hover_focus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -376,6 +377,7 @@ void main() {
     Size size, {
     bool dark = true,
     double scale = 1,
+    bool disableAnimations = false,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
@@ -386,12 +388,15 @@ void main() {
           debugShowCheckedModeBanner: false,
           theme: dark ? StudioTheme.dark() : StudioTheme.light(),
           builder: (context, child) => MediaQuery(
-            data: MediaQuery.of(
-              context,
-            ).copyWith(textScaler: TextScaler.linear(scale)),
+            data: MediaQuery.of(context).copyWith(
+              textScaler: TextScaler.linear(scale),
+              disableAnimations: disableAnimations,
+            ),
             child: child!,
           ),
-          home: Scaffold(body: page),
+          home: page is StudioShell
+              ? page
+              : StudioHoverFocus(child: Scaffold(body: page)),
         ),
       ),
     );
@@ -1052,12 +1057,24 @@ void main() {
     await tester.pump();
   });
 
-  testWidgets('参考脸固定横条、2倍悬浮与中文快捷模式和进阶面板同步', (tester) async {
+  testWidgets('整页聚焦、参考脸固定横条、2倍悬浮与中文快捷模式和进阶面板同步', (tester) async {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     fixture.video = true;
     fixture.faceCount = 12;
-    await show(tester, const WorkspacePage(), const Size(1384, 661));
+    await show(
+      tester,
+      StudioShell(
+        themeMode: ThemeMode.dark,
+        onToggleTheme: () {},
+        sidebarExpanded: true,
+        onSidebarExpandedChanged: (_) {},
+      ),
+      const Size(1384, 661),
+    );
+    await tester.tap(find.text('工作台'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump();
     final strip = find.byKey(const ValueKey('workspace-reference-faces'));
     final mode = find.byKey(const ValueKey('workspace-face-mode'));
     expect(find.text('选择模式'), findsNothing, reason: '进阶面板默认收起');
@@ -1076,12 +1093,55 @@ void main() {
     final hoverImage = find.byKey(const ValueKey('reference-face-hover-0'));
     final media = find.byKey(const ValueKey('workspace-preview-media'));
     final mediaBeforeHover = tester.getRect(media);
+    final blur = find.byKey(const ValueKey('studio-page-blur'));
+    final focus = find.byKey(const ValueKey('studio-page-focus'));
+    expect(tester.widget<ImageFiltered>(blur).enabled, isFalse);
+    expect(
+      tester.widget<TweenAnimationBuilder<double>>(focus).curve,
+      isA<Cubic>(),
+    );
     final mouse = await tester.createGesture(kind: ui.PointerDeviceKind.mouse);
     await mouse.addPointer(location: Offset.zero);
     await mouse.moveTo(tester.getCenter(firstFace));
-    await tester.pump(const Duration(milliseconds: 400));
     await tester.pump(const Duration(milliseconds: 200));
+    expect(
+      tester.widget<ImageFiltered>(blur).enabled,
+      isFalse,
+      reason: '短暂划过不触发模糊',
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+    // 浮层挂载后的下一帧才开始背景过渡。
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    final duringBlur = tester.widget<ImageFiltered>(blur);
+    expect(duringBlur.enabled, isTrue);
+    expect(
+      duringBlur.imageFilter.toString(),
+      isNot(contains('2.0, 2.0')),
+      reason: '平滑过渡而非瞬间跳变',
+    );
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(
+      tester.widget<ImageFiltered>(blur).imageFilter.toString(),
+      contains('2.0, 2.0'),
+    );
     expect(hoverImage, findsOneWidget);
+    // OverlayPortal 保留 Widget 祖先，但浮层的 RenderObject 位于独立 Overlay。
+    for (
+      RenderObject? object = tester.renderObject(hoverImage);
+      object != null;
+      object = object.parent
+    ) {
+      expect(object, isNot(same(tester.renderObject(blur))), reason: '浮层保持清晰');
+    }
+    for (final label in ['首页', '人脸参考', '待换脸视频', '立即生成']) {
+      expect(
+        find.ancestor(of: find.text(label), matching: blur),
+        findsOneWidget,
+        reason: '$label 属于整页模糊范围',
+      );
+    }
     expect(
       tester.getSize(hoverImage).width,
       closeTo(tester.getSize(thumbnail).width * 2, .1),
@@ -1092,10 +1152,37 @@ void main() {
     );
     expect(tester.getRect(media), mediaBeforeHover, reason: '浮层不占据主布局');
     await capture(tester, 'preview-face-strip-hover');
+    await mouse.moveTo(tester.getCenter(hoverImage));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<ImageFiltered>(blur).enabled,
+      isTrue,
+      reason: '移入放大图仍保持背景模糊',
+    );
+    await mouse.moveTo(
+      tester.getCenter(find.byKey(const ValueKey('reference-face-1'))),
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('reference-face-hover-1')),
+      findsOneWidget,
+    );
+    expect(
+      tester.widget<ImageFiltered>(blur).enabled,
+      isTrue,
+      reason: '旧浮层退出不清除新的人脸聚焦',
+    );
     await mouse.moveTo(Offset.zero);
     await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
     expect(hoverImage, findsNothing);
+    expect(find.byKey(const ValueKey('reference-face-hover-1')), findsNothing);
+    expect(
+      tester.widget<ImageFiltered>(blur).enabled,
+      isFalse,
+      reason: '离开后恢复清晰',
+    );
     await mouse.removePointer();
     final list = find.descendant(of: strip, matching: find.byType(ListView));
     await tester.drag(list, const Offset(-700, 0));
@@ -1158,6 +1245,58 @@ void main() {
     expect(tester.widget<PopupMenuButton<String>>(mode).enabled, isFalse);
     fixture.previewGate!.complete();
     await finishPreview(tester);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('减少动态效果时整页即时聚焦，离开工作台不残留模糊', (tester) async {
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    fixture.faceCount = 1;
+    await show(
+      tester,
+      StudioShell(
+        themeMode: ThemeMode.dark,
+        onToggleTheme: () {},
+        sidebarExpanded: true,
+        onSidebarExpandedChanged: (_) {},
+      ),
+      const Size(1384, 661),
+      disableAnimations: true,
+    );
+    await tester.tap(find.text('工作台'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('生成预览'));
+    await tester.pump();
+    await finishPreview(tester);
+    await finishPreview(tester);
+    final mouse = await tester.createGesture(kind: ui.PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    await mouse.moveTo(
+      tester.getCenter(find.byKey(const ValueKey('reference-face-0'))),
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
+    final blur = find.byKey(const ValueKey('studio-page-blur'));
+    expect(
+      tester
+          .widget<TweenAnimationBuilder<double>>(
+            find.byKey(const ValueKey('studio-page-focus')),
+          )
+          .duration,
+      Duration.zero,
+    );
+    expect(
+      tester.widget<ImageFiltered>(blur).imageFilter.toString(),
+      contains('2.0, 2.0'),
+    );
+    await tester.tap(find.text('首页'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<ImageFiltered>(blur).enabled, isFalse);
+    expect(find.byType(HomePage), findsOneWidget);
+    await mouse.removePointer();
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
     expect(tester.takeException(), isNull);
