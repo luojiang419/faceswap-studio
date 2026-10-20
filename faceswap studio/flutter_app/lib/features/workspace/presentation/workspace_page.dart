@@ -803,36 +803,40 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
 
   Future<void> _pickTargetFile() async {
     if (_actionInFlight || _sourceImporting || _targetImporting) return;
-    final files = await pickStudioFiles(
-      context,
-      multiple: false,
-      acceptedTypeGroups: const [
-        XTypeGroup(
-          label: '目标媒体',
-          extensions: [
-            'jpg',
-            'jpeg',
-            'png',
-            'webp',
-            'bmp',
-            'tiff',
-            'mp4',
-            'mov',
-            'mkv',
-            'avi',
-            'webm',
-            'wmv',
-            'mpeg',
-            'm4v',
-          ],
-        ),
-      ],
-    );
-    if (!mounted || files.isEmpty || _actionInFlight) {
-      return;
-    }
     setState(() => _targetImporting = true);
     try {
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      final files = await pickStudioFiles(
+        context,
+        multiple: false,
+        acceptedTypeGroups: const [
+          XTypeGroup(
+            label: '目标媒体',
+            extensions: [
+              'jpg',
+              'jpeg',
+              'png',
+              'webp',
+              'bmp',
+              'tiff',
+              'mp4',
+              'mov',
+              'mkv',
+              'avi',
+              'webm',
+              'wmv',
+              'mpeg',
+              'm4v',
+            ],
+          ),
+        ],
+      );
+      if (!mounted || files.isEmpty || _actionInFlight) {
+        return;
+      }
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
       await _invokeWorkspaceAction(() async {
         final draft = await _client.setWorkspaceTargetPath(files.single.path);
         _workspaceDraft = _WorkspaceDraft.fromJson(draft);
@@ -1262,15 +1266,15 @@ class _NativeWorkbenchPane extends StatelessWidget {
               : null,
         );
 
+        const targetLoading = StudioMediaLoading(
+          key: ValueKey('target-import-loading'),
+          kind: StudioMediaLoadingKind.video,
+        );
         final targetCard = _WorkspaceDraftCard(
           compact: compact,
           title: '待换脸视频',
-          loading: targetImporting
-              ? const StudioMediaLoading(
-                  key: ValueKey('target-import-loading'),
-                  kind: StudioMediaLoadingKind.video,
-                )
-              : null,
+          loading: targetImporting ? targetLoading : null,
+          imageLoading: targetLoading,
           subtitle: targetImporting
               ? '正在读取素材信息。'
               : currentDraft.targetPath == null

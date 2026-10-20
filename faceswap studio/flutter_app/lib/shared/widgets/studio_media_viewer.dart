@@ -703,6 +703,7 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
   Player? _player;
   VideoController? _controller;
   bool _opening = false;
+  bool _waitingForFirstFrame = true;
   bool _failed = false;
   bool _playWhenReady = false;
   final FocusNode _focusNode = FocusNode();
@@ -726,6 +727,7 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
       _openGeneration++;
       _disposePlayer();
       _opening = false;
+      _waitingForFirstFrame = true;
       _failed = false;
       _playWhenReady = false;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -765,6 +767,7 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
     final generation = ++_openGeneration;
     setState(() {
       _opening = true;
+      _waitingForFirstFrame = true;
       _failed = false;
       _playWhenReady = playAfterOpen;
     });
@@ -783,6 +786,7 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
       }
       setState(() {
         _opening = false;
+        _waitingForFirstFrame = false;
         _failed = true;
       });
       return null;
@@ -800,6 +804,8 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
       _opening = false;
       _playWhenReady = false;
     });
+    // open() 只代表媒体已打开。保持 SVG，直到原生纹理报告首帧已渲染。
+    unawaited(_waitForFirstFrame(controller, player, generation));
 
     if (shouldPlay) {
       await player.play();
@@ -807,6 +813,35 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
       await player.pause();
     }
     return player;
+  }
+
+  Future<void> _waitForFirstFrame(
+    VideoController controller,
+    Player player,
+    int generation,
+  ) async {
+    try {
+      await controller.waitUntilFirstFrameRendered.timeout(
+        const Duration(seconds: 30),
+      );
+      if (!mounted ||
+          generation != _openGeneration ||
+          !identical(player, _player)) {
+        return;
+      }
+      setState(() => _waitingForFirstFrame = false);
+    } catch (_) {
+      if (!mounted ||
+          generation != _openGeneration ||
+          !identical(player, _player)) {
+        return;
+      }
+      _disposePlayer();
+      setState(() {
+        _waitingForFirstFrame = false;
+        _failed = true;
+      });
+    }
   }
 
   Future<void> _togglePlayback() async {
@@ -913,8 +948,9 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
                 color: theme.colorScheme.error,
               ),
             )
-          else if (_opening)
+          else if (_opening || _waitingForFirstFrame)
             Positioned.fill(
+              key: const ValueKey('inline-video-loading'),
               child: ColoredBox(
                 color: theme.brightness == Brightness.dark
                     ? const Color(0xFF20201E)
@@ -924,7 +960,7 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
                 ),
               ),
             ),
-          if (widget.showVideoBadge && !_opening)
+          if (widget.showVideoBadge && !_opening && !_waitingForFirstFrame)
             const Positioned(
               left: 8,
               top: 8,
@@ -942,7 +978,7 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
             bottom: 6,
             child: _StudioPlayerTransport(
               player: player,
-              enabled: !_opening && !_failed,
+              enabled: !_opening && !_waitingForFirstFrame && !_failed,
               onTogglePlayback: () {
                 _focusNode.requestFocus();
                 _togglePlayback();

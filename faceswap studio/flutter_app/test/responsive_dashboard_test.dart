@@ -24,6 +24,7 @@ class _Fixture extends HttpOverrides {
   int sourceProcessed = 0;
   bool sourceFailed = false;
   int sourceRequests = 0;
+  int targetRequests = 0;
   int faceCount = 0;
   final Map<String, dynamic> options = {};
   late String imagePath;
@@ -180,6 +181,7 @@ class _Request extends Fake implements HttpClientRequest {
       await fixture.sourceGate?.future;
     }
     if (url.path == '/workspace/draft/target-path') {
+      fixture.targetRequests++;
       await fixture.targetGate?.future;
     }
     return _Response(jsonEncode(fixture.response(url, body)));
@@ -457,6 +459,60 @@ void main() {
       );
       expect(tester.widget<FilledButton>(upload).onPressed, isNotNull);
       await tester.pumpWidget(const SizedBox());
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+  );
+
+  testWidgets(
+    '视频选择返回前已显示 SVG，取消恢复并覆盖信息读取等待',
+    (tester) async {
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      const picker = MethodChannel('faceswap_studio/file_dialog');
+      var picked = Completer<List<String>>();
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        picker,
+        (_) => picked.future,
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          picker,
+          null,
+        ),
+      );
+      await show(tester, const WorkspacePage(), const Size(1384, 661));
+      await tester.tap(find.text('更换视频'));
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('target-import-loading')),
+        findsOneWidget,
+      );
+      expect(fixture.targetRequests, 0);
+      await tester.pump(const Duration(seconds: 2));
+      expect(find.text('视频加载中'), findsOneWidget);
+      picked.complete([]);
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(const ValueKey('target-import-loading')), findsNothing);
+      expect(fixture.targetRequests, 0);
+      picked = Completer<List<String>>();
+      fixture.targetGate = Completer<void>();
+      await tester.tap(find.text('更换视频'));
+      await tester.pump();
+      picked.complete([r'D:\素材\demo.mp4']);
+      await tester.pump();
+      await tester.pump();
+      expect(fixture.targetRequests, 1);
+      await tester.pump(const Duration(seconds: 2));
+      expect(find.text('视频加载中'), findsOneWidget);
+      fixture.targetGate!.complete();
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump();
+      // 此测试使用已有缓存图片作为返回素材，真实解码另由 Windows 集成覆盖。
+      expect(find.text('视频加载中'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+      expect(tester.takeException(), isNull);
     },
     variant: TargetPlatformVariant.only(TargetPlatform.windows),
   );
