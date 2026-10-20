@@ -8,6 +8,7 @@ import 'package:faceswap_studio/app/widgets/studio_shell.dart';
 import 'package:faceswap_studio/features/home/presentation/home_page.dart';
 import 'package:faceswap_studio/features/workspace/presentation/workspace_page.dart';
 import 'package:faceswap_studio/shared/widgets/studio_hover_focus.dart';
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:faceswap_studio/shared/widgets/studio_media_viewer.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -37,6 +38,8 @@ class _Fixture extends HttpOverrides {
   late String importedTargetPath;
   int sourceRequests = 0;
   int targetRequests = 0;
+  List<dynamic>? droppedSourcePaths;
+  String? droppedTargetPath;
   int faceCount = 0;
   final Map<String, dynamic> options = {};
   late String imagePath;
@@ -232,10 +235,16 @@ class _Request extends Fake implements HttpClientRequest {
     if (url.path == '/workspace/preview') await fixture.previewGate?.future;
     if (url.path == '/workspace/draft/extract-source-faces') {
       fixture.sourceRequests++;
+      fixture.droppedSourcePaths =
+          (jsonDecode(utf8.decode(body)) as Map)['paths'] as List;
       await fixture.sourceGate?.future;
     }
     if (url.path == '/workspace/draft/target-path') {
       fixture.targetRequests++;
+      if (body.isNotEmpty) {
+        fixture.droppedTargetPath =
+            (jsonDecode(utf8.decode(body)) as Map)['path'] as String;
+      }
       await fixture.targetGate?.future;
     }
     return _Response(jsonEncode(fixture.response(url, body)));
@@ -436,6 +445,119 @@ void main() {
     );
     await tester.pump();
   }
+
+  testWidgets('外部拖拽跨格高亮，多张人脸与单视频复用并行导入且错误格式不覆盖', (tester) async {
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    var pickerCalls = 0;
+    const picker = MethodChannel('faceswap_studio/file_dialog');
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(picker, (
+      _,
+    ) async {
+      pickerCalls++;
+      return <String>[];
+    });
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        picker,
+        null,
+      ),
+    );
+    await show(tester, const WorkspacePage(), const Size(1384, 661));
+    Future<void> native(String method, Object? args) async {
+      await tester.runAsync(() async {
+        final done = Completer<void>();
+        tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+          'desktop_drop',
+          const StandardMethodCodec().encodeMethodCall(
+            MethodCall(method, args),
+          ),
+          (_) => done.complete(),
+        );
+        await done.future;
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+      });
+      await tester.pump();
+    }
+
+    final source = find.byKey(const ValueKey('source-file-drop'));
+    final target = find.byKey(const ValueKey('target-file-drop'));
+    Future<void> enter(Finder area, {bool update = false}) async {
+      final point = tester.getCenter(area);
+      await native(update ? 'updated' : 'entered', [point.dx, point.dy]);
+      await tester.pump(const Duration(milliseconds: 250));
+    }
+
+    double opacity(String key) => tester
+        .widget<AnimatedOpacity>(
+          find
+              .ancestor(
+                of: find.byKey(ValueKey(key)),
+                matching: find.byType(AnimatedOpacity),
+              )
+              .first,
+        )
+        .opacity;
+    await enter(source);
+    expect(opacity('source-drop-overlay'), 1);
+    expect(opacity('target-drop-overlay'), 0);
+    await capture(tester, 'workspace-source-drop');
+    await enter(target, update: true);
+    expect(opacity('source-drop-overlay'), 0);
+    expect(opacity('target-drop-overlay'), 1);
+    await capture(tester, 'workspace-target-drop');
+    await native('performOperation', [r'D:\bad.txt']);
+    expect(fixture.targetRequests, 0);
+    expect(find.textContaining('请拖入支持的视频文件'), findsOneWidget);
+    fixture.sourceGate = Completer<void>();
+    fixture.targetGate = Completer<void>();
+    final secondFace = File(fixture.imagePath).copySync('${temp.path}/第二张.JPG');
+    final video = File('${temp.path}/测试视频.MP4')..writeAsBytesSync([0]);
+    await enter(source);
+    await native('performOperation', [fixture.imagePath, secondFace.path]);
+    for (var frame = 0; frame < 6; frame++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 15)),
+      );
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(fixture.sourceRequests, 1);
+    expect(fixture.droppedSourcePaths, [fixture.imagePath, secondFace.path]);
+    expect(find.byKey(const ValueKey('source-import-loading')), findsOneWidget);
+    expect(
+      tester
+          .widget<DropTarget>(
+            find.descendant(of: source, matching: find.byType(DropTarget)),
+          )
+          .enable,
+      isFalse,
+    );
+    expect(
+      tester
+          .widget<DropTarget>(
+            find.descendant(of: target, matching: find.byType(DropTarget)),
+          )
+          .enable,
+      isTrue,
+    );
+    await enter(target);
+    await native('performOperation', [video.path]);
+    for (var frame = 0; frame < 6; frame++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 15)),
+      );
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(fixture.targetRequests, 1);
+    expect(fixture.droppedTargetPath, video.path);
+    expect(pickerCalls, 0);
+    fixture.sourceGate!.complete();
+    fixture.targetGate!.complete();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
 
   testWidgets('预览从点击到对照图片解码始终显示粒子，失败可重试', (tester) async {
     addTearDown(tester.view.resetPhysicalSize);

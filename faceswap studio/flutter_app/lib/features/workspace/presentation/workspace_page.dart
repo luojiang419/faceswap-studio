@@ -10,6 +10,7 @@ import 'package:faceswap_studio/shared/services/studio_file_picker.dart';
 import 'package:faceswap_studio/shared/widgets/studio_media_viewer.dart';
 import 'package:faceswap_studio/shared/widgets/studio_media_loading.dart';
 import 'package:faceswap_studio/shared/widgets/studio_hover_focus.dart';
+import 'package:faceswap_studio/shared/widgets/studio_file_drop_region.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_all/webview_all.dart';
@@ -681,7 +682,7 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
     _workspaceDraftRevision++;
   }
 
-  Future<void> _pickSourceFiles() async {
+  Future<void> _pickSourceFiles([List<XFile>? droppedFiles]) async {
     if (_actionInFlight || _previewInFlight || _sourceImporting) return;
     // 先在文件窗口下方绘制等待态，窗口关闭后不必再等原生清理回调。
     setState(() {
@@ -691,29 +692,31 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
     try {
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted) return;
-      final files = await pickStudioFiles(
-        context,
-        acceptedTypeGroups: const [
-          XTypeGroup(
-            label: '源媒体',
-            extensions: [
-              'jpg',
-              'jpeg',
-              'png',
-              'webp',
-              'bmp',
-              'tiff',
-              'mp3',
-              'wav',
-              'aac',
-              'flac',
-              'ogg',
-              'm4a',
-              'opus',
+      final files =
+          droppedFiles ??
+          await pickStudioFiles(
+            context,
+            acceptedTypeGroups: const [
+              XTypeGroup(
+                label: '源媒体',
+                extensions: [
+                  'jpg',
+                  'jpeg',
+                  'png',
+                  'webp',
+                  'bmp',
+                  'tiff',
+                  'mp3',
+                  'wav',
+                  'aac',
+                  'flac',
+                  'ogg',
+                  'm4a',
+                  'opus',
+                ],
+              ),
             ],
-          ),
-        ],
-      );
+          );
       if (!mounted || files.isEmpty || _actionInFlight) {
         return;
       }
@@ -839,31 +842,33 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
     });
   }
 
-  Future<void> _pickTargetFile() async {
+  Future<void> _pickTargetFile([List<XFile>? droppedFiles]) async {
     if (_actionInFlight || _previewInFlight || _targetImporting) return;
     setState(() => _targetImporting = true);
     try {
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted) return;
-      final files = await pickStudioFiles(
-        context,
-        multiple: false,
-        acceptedTypeGroups: const [
-          XTypeGroup(
-            label: '换脸视频',
-            extensions: [
-              'mp4',
-              'mov',
-              'mkv',
-              'avi',
-              'webm',
-              'wmv',
-              'mpeg',
-              'm4v',
+      final files =
+          droppedFiles ??
+          await pickStudioFiles(
+            context,
+            multiple: false,
+            acceptedTypeGroups: const [
+              XTypeGroup(
+                label: '换脸视频',
+                extensions: [
+                  'mp4',
+                  'mov',
+                  'mkv',
+                  'avi',
+                  'webm',
+                  'wmv',
+                  'mpeg',
+                  'm4v',
+                ],
+              ),
             ],
-          ),
-        ],
-      );
+          );
       if (!mounted || files.isEmpty || _actionInFlight) {
         return;
       }
@@ -1023,10 +1028,12 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
             workspaceMessage: _workspaceMessage,
             previewMessage: _previewMessage,
             onPickSourceFiles: _pickSourceFiles,
+            onDropSourceFiles: _pickSourceFiles,
             onPickPersona: _pickPersona,
             onSavePersona: _savePersona,
             onClearSourceFiles: _clearSourceFiles,
             onPickTargetFile: _pickTargetFile,
+            onDropTargetFiles: _pickTargetFile,
             onClearTargetFile: _clearTargetFile,
             onUpdateOptions: _updateWorkspaceOptions,
             onResetOptions: _resetWorkspaceOptions,
@@ -1162,10 +1169,12 @@ class _NativeWorkbenchPane extends StatelessWidget {
     required this.workspaceMessage,
     required this.previewMessage,
     required this.onPickSourceFiles,
+    required this.onDropSourceFiles,
     required this.onPickPersona,
     required this.onSavePersona,
     required this.onClearSourceFiles,
     required this.onPickTargetFile,
+    required this.onDropTargetFiles,
     required this.onClearTargetFile,
     required this.onUpdateOptions,
     required this.onResetOptions,
@@ -1201,10 +1210,12 @@ class _NativeWorkbenchPane extends StatelessWidget {
   final String workspaceMessage;
   final String previewMessage;
   final VoidCallback onPickSourceFiles;
+  final Future<void> Function(List<XFile>) onDropSourceFiles;
   final VoidCallback onPickPersona;
   final VoidCallback onSavePersona;
   final VoidCallback onClearSourceFiles;
   final VoidCallback onPickTargetFile;
+  final Future<void> Function(List<XFile>) onDropTargetFiles;
   final VoidCallback onClearTargetFile;
   final Future<void> Function(Map<String, dynamic> payload, {bool clearPreview})
   onUpdateOptions;
@@ -1264,12 +1275,15 @@ class _NativeWorkbenchPane extends StatelessWidget {
         final sourceCard = _WorkspaceDraftCard(
           compact: compact,
           title: '人脸参考',
+          onDropFiles: bridgeOnline && !actionBusy && !sourceImporting
+              ? onDropSourceFiles
+              : null,
           loading: sourceImporting ? sourceLoading : null,
           imageLoading: sourceLoading,
           subtitle: sourceImporting
               ? '正在为你准备人脸参考。'
               : currentDraft.sourcePaths.isEmpty
-              ? '可添加多张人脸图片。'
+              ? '拖入多张人脸图片，或点击下方上传。'
               : '已选 ${currentDraft.sourcePaths.length} 个文件，支持多张图片。',
           filePath: currentDraft.primarySourcePath,
           thumbnailPath: currentDraft.sourceThumbnail,
@@ -1311,12 +1325,16 @@ class _NativeWorkbenchPane extends StatelessWidget {
         final targetCard = _WorkspaceDraftCard(
           compact: compact,
           title: '待换脸视频',
+          videoDrop: true,
+          onDropFiles: bridgeOnline && !actionBusy && !targetImporting
+              ? onDropTargetFiles
+              : null,
           loading: targetImporting ? targetLoading : null,
           imageLoading: targetLoading,
           subtitle: targetImporting
               ? '正在读取素材信息。'
               : currentDraft.targetPath == null
-              ? '请选择支持的换脸视频。'
+              ? '拖入一个视频，或点击下方选择。'
               : '待换脸素材已就绪。',
           filePath: currentDraft.targetPath,
           thumbnailPath: currentDraft.targetThumbnail,
@@ -1480,6 +1498,8 @@ class _WorkspaceDraftCard extends StatelessWidget {
     this.compact = false,
     this.loading,
     this.imageLoading,
+    this.videoDrop = false,
+    this.onDropFiles,
     required this.title,
     required this.subtitle,
     required this.filePath,
@@ -1496,6 +1516,8 @@ class _WorkspaceDraftCard extends StatelessWidget {
   final bool compact;
   final Widget? loading;
   final Widget? imageLoading;
+  final bool videoDrop;
+  final Future<void> Function(List<XFile>)? onDropFiles;
   final String title;
   final String subtitle;
   final String? filePath;
@@ -1512,144 +1534,167 @@ class _WorkspaceDraftCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Container(
-      padding: EdgeInsets.all(compact ? 10 : 14),
-      decoration: BoxDecoration(
-        color: theme.cardTheme.color,
-        borderRadius: BorderRadius.circular(22),
-        boxShadow: StudioDepth.shadows(context),
-        border: Border.all(color: StudioDepth.borderColor(context)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style:
-                (compact
-                        ? theme.textTheme.titleSmall
-                        : theme.textTheme.titleMedium)
-                    ?.copyWith(fontWeight: FontWeight.w800),
-          ),
-          SizedBox(height: compact ? 4 : 6),
-          Text(
-            subtitle,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-              height: compact ? 1.22 : 1.35,
-              fontSize: compact ? 11.5 : null,
+    return StudioFileDropRegion(
+      key: ValueKey(videoDrop ? 'target-file-drop' : 'source-file-drop'),
+      video: videoDrop,
+      extensions: videoDrop
+          ? const {'mp4', 'mov', 'mkv', 'avi', 'webm', 'wmv', 'mpeg', 'm4v'}
+          : const {
+              'jpg',
+              'jpeg',
+              'png',
+              'webp',
+              'bmp',
+              'tiff',
+              'mp3',
+              'wav',
+              'aac',
+              'flac',
+              'ogg',
+              'm4a',
+              'opus',
+            },
+      onFiles: onDropFiles,
+      child: Container(
+        padding: EdgeInsets.all(compact ? 10 : 14),
+        decoration: BoxDecoration(
+          color: theme.cardTheme.color,
+          borderRadius: BorderRadius.circular(22),
+          boxShadow: StudioDepth.shadows(context),
+          border: Border.all(color: StudioDepth.borderColor(context)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style:
+                  (compact
+                          ? theme.textTheme.titleSmall
+                          : theme.textTheme.titleMedium)
+                      ?.copyWith(fontWeight: FontWeight.w800),
             ),
-          ),
-          SizedBox(height: compact ? 10 : 14),
-          Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(18),
-              child: Material(
-                color: theme.brightness == Brightness.dark
-                    ? const Color(0xFF20201E)
-                    : theme.colorScheme.surfaceContainer,
-                child: InkWell(
-                  onTap: loading != null || mediaType == 'video'
-                      ? null
-                      : onOpenPreview,
-                  child: SizedBox(
-                    width: double.infinity,
-                    child:
-                        loading ??
-                        (mediaType == 'video' && filePath != null
-                            ? StudioInlineVideoPlayer(
-                                filePath: filePath!,
-                                thumbnailPath: thumbnailPath,
-                                fit: BoxFit.contain,
-                                onOpenFullscreen: onOpenPreview,
-                              )
-                            : Stack(
-                                children: [
-                                  Positioned.fill(
-                                    child: thumbnailPath != null
-                                        ? Padding(
-                                            padding: EdgeInsets.all(
-                                              compact ? 8 : 10,
+            SizedBox(height: compact ? 4 : 6),
+            Text(
+              subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                height: compact ? 1.22 : 1.35,
+                fontSize: compact ? 11.5 : null,
+              ),
+            ),
+            SizedBox(height: compact ? 10 : 14),
+            Expanded(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(18),
+                child: Material(
+                  color: theme.brightness == Brightness.dark
+                      ? const Color(0xFF20201E)
+                      : theme.colorScheme.surfaceContainer,
+                  child: InkWell(
+                    onTap: loading != null || mediaType == 'video'
+                        ? null
+                        : onOpenPreview,
+                    child: SizedBox(
+                      width: double.infinity,
+                      child:
+                          loading ??
+                          (mediaType == 'video' && filePath != null
+                              ? StudioInlineVideoPlayer(
+                                  filePath: filePath!,
+                                  thumbnailPath: thumbnailPath,
+                                  fit: BoxFit.contain,
+                                  onOpenFullscreen: onOpenPreview,
+                                )
+                              : Stack(
+                                  children: [
+                                    Positioned.fill(
+                                      child: thumbnailPath != null
+                                          ? Padding(
+                                              padding: EdgeInsets.all(
+                                                compact ? 8 : 10,
+                                              ),
+                                              child: Image.file(
+                                                File(thumbnailPath!),
+                                                fit: BoxFit.contain,
+                                                frameBuilder:
+                                                    imageLoading == null
+                                                    ? null
+                                                    : (
+                                                        _,
+                                                        child,
+                                                        frame,
+                                                        synchronous,
+                                                      ) =>
+                                                          frame != null ||
+                                                              synchronous
+                                                          ? child
+                                                          : imageLoading!,
+                                                errorBuilder: (_, _, _) =>
+                                                    _MediaPlaceholder(
+                                                      compact: compact,
+                                                      mediaType: mediaType,
+                                                    ),
+                                              ),
+                                            )
+                                          : _MediaPlaceholder(
+                                              compact: compact,
+                                              mediaType: mediaType,
                                             ),
-                                            child: Image.file(
-                                              File(thumbnailPath!),
-                                              fit: BoxFit.contain,
-                                              frameBuilder: imageLoading == null
-                                                  ? null
-                                                  : (
-                                                      _,
-                                                      child,
-                                                      frame,
-                                                      synchronous,
-                                                    ) =>
-                                                        frame != null ||
-                                                            synchronous
-                                                        ? child
-                                                        : imageLoading!,
-                                              errorBuilder: (_, _, _) =>
-                                                  _MediaPlaceholder(
-                                                    compact: compact,
-                                                    mediaType: mediaType,
-                                                  ),
-                                            ),
-                                          )
-                                        : _MediaPlaceholder(
-                                            compact: compact,
-                                            mediaType: mediaType,
-                                          ),
-                                  ),
-                                  if (onOpenPreview != null)
-                                    Positioned(
-                                      right: compact ? 8 : 10,
-                                      bottom: compact ? 8 : 10,
-                                      child: _PreviewActionBadge(
-                                        label: mediaType == 'video'
-                                            ? '点击播放'
-                                            : '点击查看',
-                                      ),
                                     ),
-                                ],
-                              )),
+                                    if (onOpenPreview != null)
+                                      Positioned(
+                                        right: compact ? 8 : 10,
+                                        bottom: compact ? 8 : 10,
+                                        child: _PreviewActionBadge(
+                                          label: mediaType == 'video'
+                                              ? '点击播放'
+                                              : '点击查看',
+                                        ),
+                                      ),
+                                  ],
+                                )),
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-          SizedBox(height: compact ? 8 : 10),
-          Text(
-            loading != null
-                ? '正在处理新素材…'
-                : filePath == null
-                ? '未选择文件'
-                : filePath!.split(RegExp(r'[/\\]')).last,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontSize: compact ? 13 : null,
-              height: compact ? 1.2 : null,
+            SizedBox(height: compact ? 8 : 10),
+            Text(
+              loading != null
+                  ? '正在处理新素材…'
+                  : filePath == null
+                  ? '未选择文件'
+                  : filePath!.split(RegExp(r'[/\\]')).last,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontSize: compact ? 13 : null,
+                height: compact ? 1.2 : null,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          SizedBox(height: compact ? 10 : 14),
-          _WorkspaceDraftActionsBar(
-            compact: compact,
-            visibleActionCount: visibleActionCount,
-            actions: [
-              _WorkspaceDraftAction(
-                label: actionLabel,
-                icon: Icons.folder_open_rounded,
-                onPressed: onPick,
-              ),
-              ...extraActions,
-              _WorkspaceDraftAction(
-                label: '清空',
-                icon: Icons.clear_rounded,
-                onPressed: onClear,
-              ),
-            ],
-          ),
-        ],
+            SizedBox(height: compact ? 10 : 14),
+            _WorkspaceDraftActionsBar(
+              compact: compact,
+              visibleActionCount: visibleActionCount,
+              actions: [
+                _WorkspaceDraftAction(
+                  label: actionLabel,
+                  icon: Icons.folder_open_rounded,
+                  onPressed: onPick,
+                ),
+                ...extraActions,
+                _WorkspaceDraftAction(
+                  label: '清空',
+                  icon: Icons.clear_rounded,
+                  onPressed: onClear,
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
