@@ -250,6 +250,41 @@ def test_target_import_completes_while_source_extraction_waits(tmp_path : Path, 
 	assert saved['target_path'] == state['target_path']
 
 
+@pytest.mark.parametrize('append', [True, False])
+def test_multi_batch_source_drop_preserves_previous_faces_only_when_appending(tmp_path : Path, append : bool) -> None:
+	runtime = create_runtime(tmp_path)
+	previous = create_source_image(runtime, 'previous.png')
+	sources = [create_source_image(runtime, f'source-{index}.png') for index in range(2)]
+	faces = [create_source_image(runtime, f'faces/{index}.png') for index in range(2)]
+	runtime.set_workspace_source_paths([str(previous)])
+	runtime._run_source_face_extractor = lambda paths: {
+		'ok': True,
+		'faces': [{'source_path': path, 'face_path': str(face)} for path, face in zip(paths, faces)],
+	}
+	for _ in range(2):
+		result = runtime.extract_workspace_source_faces([str(path) for path in sources], append=append)
+		assert result['ok'] is True
+		expected = ([str(previous)] if append else []) + [str(path) for path in faces]
+		assert result['workspace']['source_paths'] == expected
+		assert json.loads(runtime._workspace_state_path.read_text(encoding='utf-8'))['source_paths'] == expected
+
+
+def test_failed_appending_keeps_previous_faces_and_audio_appending_keeps_faces(tmp_path : Path) -> None:
+	runtime = create_runtime(tmp_path)
+	previous = create_source_image(runtime, 'previous.png')
+	source = create_source_image(runtime, 'no-face.png')
+	audio = runtime._studio_root / 'sample.wav'
+	audio.write_bytes(b'fixture')
+	runtime.set_workspace_source_paths([str(previous)])
+	runtime._run_source_face_extractor = lambda paths: {'ok': False, 'faces': [], 'skipped': paths}
+	result = runtime.extract_workspace_source_faces([str(source)], append=True)
+	assert result['ok'] is False
+	assert result['workspace']['source_paths'] == [str(previous)]
+	for _ in range(2):
+		result = runtime.extract_workspace_source_faces([str(audio)], append=True)
+		assert result['workspace']['source_paths'] == [str(previous), str(audio)]
+
+
 def test_save_persona_from_images_does_not_change_workspace(tmp_path : Path) -> None:
 	runtime = create_runtime(tmp_path)
 	workspace_source = create_source_image(runtime, 'workspace-face.png')

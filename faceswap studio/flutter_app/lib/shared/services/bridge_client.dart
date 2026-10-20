@@ -132,8 +132,10 @@ class BridgeClient {
   Future<Map<String, dynamic>> extractWorkspaceSourceFaces(
     List<String> paths, {
     String? requestId,
+    bool append = false,
   }) async => _postJsonWithPayload('/workspace/draft/extract-source-faces', {
     'paths': paths,
+    'append': append,
     'request_id': ?requestId,
   }, timeout: _previewTimeout);
 

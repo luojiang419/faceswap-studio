@@ -39,6 +39,7 @@ class _Fixture extends HttpOverrides {
   int sourceRequests = 0;
   int targetRequests = 0;
   List<dynamic>? droppedSourcePaths;
+  bool? appendSources;
   String? droppedTargetPath;
   int faceCount = 0;
   final Map<String, dynamic> options = {};
@@ -235,6 +236,8 @@ class _Request extends Fake implements HttpClientRequest {
     if (url.path == '/workspace/preview') await fixture.previewGate?.future;
     if (url.path == '/workspace/draft/extract-source-faces') {
       fixture.sourceRequests++;
+      fixture.appendSources =
+          (jsonDecode(utf8.decode(body)) as Map)['append'] as bool?;
       fixture.droppedSourcePaths =
           (jsonDecode(utf8.decode(body)) as Map)['paths'] as List;
       await fixture.sourceGate?.future;
@@ -523,6 +526,7 @@ void main() {
     }
     expect(fixture.sourceRequests, 1);
     expect(fixture.droppedSourcePaths, [fixture.imagePath, secondFace.path]);
+    expect(fixture.appendSources, isTrue);
     expect(find.byKey(const ValueKey('source-import-loading')), findsOneWidget);
     expect(
       tester

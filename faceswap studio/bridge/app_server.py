@@ -3615,7 +3615,7 @@ class FaceFusionRuntime:
         self._finish_source_progress(request_id, "completed")
         return extract_result
 
-    def extract_workspace_source_faces(self, source_paths: list[str], request_id: str | None = None) -> dict[str, Any]:
+    def extract_workspace_source_faces(self, source_paths: list[str], request_id: str | None = None, *, append: bool = False) -> dict[str, Any]:
         if request_id:
             self._source_progress_path(request_id)
         normalized = self._normalize_source_paths(source_paths)
@@ -3632,7 +3632,7 @@ class FaceFusionRuntime:
             }
 
         if not image_paths:
-            workspace = self.set_workspace_source_paths(normalized)
+            workspace = self.set_workspace_source_paths(normalized, append=append)
             return {
                 "ok": True,
                 "message": f"已更新源文件，共 {len(workspace['source_paths'])} 个。",
@@ -3673,7 +3673,7 @@ class FaceFusionRuntime:
                 "skipped": skipped,
             }
 
-        workspace = self.set_workspace_source_paths(extracted_paths)
+        workspace = self.set_workspace_source_paths(extracted_paths, append=append)
         if skipped:
             message = f"已自动提取 {len(faces)} 张源脸，{len(skipped)} 个文件未检测到可用人脸。"
         else:
@@ -4394,9 +4394,11 @@ class FaceFusionRuntime:
             "can_submit": bool(source_paths and target_path),
         }
 
-    def set_workspace_source_paths(self, source_paths: list[str]) -> dict[str, Any]:
+    def set_workspace_source_paths(self, source_paths: list[str], *, append: bool = False) -> dict[str, Any]:
         normalized = self._normalize_source_paths(source_paths)
         with self._lock:
+            if append:
+                normalized = list(dict.fromkeys([*self._workspace_state.get("source_paths", []), *normalized]))
             self._workspace_state["source_paths"] = normalized
             self._save_workspace_state()
         self._append_log(f"[bridge] Updated workspace source paths: {len(normalized)} file(s).")
@@ -6352,7 +6354,7 @@ def workspace_draft() -> dict[str, Any]:
 
 @app.post("/workspace/draft/extract-source-faces")
 def workspace_source_faces_extract(payload: dict[str, Any]) -> dict[str, Any]:
-    return runtime.extract_workspace_source_faces(payload.get("paths") or [], payload.get("request_id"))
+    return runtime.extract_workspace_source_faces(payload.get("paths") or [], payload.get("request_id"), append=payload.get("append") is True)
 
 
 @app.get("/workspace/draft/source-progress")

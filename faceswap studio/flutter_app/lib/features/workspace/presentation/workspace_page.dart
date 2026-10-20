@@ -774,6 +774,7 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
         final result = await _client.extractWorkspaceSourceFaces(
           files.map((file) => file.path).toList(),
           requestId: requestId,
+          append: droppedFiles != null,
         );
         final workspace = result['workspace'] as Map<String, dynamic>?;
         if (result['ok'] == true && workspace != null) {
@@ -1284,7 +1285,7 @@ class _NativeWorkbenchPane extends StatelessWidget {
               ? '正在为你准备人脸参考。'
               : currentDraft.sourcePaths.isEmpty
               ? '拖入多张人脸图片，或点击下方上传。'
-              : '已选 ${currentDraft.sourcePaths.length} 个文件，支持多张图片。',
+              : '已添加 ${currentDraft.sourcePaths.length} 个文件，可继续拖入追加。',
           filePath: currentDraft.primarySourcePath,
           thumbnailPath: currentDraft.sourceThumbnail,
           mediaType: currentDraft.primarySourceMediaType,
