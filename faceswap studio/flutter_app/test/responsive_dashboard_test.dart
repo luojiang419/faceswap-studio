@@ -17,6 +17,8 @@ class _Fixture extends HttpOverrides {
   bool online = true;
   int previews = 0;
   Completer<void>? previewGate;
+  bool previewFailed = false;
+  bool invalidPreviewImage = false;
   Map<String, dynamic>? previewPayload;
   bool video = false;
   Completer<void>? sourceGate;
@@ -83,9 +85,10 @@ class _Fixture extends HttpOverrides {
       case '/workspace/preview':
         previews++;
         previewPayload = jsonDecode(utf8.decode(body)) as Map<String, dynamic>;
+        if (previewFailed) return {'ok': false, 'message': '测试预览失败'};
         return {
           'ok': true,
-          'image_base64': png,
+          'image_base64': invalidPreviewImage ? base64Encode([0, 1, 2]) : png,
           'before_image_base64': png,
           'after_image_base64': png,
           'width': 120,
@@ -225,12 +228,35 @@ class _Response extends Stream<List<int>> implements HttpClientResponse {
 }
 
 class _StudioVisualBinding extends AutomatedTestWidgetsFlutterBinding {
+  Completer<void>? decodeGate;
+  int pendingDecodes = 0;
+
+  @override
+  Future<ui.Codec> instantiateImageCodecWithSize(
+    ui.ImmutableBuffer buffer, {
+    ui.TargetImageSizeCallback? getTargetSize,
+  }) async {
+    final gate = decodeGate;
+    if (gate != null) {
+      pendingDecodes++;
+      try {
+        await gate.future;
+      } finally {
+        pendingDecodes--;
+      }
+    }
+    return super.instantiateImageCodecWithSize(
+      buffer,
+      getTargetSize: getTargetSize,
+    );
+  }
+
   @override
   bool get disableShadows => false;
 }
 
 void main() {
-  _StudioVisualBinding();
+  final binding = _StudioVisualBinding();
   final sizes = [
     const Size(1100, 613),
     const Size(1366, 768),
@@ -346,6 +372,77 @@ void main() {
       image.dispose();
     });
   }
+
+  Future<void> finishPreview(WidgetTester tester) async {
+    // 图片解码在引擎执行，让真实异步解码完成后再检查结果。
+    await tester.pump();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 80)),
+    );
+    await tester.pump();
+  }
+
+  testWidgets('预览从点击到对照图片解码始终显示粒子，失败可重试', (tester) async {
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(() => binding.decodeGate = null);
+    fixture.previewGate = Completer<void>();
+    await show(tester, const WorkspacePage(), const Size(1384, 661));
+    binding.decodeGate = Completer<void>();
+    final loading = find.byKey(const ValueKey('workspace-preview-loading'));
+    await tester.tap(find.text('生成预览'));
+    await tester.pump();
+    expect(loading, findsOneWidget);
+    expect(find.text('正在生成预览'), findsOneWidget);
+    expect(find.text('正在检测与裁切，请稍候'), findsNothing);
+    await capture(tester, 'workspace-preview-particles');
+    fixture.previewGate!.complete();
+    await tester.pump();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 30)),
+    );
+    await tester.pump(const Duration(seconds: 2));
+    expect(fixture.previews, 1);
+    expect(binding.pendingDecodes, 3, reason: '等待单图、原图与换脸结果的真实解码');
+    expect(loading, findsOneWidget);
+    expect(find.text('正在预览'), findsOneWidget);
+    binding.decodeGate!.complete();
+    binding.decodeGate = null;
+    await finishPreview(tester);
+    expect(loading, findsNothing);
+    expect(find.text('重新生成预览'), findsOneWidget);
+    expect(find.text('已生成'), findsOneWidget);
+
+    fixture.previewFailed = true;
+    await tester.tap(find.text('重新生成预览'));
+    await tester.pump();
+    expect(loading, findsOneWidget);
+    await finishPreview(tester);
+    expect(loading, findsNothing);
+    expect(find.text('测试预览失败'), findsOneWidget);
+    fixture.previewFailed = false;
+    fixture.invalidPreviewImage = true;
+    await tester.tap(find.text('生成预览'));
+    await tester.pump();
+    await finishPreview(tester);
+    expect(loading, findsNothing);
+    expect(find.textContaining('预览图片无法解码'), findsOneWidget);
+    fixture.invalidPreviewImage = false;
+    await tester.tap(find.text('生成预览'));
+    await tester.pump();
+    await finishPreview(tester);
+    expect(loading, findsNothing);
+    expect(find.text('已生成'), findsOneWidget);
+    fixture.previewGate = Completer<void>();
+    await tester.tap(find.text('重新生成预览'));
+    await tester.pump();
+    expect(loading, findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    fixture.previewGate!.complete();
+    await finishPreview(tester);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     '文件窗口返回前已绘制粒子，识别完成后持续到图片首帧',
@@ -672,6 +769,7 @@ void main() {
       );
       fixture.previewGate!.complete();
       await tester.pump(const Duration(milliseconds: 100));
+      await finishPreview(tester);
       expect(find.text('重新生成预览'), findsOneWidget);
       expect(fixture.previewPayload!['source_paths'], [fixture.imagePath]);
       expect(fixture.previewPayload!['target_path'], fixture.imagePath);
@@ -804,7 +902,19 @@ void main() {
         );
         checkFits('$dark $size 未生成');
         expect(find.text('预览帧'), findsOneWidget);
+        fixture.previewGate = Completer<void>();
         await tester.tap(find.text('生成预览'));
+        await tester.pump();
+        expect(
+          find.byKey(const ValueKey('workspace-preview-loading')),
+          findsOneWidget,
+        );
+        await capture(
+          tester,
+          'video-${dark ? 'dark' : 'light'}-${size.width.toInt()}-loading',
+        );
+        checkFits('$dark $size 生成等待');
+        fixture.previewGate!.complete();
         await tester.pump(const Duration(milliseconds: 300));
         await capture(
           tester,
@@ -814,15 +924,18 @@ void main() {
         final previousPreviews = fixture.previews;
         await tester.drag(find.byType(Slider).first, const Offset(30, 0));
         await tester.pump(const Duration(milliseconds: 300));
+        await finishPreview(tester);
         expect(fixture.previews, greaterThan(previousPreviews));
         await tester.tap(find.byTooltip('人脸 #1'));
         await tester.pump(const Duration(milliseconds: 300));
+        await finishPreview(tester);
         expect(fixture.options['face_selector_mode'], 'reference');
         expect(fixture.options['reference_face_position'], 1);
         checkFits('$dark $size 切换参考脸');
         fixture.faceCount = 0;
         await tester.tap(find.text('重新生成预览'));
         await tester.pump(const Duration(milliseconds: 300));
+        await finishPreview(tester);
         checkFits('$dark $size 无人脸');
         expect(find.text('当前帧未检测到人脸'), findsOneWidget);
         await tester.pumpWidget(const SizedBox.shrink());

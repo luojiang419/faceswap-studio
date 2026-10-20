@@ -15,6 +15,7 @@ class StudioMediaLoading extends StatefulWidget {
     this.recognized = 0,
     this.skipped = 0,
     this.message,
+    this.detail,
   });
 
   final StudioMediaLoadingKind kind;
@@ -23,6 +24,7 @@ class StudioMediaLoading extends StatefulWidget {
   final int recognized;
   final int skipped;
   final String? message;
+  final String? detail;
 
   @override
   State<StudioMediaLoading> createState() => _StudioMediaLoadingState();
@@ -58,9 +60,11 @@ class _StudioMediaLoadingState extends State<StudioMediaLoading>
     final face = widget.kind == StudioMediaLoadingKind.face;
     final title = widget.message ?? (face ? '正在识别人脸' : '视频加载中');
     final processed = widget.processed.clamp(0, widget.total);
-    final detail = face && widget.total > 1
-        ? '已识别 $processed 张 / 共 ${widget.total} 张'
-        : (face ? '正在检测与裁切，请稍候' : '正在准备画面与播放信息');
+    final detail =
+        widget.detail ??
+        (face && widget.total > 1
+            ? '已识别 $processed 张 / 共 ${widget.total} 张'
+            : (face ? '正在检测与裁切，请稍候' : '正在准备画面与播放信息'));
     return Semantics(
       liveRegion: true,
       label: '$title，$detail',
@@ -68,98 +72,103 @@ class _StudioMediaLoadingState extends State<StudioMediaLoading>
         child: LayoutBuilder(
           builder: (context, constraints) {
             final small = constraints.maxHeight < 170;
+            final content = Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (!small)
+                  Flexible(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(
+                        maxWidth: 300,
+                        maxHeight: 180,
+                      ),
+                      child: AspectRatio(
+                        aspectRatio: 16 / 9,
+                        child: RepaintBoundary(
+                          child: face
+                              ? CustomPaint(
+                                  painter: _FaceParticles(
+                                    _motion,
+                                    theme.colorScheme.primary,
+                                  ),
+                                )
+                              : AnimatedBuilder(
+                                  animation: _motion,
+                                  child: SvgPicture.asset(
+                                    'assets/loading/video_loading.svg',
+                                    excludeFromSemantics: true,
+                                  ),
+                                  builder: (_, child) => Transform.translate(
+                                    offset: Offset(
+                                      0,
+                                      math.sin(_motion.value * math.pi * 2) * 3,
+                                    ),
+                                    child: Stack(
+                                      fit: StackFit.expand,
+                                      children: [
+                                        child!,
+                                        CustomPaint(
+                                          painter: _VideoScan(
+                                            _motion.value,
+                                            theme.colorScheme.primary,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                        ),
+                      ),
+                    ),
+                  ),
+                Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  detail,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                if (face && widget.total > 1) ...[
+                  const SizedBox(height: 14),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 190),
+                    child: LinearProgressIndicator(
+                      value: processed / widget.total,
+                      minHeight: 3,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                ],
+                if (widget.skipped > 0 && !small) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    '${widget.recognized} 张检测到人脸 · ${widget.skipped} 张未检测到可用人脸',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
+              ],
+            );
             return Center(
               child: Padding(
                 padding: const EdgeInsets.all(12),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (!small)
-                      Flexible(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(
-                            maxWidth: 300,
-                            maxHeight: 180,
-                          ),
-                          child: AspectRatio(
-                            aspectRatio: 16 / 9,
-                            child: RepaintBoundary(
-                              child: face
-                                  ? CustomPaint(
-                                      painter: _FaceParticles(
-                                        _motion,
-                                        theme.colorScheme.primary,
-                                      ),
-                                    )
-                                  : AnimatedBuilder(
-                                      animation: _motion,
-                                      child: SvgPicture.asset(
-                                        'assets/loading/video_loading.svg',
-                                        excludeFromSemantics: true,
-                                      ),
-                                      builder: (_, child) =>
-                                          Transform.translate(
-                                            offset: Offset(
-                                              0,
-                                              math.sin(
-                                                    _motion.value * math.pi * 2,
-                                                  ) *
-                                                  3,
-                                            ),
-                                            child: Stack(
-                                              fit: StackFit.expand,
-                                              children: [
-                                                child!,
-                                                CustomPaint(
-                                                  painter: _VideoScan(
-                                                    _motion.value,
-                                                    theme.colorScheme.primary,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                    ),
-                            ),
-                          ),
+                child: small
+                    ? FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: SizedBox(
+                          width: math.max(0, constraints.maxWidth - 24),
+                          child: content,
                         ),
-                      ),
-                    Text(
-                      title,
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      detail,
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    if (face && widget.total > 1) ...[
-                      const SizedBox(height: 14),
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 190),
-                        child: LinearProgressIndicator(
-                          value: processed / widget.total,
-                          minHeight: 3,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ),
-                    ],
-                    if (widget.skipped > 0 && !small) ...[
-                      const SizedBox(height: 10),
-                      Text(
-                        '${widget.recognized} 张检测到人脸 · ${widget.skipped} 张未检测到可用人脸',
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.bodySmall,
-                      ),
-                    ],
-                  ],
-                ),
+                      )
+                    : content,
               ),
             );
           },

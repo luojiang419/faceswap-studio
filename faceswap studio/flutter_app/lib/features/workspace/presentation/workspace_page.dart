@@ -463,6 +463,9 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
       _previewMessage = '正在生成预览，请稍候。';
     });
     try {
+      // 先呈现等待反馈，再开始请求和结果解码。
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
       final result = await _client.previewWorkspace({
         'source_paths': currentDraft.sourcePaths,
         'target_path': currentDraft.targetPath,
@@ -479,6 +482,26 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
             _previewMessage = '预览生成失败：Bridge 返回了空的预览图片。';
           });
           return;
+        }
+        // 对照模式会同时显示原图和换脸图，全部准备好再移除粒子动画。
+        Object? imageError;
+        await Future.wait([
+          for (final bytes in [
+            previewResult.imageBytes,
+            if (previewResult.canCompare) ...[
+              previewResult.beforeImageBytes,
+              previewResult.afterImageBytes,
+            ],
+          ])
+            precacheImage(
+              MemoryImage(bytes),
+              context,
+              onError: (error, _) => imageError ??= error,
+            ),
+        ]);
+        if (!mounted) return;
+        if (imageError != null) {
+          throw StateError('预览图片无法解码');
         }
         setState(() {
           _workspacePreviewResult = previewResult;
@@ -1310,7 +1333,7 @@ class _NativeWorkbenchPane extends StatelessWidget {
               0,
           targetVideoFrameTotal: currentDraft.targetVideoFrameTotal,
           lastVideoFrameTotal: lastVideoFrameTotal,
-          onOpenPreviewResult: previewResult != null
+          onOpenPreviewResult: previewResult != null && !previewBusy
               ? () => onOpenPreviewResult()
               : null,
           onUpdateOptions: onUpdateOptions,
@@ -2384,24 +2407,13 @@ class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
                           children: [
                             Positioned.fill(
                               child: widget.previewBusy
-                                  ? Center(
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const SizedBox(
-                                            width: 28,
-                                            height: 28,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2.4,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 12),
-                                          Text(
-                                            '正在生成预览',
-                                            style: theme.textTheme.bodyMedium,
-                                          ),
-                                        ],
+                                  ? const StudioMediaLoading(
+                                      key: ValueKey(
+                                        'workspace-preview-loading',
                                       ),
+                                      kind: StudioMediaLoadingKind.face,
+                                      message: '正在生成预览',
+                                      detail: '正在融合人脸与生成画面，请稍候',
                                     )
                                   : previewResult != null
                                   ? previewResult.canCompare
