@@ -849,14 +849,8 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
         multiple: false,
         acceptedTypeGroups: const [
           XTypeGroup(
-            label: '目标媒体',
+            label: '换脸视频',
             extensions: [
-              'jpg',
-              'jpeg',
-              'png',
-              'webp',
-              'bmp',
-              'tiff',
               'mp4',
               'mov',
               'mkv',
@@ -1321,7 +1315,7 @@ class _NativeWorkbenchPane extends StatelessWidget {
           subtitle: targetImporting
               ? '正在读取素材信息。'
               : currentDraft.targetPath == null
-              ? '选择待换脸视频，也支持图片。'
+              ? '请选择支持的换脸视频。'
               : '待换脸素材已就绪。',
           filePath: currentDraft.targetPath,
           thumbnailPath: currentDraft.targetThumbnail,

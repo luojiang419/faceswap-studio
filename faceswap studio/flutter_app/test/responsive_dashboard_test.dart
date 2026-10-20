@@ -763,10 +763,29 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       const picker = MethodChannel('faceswap_studio/file_dialog');
       var picked = Completer<List<String>>();
-      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-        picker,
-        (_) => picked.future,
-      );
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(picker, (
+        call,
+      ) {
+        expect(call.arguments, {
+          'multiple': false,
+          'filters': [
+            {
+              'label': '换脸视频',
+              'extensions': [
+                'mp4',
+                'mov',
+                'mkv',
+                'avi',
+                'webm',
+                'wmv',
+                'mpeg',
+                'm4v',
+              ],
+            },
+          ],
+        });
+        return picked.future;
+      });
       addTearDown(
         () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
           picker,
