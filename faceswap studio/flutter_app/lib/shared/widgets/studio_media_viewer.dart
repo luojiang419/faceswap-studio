@@ -697,7 +697,6 @@ class StudioInlineVideoPlayer extends StatefulWidget {
     this.thumbnailPath,
     this.fit = BoxFit.cover,
     this.onOpenFullscreen,
-    this.showVideoBadge = true,
     this.showFullscreenButton = true,
   });
 
@@ -705,7 +704,6 @@ class StudioInlineVideoPlayer extends StatefulWidget {
   final String? thumbnailPath;
   final BoxFit fit;
   final VoidCallback? onOpenFullscreen;
-  final bool showVideoBadge;
   final bool showFullscreenButton;
 
   @override
@@ -971,18 +969,6 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
                     : theme.colorScheme.surfaceContainer,
                 child: const StudioMediaLoading(
                   kind: StudioMediaLoadingKind.video,
-                ),
-              ),
-            ),
-          if (widget.showVideoBadge && !_opening && !_waitingForFirstFrame)
-            const Positioned(
-              left: 8,
-              top: 8,
-              child: IgnorePointer(
-                child: _InlineVideoBadge(
-                  icon: Icons.movie_creation_outlined,
-                  label: '视频',
-                  color: Colors.white,
                 ),
               ),
             ),
@@ -1782,15 +1768,6 @@ class _StudioVideoViewerDialogState extends State<_StudioVideoViewerDialog> {
                       fit: BoxFit.contain,
                       controls: NoVideoControls,
                     ),
-            ),
-          ),
-          Positioned(
-            top: 20,
-            left: 20,
-            right: 68,
-            child: _ViewerHintLabel(
-              label:
-                  '${widget.title ?? '视频播放'} · Space 播放/暂停 · ←/→ 5 秒 · Esc 退出',
             ),
           ),
           Positioned(
