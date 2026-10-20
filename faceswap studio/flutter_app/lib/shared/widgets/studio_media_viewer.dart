@@ -1,4 +1,5 @@
 import 'package:faceswap_studio/shared/widgets/studio_video_controls.dart';
+import 'package:faceswap_studio/shared/widgets/studio_media_loading.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
@@ -913,14 +914,17 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
               ),
             )
           else if (_opening)
-            const Center(
-              child: SizedBox(
-                width: 28,
-                height: 28,
-                child: CircularProgressIndicator(strokeWidth: 2.4),
+            Positioned.fill(
+              child: ColoredBox(
+                color: theme.brightness == Brightness.dark
+                    ? const Color(0xFF20201E)
+                    : theme.colorScheme.surfaceContainer,
+                child: const StudioMediaLoading(
+                  kind: StudioMediaLoadingKind.video,
+                ),
               ),
             ),
-          if (widget.showVideoBadge)
+          if (widget.showVideoBadge && !_opening)
             const Positioned(
               left: 8,
               top: 8,

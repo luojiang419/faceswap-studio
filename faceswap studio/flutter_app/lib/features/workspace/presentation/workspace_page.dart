@@ -8,6 +8,7 @@ import 'dart:typed_data';
 import 'package:faceswap_studio/shared/services/bridge_client.dart';
 import 'package:faceswap_studio/shared/services/studio_file_picker.dart';
 import 'package:faceswap_studio/shared/widgets/studio_media_viewer.dart';
+import 'package:faceswap_studio/shared/widgets/studio_media_loading.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_all/webview_all.dart';
@@ -139,6 +140,14 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
 
   bool _requestInFlight = false;
   bool _actionInFlight = false;
+  bool _sourceImporting = false;
+  bool _targetImporting = false;
+  int _sourceProcessed = 0;
+  int _sourceTotal = 0;
+  int _sourceRecognized = 0;
+  int _sourceSkipped = 0;
+  Timer? _sourceProgressTimer;
+  String? _sourceRequestId;
   bool _bridgeOnline = false;
   bool _controllerReady = false;
   bool _isPinned = true;
@@ -237,6 +246,7 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _sourceProgressTimer?.cancel();
     super.dispose();
   }
 
@@ -634,6 +644,7 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
   bool get _isWebUiReady => _serviceState == 'ready';
 
   Future<void> _pickSourceFiles() async {
+    if (_actionInFlight || _sourceImporting || _targetImporting) return;
     final files = await pickStudioFiles(
       context,
       acceptedTypeGroups: const [
@@ -657,28 +668,87 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
         ),
       ],
     );
-    if (files.isEmpty) {
+    if (!mounted || files.isEmpty || _actionInFlight) {
       return;
     }
-    await _invokeWorkspaceAction(() async {
-      _workspaceMessage = '正在自动提取源脸，请稍候。';
-      final result = await _client.extractWorkspaceSourceFaces(
-        files.map((file) => file.path).toList(),
-      );
-      final workspace = result['workspace'] as Map<String, dynamic>?;
-      if (workspace != null) {
-        _workspaceDraft = _WorkspaceDraft.fromJson(workspace);
-      }
-      if (result['ok'] == true) {
-        _workspaceMessage =
-            '${result['message'] ?? '已自动提取源脸。'} 当前共 ${_workspaceDraft?.sourcePaths.length ?? 0} 个源文件。';
-      } else {
-        _workspaceMessage = '${result['message'] ?? '源脸提取失败。'}';
-      }
-      _workspacePreviewResult = null;
-      _lastVideoFrameTotal = null;
-      _previewMessage = '源文件已更新，请重新生成预览。';
+    final requestId =
+        '${DateTime.now().microsecondsSinceEpoch}-${math.Random().nextInt(1 << 32)}';
+    final imageCount = files
+        .where(
+          (file) => RegExp(
+            r'\.(jpg|jpeg|png|webp|bmp|tiff)$',
+            caseSensitive: false,
+          ).hasMatch(file.path),
+        )
+        .length;
+    setState(() {
+      _sourceImporting = true;
+      _sourceRequestId = requestId;
+      _sourceProcessed = _sourceRecognized = _sourceSkipped = 0;
+      _sourceTotal = imageCount;
     });
+    var readingProgress = false;
+    _sourceProgressTimer = Timer.periodic(const Duration(milliseconds: 500), (
+      _,
+    ) async {
+      if (readingProgress) return;
+      readingProgress = true;
+      try {
+        final progress = await _client.getSourceExtractionProgress(requestId);
+        if (!mounted ||
+            !_sourceImporting ||
+            _sourceRequestId != requestId ||
+            progress['request_id'] != requestId) {
+          return;
+        }
+        setState(() {
+          _sourceProcessed = math
+              .max(
+                _sourceProcessed,
+                (progress['processed'] as num?)?.toInt() ?? 0,
+              )
+              .clamp(0, _sourceTotal);
+          _sourceRecognized = (progress['recognized'] as num?)?.toInt() ?? 0;
+          _sourceSkipped = (progress['skipped'] as num?)?.toInt() ?? 0;
+        });
+      } catch (_) {
+        /* 短暂轮询失败不影响识别请求，最终请求负责展示错误。 */
+      } finally {
+        readingProgress = false;
+      }
+    });
+    try {
+      await _invokeWorkspaceAction(() async {
+        _workspaceMessage = '正在自动提取源脸，请稍候。';
+        final result = await _client.extractWorkspaceSourceFaces(
+          files.map((file) => file.path).toList(),
+          requestId: requestId,
+        );
+        final workspace = result['workspace'] as Map<String, dynamic>?;
+        if (workspace != null) {
+          _workspaceDraft = _WorkspaceDraft.fromJson(workspace);
+        }
+        if (result['ok'] == true) {
+          _workspaceMessage =
+              '${result['message'] ?? '已自动提取源脸。'} 当前共 ${_workspaceDraft?.sourcePaths.length ?? 0} 个源文件。';
+        } else {
+          _workspaceMessage = '${result['message'] ?? '源脸提取失败。'}';
+          if (mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text(_workspaceMessage)));
+          }
+          return;
+        }
+        _workspacePreviewResult = null;
+        _lastVideoFrameTotal = null;
+        _previewMessage = '源文件已更新，请重新生成预览。';
+      });
+    } finally {
+      _sourceProgressTimer?.cancel();
+      _sourceRequestId = null;
+      if (mounted) setState(() => _sourceImporting = false);
+    }
   }
 
   Future<void> _pickPersona() async {
@@ -721,6 +791,7 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
   }
 
   Future<void> _pickTargetFile() async {
+    if (_actionInFlight || _sourceImporting || _targetImporting) return;
     final files = await pickStudioFiles(
       context,
       multiple: false,
@@ -746,17 +817,22 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
         ),
       ],
     );
-    if (files.isEmpty) {
+    if (!mounted || files.isEmpty || _actionInFlight) {
       return;
     }
-    await _invokeWorkspaceAction(() async {
-      final draft = await _client.setWorkspaceTargetPath(files.single.path);
-      _workspaceDraft = _WorkspaceDraft.fromJson(draft);
-      _workspaceMessage = '已更新目标文件。';
-      _workspacePreviewResult = null;
-      _lastVideoFrameTotal = null;
-      _previewMessage = '目标文件已更新，请重新生成预览。';
-    });
+    setState(() => _targetImporting = true);
+    try {
+      await _invokeWorkspaceAction(() async {
+        final draft = await _client.setWorkspaceTargetPath(files.single.path);
+        _workspaceDraft = _WorkspaceDraft.fromJson(draft);
+        _workspaceMessage = '已更新目标文件。';
+        _workspacePreviewResult = null;
+        _lastVideoFrameTotal = null;
+        _previewMessage = '目标文件已更新，请重新生成预览。';
+      });
+    } finally {
+      if (mounted) setState(() => _targetImporting = false);
+    }
   }
 
   Future<void> _clearSourceFiles() async {
@@ -848,6 +924,11 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
       await action();
     } catch (error) {
       _workspaceMessage = '操作失败: $error';
+      if (mounted && (_sourceImporting || _targetImporting)) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_workspaceMessage)));
+      }
     } finally {
       await _refresh();
       if (mounted) {
@@ -874,6 +955,12 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
             webUiReady: _isWebUiReady,
             busy: _actionInFlight || _previewInFlight,
             previewBusy: _previewInFlight,
+            sourceImporting: _sourceImporting,
+            targetImporting: _targetImporting,
+            sourceProcessed: _sourceProcessed,
+            sourceTotal: _sourceTotal,
+            sourceRecognized: _sourceRecognized,
+            sourceSkipped: _sourceSkipped,
             draft: _workspaceDraft,
             workspaceOptionsSchema: _workspaceOptionsSchema,
             workspaceOptionsState: _workspaceOptionsState,
@@ -1006,6 +1093,12 @@ class _NativeWorkbenchPane extends StatelessWidget {
     required this.webUiReady,
     required this.busy,
     required this.previewBusy,
+    required this.sourceImporting,
+    required this.targetImporting,
+    required this.sourceProcessed,
+    required this.sourceTotal,
+    required this.sourceRecognized,
+    required this.sourceSkipped,
     required this.draft,
     required this.workspaceOptionsSchema,
     required this.workspaceOptionsState,
@@ -1038,6 +1131,12 @@ class _NativeWorkbenchPane extends StatelessWidget {
   final bool webUiReady;
   final bool busy;
   final bool previewBusy;
+  final bool sourceImporting;
+  final bool targetImporting;
+  final int sourceProcessed;
+  final int sourceTotal;
+  final int sourceRecognized;
+  final int sourceSkipped;
   final _WorkspaceDraft? draft;
   final WorkspaceOptionsSchema? workspaceOptionsSchema;
   final WorkspaceOptionsState? workspaceOptionsState;
@@ -1102,7 +1201,20 @@ class _NativeWorkbenchPane extends StatelessWidget {
         final sourceCard = _WorkspaceDraftCard(
           compact: compact,
           title: '人脸参考',
-          subtitle: currentDraft.sourcePaths.isEmpty
+          loading: sourceImporting
+              ? StudioMediaLoading(
+                  key: const ValueKey('source-import-loading'),
+                  kind: StudioMediaLoadingKind.face,
+                  processed: sourceProcessed,
+                  total: sourceTotal,
+                  recognized: sourceRecognized,
+                  skipped: sourceSkipped,
+                  message: sourceTotal == 0 ? '正在载入源素材' : null,
+                )
+              : null,
+          subtitle: sourceImporting
+              ? '正在为你准备人脸参考。'
+              : currentDraft.sourcePaths.isEmpty
               ? '可添加多张人脸图片。'
               : '已选 ${currentDraft.sourcePaths.length} 个文件，支持多张图片。',
           filePath: currentDraft.primarySourcePath,
@@ -1139,7 +1251,15 @@ class _NativeWorkbenchPane extends StatelessWidget {
         final targetCard = _WorkspaceDraftCard(
           compact: compact,
           title: '待换脸视频',
-          subtitle: currentDraft.targetPath == null
+          loading: targetImporting
+              ? const StudioMediaLoading(
+                  key: ValueKey('target-import-loading'),
+                  kind: StudioMediaLoadingKind.video,
+                )
+              : null,
+          subtitle: targetImporting
+              ? '正在读取素材信息。'
+              : currentDraft.targetPath == null
               ? '选择待换脸视频，也支持图片。'
               : '待换脸素材已就绪。',
           filePath: currentDraft.targetPath,
@@ -1299,6 +1419,7 @@ class _NativeWorkbenchPane extends StatelessWidget {
 class _WorkspaceDraftCard extends StatelessWidget {
   const _WorkspaceDraftCard({
     this.compact = false,
+    this.loading,
     required this.title,
     required this.subtitle,
     required this.filePath,
@@ -1313,6 +1434,7 @@ class _WorkspaceDraftCard extends StatelessWidget {
   });
 
   final bool compact;
+  final Widget? loading;
   final String title;
   final String subtitle;
   final String? filePath;
@@ -1368,51 +1490,55 @@ class _WorkspaceDraftCard extends StatelessWidget {
                     ? const Color(0xFF20201E)
                     : theme.colorScheme.surfaceContainer,
                 child: InkWell(
-                  onTap: mediaType == 'video' ? null : onOpenPreview,
+                  onTap: loading != null || mediaType == 'video'
+                      ? null
+                      : onOpenPreview,
                   child: SizedBox(
                     width: double.infinity,
-                    child: mediaType == 'video' && filePath != null
-                        ? StudioInlineVideoPlayer(
-                            filePath: filePath!,
-                            thumbnailPath: thumbnailPath,
-                            fit: BoxFit.contain,
-                            onOpenFullscreen: onOpenPreview,
-                          )
-                        : Stack(
-                            children: [
-                              Positioned.fill(
-                                child: thumbnailPath != null
-                                    ? Padding(
-                                        padding: EdgeInsets.all(
-                                          compact ? 8 : 10,
-                                        ),
-                                        child: Image.file(
-                                          File(thumbnailPath!),
-                                          fit: BoxFit.contain,
-                                          errorBuilder: (_, _, _) =>
-                                              _MediaPlaceholder(
-                                                compact: compact,
-                                                mediaType: mediaType,
-                                              ),
-                                        ),
-                                      )
-                                    : _MediaPlaceholder(
-                                        compact: compact,
-                                        mediaType: mediaType,
-                                      ),
-                              ),
-                              if (onOpenPreview != null)
-                                Positioned(
-                                  right: compact ? 8 : 10,
-                                  bottom: compact ? 8 : 10,
-                                  child: _PreviewActionBadge(
-                                    label: mediaType == 'video'
-                                        ? '点击播放'
-                                        : '点击查看',
+                    child:
+                        loading ??
+                        (mediaType == 'video' && filePath != null
+                            ? StudioInlineVideoPlayer(
+                                filePath: filePath!,
+                                thumbnailPath: thumbnailPath,
+                                fit: BoxFit.contain,
+                                onOpenFullscreen: onOpenPreview,
+                              )
+                            : Stack(
+                                children: [
+                                  Positioned.fill(
+                                    child: thumbnailPath != null
+                                        ? Padding(
+                                            padding: EdgeInsets.all(
+                                              compact ? 8 : 10,
+                                            ),
+                                            child: Image.file(
+                                              File(thumbnailPath!),
+                                              fit: BoxFit.contain,
+                                              errorBuilder: (_, _, _) =>
+                                                  _MediaPlaceholder(
+                                                    compact: compact,
+                                                    mediaType: mediaType,
+                                                  ),
+                                            ),
+                                          )
+                                        : _MediaPlaceholder(
+                                            compact: compact,
+                                            mediaType: mediaType,
+                                          ),
                                   ),
-                                ),
-                            ],
-                          ),
+                                  if (onOpenPreview != null)
+                                    Positioned(
+                                      right: compact ? 8 : 10,
+                                      bottom: compact ? 8 : 10,
+                                      child: _PreviewActionBadge(
+                                        label: mediaType == 'video'
+                                            ? '点击播放'
+                                            : '点击查看',
+                                      ),
+                                    ),
+                                ],
+                              )),
                   ),
                 ),
               ),
@@ -1420,7 +1546,11 @@ class _WorkspaceDraftCard extends StatelessWidget {
           ),
           SizedBox(height: compact ? 8 : 10),
           Text(
-            filePath == null ? '未选择文件' : filePath!.split(RegExp(r'[/\\]')).last,
+            loading != null
+                ? '正在处理新素材…'
+                : filePath == null
+                ? '未选择文件'
+                : filePath!.split(RegExp(r'[/\\]')).last,
             style: theme.textTheme.bodyMedium?.copyWith(
               fontSize: compact ? 13 : null,
               height: compact ? 1.2 : null,

@@ -130,16 +130,27 @@ class BridgeClient {
   );
 
   Future<Map<String, dynamic>> extractWorkspaceSourceFaces(
-    List<String> paths,
-  ) async => _postJsonWithPayload('/workspace/draft/extract-source-faces', {
+    List<String> paths, {
+    String? requestId,
+  }) async => _postJsonWithPayload('/workspace/draft/extract-source-faces', {
     'paths': paths,
+    'request_id': ?requestId,
   }, timeout: _previewTimeout);
+
+  Future<Map<String, dynamic>> getSourceExtractionProgress(
+    String requestId,
+  ) async => _getJson(
+    '/workspace/draft/source-progress?request_id=${Uri.encodeQueryComponent(requestId)}',
+    timeout: const Duration(seconds: 3),
+  );
 
   Future<Map<String, dynamic>> clearWorkspaceSourcePaths() async =>
       _deleteJson('/workspace/draft/source-paths');
 
   Future<Map<String, dynamic>> setWorkspaceTargetPath(String path) async =>
-      _putJson('/workspace/draft/target-path', {'path': path});
+      _putJson('/workspace/draft/target-path', {
+        'path': path,
+      }, timeout: _uploadTimeout);
 
   Future<Map<String, dynamic>> uploadWorkspaceTarget(
     BridgeUploadFile file,
@@ -282,8 +293,9 @@ class BridgeClient {
 
   Future<Map<String, dynamic>> _putJson(
     String path,
-    Map<String, dynamic> payload,
-  ) async {
+    Map<String, dynamic> payload, {
+    Duration timeout = _defaultTimeout,
+  }) async {
     final response = await http
         .put(
           Uri.parse('$_baseUrl$path'),
@@ -293,7 +305,7 @@ class BridgeClient {
           },
           body: jsonEncode(payload),
         )
-        .timeout(_defaultTimeout, onTimeout: _handleTimeout);
+        .timeout(timeout, onTimeout: _handleTimeout);
     _ensureSuccess(response);
     return jsonDecode(response.body) as Map<String, dynamic>;
   }

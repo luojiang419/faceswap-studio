@@ -19,6 +19,7 @@ dependencies:
   super_clipboard: ^0.9.1
   web: ^1.1.1
   webview_all: ^1.0.3
+  flutter_svg: ^2.3.0
 
 dev_dependencies:
   integration_test:
@@ -32,3 +33,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/branding/
+    - assets/loading/

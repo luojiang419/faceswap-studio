@@ -2,6 +2,8 @@ import importlib.util
 import json
 from pathlib import Path
 import threading
+import pytest
+from types import SimpleNamespace
 
 
 APP_SERVER_PATH = Path(__file__).resolve().parents[1] / 'faceswap studio' / 'bridge' / 'app_server.py'
@@ -93,6 +95,42 @@ def create_source_image(runtime : FaceFusionRuntime, name : str) -> Path:
 	source_path.parent.mkdir(parents = True, exist_ok = True)
 	source_path.write_bytes(b'test-image')
 	return source_path
+
+
+def test_source_progress_is_batch_scoped_and_does_not_hold_extraction_lock(tmp_path):
+	runtime = create_runtime(tmp_path)
+	path = runtime._source_progress_path('batch-a')
+	path.parent.mkdir(parents=True)
+	path.write_text(json.dumps({'request_id': 'batch-a', 'processed': 2, 'total': 4}), encoding='utf-8')
+	with runtime._preview_lock:
+		assert runtime.source_extraction_progress('batch-a')['processed'] == 2
+		assert runtime.source_extraction_progress('batch-b')['processed'] == 0
+	for invalid in ['../settings', 'a/b', 'a\\b', 'x' * 81]:
+		with pytest.raises(APP_SERVER_MODULE.HTTPException) as error:
+			runtime.source_extraction_progress(invalid)
+		assert error.value.status_code == 400
+
+
+@pytest.mark.parametrize('failure', ['timeout', 'invalid_json', 'empty', 'worker_error'])
+def test_source_progress_stops_on_worker_failure_without_losing_partial_count(tmp_path, monkeypatch, failure):
+	runtime = create_runtime(tmp_path)
+	runtime._build_env = lambda: {}
+	def fail(command, **kwargs):
+		payload = json.loads(kwargs['input'])
+		path = Path(payload['progress_path'])
+		path.write_text(json.dumps({'request_id': 'batch-failed', 'state': 'running',
+			'processed': 1, 'recognized': 1, 'skipped': 0, 'total': 2}), encoding='utf-8')
+		if failure == 'timeout':
+			raise APP_SERVER_MODULE.subprocess.TimeoutExpired(command, 300)
+		return SimpleNamespace(returncode=1 if failure == 'worker_error' else 0, stderr='',
+			stdout={'invalid_json': '{', 'empty': '', 'worker_error': '{"ok": false, "message": "failed"}'}[failure])
+	monkeypatch.setattr(APP_SERVER_MODULE.subprocess, 'run', fail)
+	result = runtime._run_source_face_extractor(['a.jpg', 'b.jpg'], request_id='batch-failed')
+	assert not result['ok']
+	progress = runtime.source_extraction_progress('batch-failed')
+	assert progress['state'] == 'failed'
+	assert progress['processed'] == progress['recognized'] == 1
+	assert progress['total'] == 2
 
 
 def test_save_workspace_persona_generates_numbered_files_and_manifest(tmp_path : Path) -> None:

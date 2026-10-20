@@ -3499,7 +3499,29 @@ class FaceFusionRuntime:
         }
         return preview_result
 
-    def _run_source_face_extractor(self, image_paths: list[str]) -> dict[str, Any]:
+    def _source_progress_path(self, request_id: str) -> Path:
+        if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", request_id):
+            raise HTTPException(status_code=400, detail="Invalid source progress request ID.")
+        return self._runtime_dir / "source-progress" / f"{request_id}.json"
+
+    def source_extraction_progress(self, request_id: str) -> dict[str, Any]:
+        path = self._source_progress_path(request_id)
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {"request_id": request_id, "state": "pending", "processed": 0,
+                    "recognized": 0, "skipped": 0, "total": 0}
+
+    def _finish_source_progress(self, request_id: str | None, state: str) -> None:
+        if request_id:
+            from updater.transaction import write_json
+            try:
+                progress = self.source_extraction_progress(request_id)
+                write_json(self._source_progress_path(request_id), {**progress, "state": state})
+            except OSError as error:
+                self._append_log(f"[bridge] Could not finalize extraction progress: {error}")
+
+    def _run_source_face_extractor(self, image_paths: list[str], request_id: str | None = None) -> dict[str, Any]:
         output_dir = self._extracted_faces_dir / datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f")
         output_dir.mkdir(parents=True, exist_ok=True)
         request_payload = {
@@ -3509,6 +3531,12 @@ class FaceFusionRuntime:
             "temp_path": str(self._temp_dir),
             "jobs_path": str(self._jobs_dir),
         }
+        if request_id:
+            from updater.transaction import write_json
+            progress_path = self._source_progress_path(request_id)
+            request_payload.update(progress_path=str(progress_path), request_id=request_id)
+            write_json(progress_path, {"request_id": request_id, "state": "preparing",
+                "processed": 0, "recognized": 0, "skipped": 0, "total": len(image_paths)})
         command = [sys.executable, str(self._source_face_extractor_worker_path())]
         self._append_log(f"[bridge] Source face extraction requested: {len(image_paths)} image(s).")
 
@@ -3527,6 +3555,7 @@ class FaceFusionRuntime:
                     timeout=300,
                 )
         except subprocess.TimeoutExpired:
+            self._finish_source_progress(request_id, "failed")
             self._append_log("[bridge] Source face extraction timed out after 300 seconds.")
             return {
                 "ok": False,
@@ -3544,6 +3573,7 @@ class FaceFusionRuntime:
 
         stdout_text = (result.stdout or "").strip()
         if not stdout_text:
+            self._finish_source_progress(request_id, "failed")
             self._append_log(
                 f"[bridge] Source face extraction failed with empty output, exit code {result.returncode}.",
             )
@@ -3557,6 +3587,7 @@ class FaceFusionRuntime:
         try:
             extract_result = json.loads(stdout_text)
         except json.JSONDecodeError:
+            self._finish_source_progress(request_id, "failed")
             self._append_log(
                 f"[bridge] Source face extraction returned invalid JSON, exit code {result.returncode}.",
             )
@@ -3569,6 +3600,7 @@ class FaceFusionRuntime:
             }
 
         if result.returncode != 0 or not extract_result.get("ok"):
+            self._finish_source_progress(request_id, "failed")
             message = extract_result.get("message") or "源脸提取失败。"
             self._append_log(f"[bridge] Source face extraction failed: {message}")
             return {
@@ -3580,9 +3612,12 @@ class FaceFusionRuntime:
             }
 
         self._append_log(f"[bridge] Source face extraction completed: {len(extract_result.get('faces') or [])} face(s).")
+        self._finish_source_progress(request_id, "completed")
         return extract_result
 
-    def extract_workspace_source_faces(self, source_paths: list[str]) -> dict[str, Any]:
+    def extract_workspace_source_faces(self, source_paths: list[str], request_id: str | None = None) -> dict[str, Any]:
+        if request_id:
+            self._source_progress_path(request_id)
         normalized = self._normalize_source_paths(source_paths)
         image_paths = [path for path in normalized if Path(path).suffix.lower() in IMAGE_EXTENSIONS]
         passthrough_paths = [path for path in normalized if Path(path).suffix.lower() in AUDIO_EXTENSIONS]
@@ -3606,7 +3641,8 @@ class FaceFusionRuntime:
                 "skipped": [],
             }
 
-        extract_result = self._run_source_face_extractor(image_paths)
+        extract_result = (self._run_source_face_extractor(image_paths, request_id=request_id)
+                          if request_id else self._run_source_face_extractor(image_paths))
         faces = [
             item
             for item in extract_result.get("faces") or []
@@ -6316,7 +6352,12 @@ def workspace_draft() -> dict[str, Any]:
 
 @app.post("/workspace/draft/extract-source-faces")
 def workspace_source_faces_extract(payload: dict[str, Any]) -> dict[str, Any]:
-    return runtime.extract_workspace_source_faces(payload.get("paths") or [])
+    return runtime.extract_workspace_source_faces(payload.get("paths") or [], payload.get("request_id"))
+
+
+@app.get("/workspace/draft/source-progress")
+def workspace_source_faces_progress(request_id: str) -> dict[str, Any]:
+    return runtime.source_extraction_progress(request_id)
 
 
 @app.get("/workspace/options/schema")

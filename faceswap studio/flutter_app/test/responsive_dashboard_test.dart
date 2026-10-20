@@ -19,6 +19,10 @@ class _Fixture extends HttpOverrides {
   Completer<void>? previewGate;
   Map<String, dynamic>? previewPayload;
   bool video = false;
+  Completer<void>? sourceGate;
+  Completer<void>? targetGate;
+  int sourceProcessed = 0;
+  bool sourceFailed = false;
   int faceCount = 0;
   final Map<String, dynamic> options = {};
   late String imagePath;
@@ -26,6 +30,31 @@ class _Fixture extends HttpOverrides {
 
   Object response(Uri uri, List<int> body) {
     switch (uri.path) {
+      case '/workspace/draft/source-progress':
+        return {
+          'request_id': uri.queryParameters['request_id'],
+          'processed': sourceProcessed,
+          'total': 3,
+          'recognized': sourceProcessed,
+          'skipped': 0,
+        };
+      case '/workspace/draft/extract-source-faces':
+        return {
+          'ok': !sourceFailed,
+          'message': sourceFailed ? '未检测到可用人脸' : '已提取源脸',
+          'workspace': {
+            'source_paths': [imagePath],
+            'source_thumbnail': imagePath,
+          },
+        };
+      case '/workspace/draft/target-path':
+        return {
+          'source_paths': [imagePath],
+          'target_path': imagePath,
+          'target_media_type': 'image',
+          'source_thumbnail': imagePath,
+          'target_thumbnail': imagePath,
+        };
       case '/facefusion/status':
         if (!online) throw const SocketException('测试离线状态');
         return {
@@ -145,6 +174,12 @@ class _Request extends Fake implements HttpClientRequest {
   @override
   Future<HttpClientResponse> close() async {
     if (url.path == '/workspace/preview') await fixture.previewGate?.future;
+    if (url.path == '/workspace/draft/extract-source-faces') {
+      await fixture.sourceGate?.future;
+    }
+    if (url.path == '/workspace/draft/target-path') {
+      await fixture.targetGate?.future;
+    }
     return _Response(jsonEncode(fixture.response(url, body)));
   }
 }
@@ -307,6 +342,61 @@ void main() {
       image.dispose();
     });
   }
+
+  testWidgets(
+    '导入格子在请求期间展示真实进度，失败与完成后恢复',
+    (tester) async {
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      const picker = MethodChannel('faceswap_studio/file_dialog');
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        picker,
+        (_) async => [r'D:\素材\a.jpg', r'D:\素材\b.jpg', r'D:\素材\c.png'],
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          picker,
+          null,
+        ),
+      );
+      fixture.sourceGate = Completer<void>();
+      await show(tester, const WorkspacePage(), const Size(1384, 661));
+      await tester.tap(find.text('上传人脸图片'));
+      await tester.pump();
+      expect(find.text('正在识别人脸'), findsOneWidget);
+      expect(find.text('已识别 0 张 / 共 3 张'), findsOneWidget);
+      fixture.sourceProcessed = 2;
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pump();
+      expect(find.text('已识别 2 张 / 共 3 张'), findsOneWidget);
+      await capture(tester, 'workspace-face-recognition');
+      fixture.sourceFailed = true;
+      fixture.sourceGate!.complete();
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('正在识别人脸'), findsNothing);
+      expect(find.text('未检测到可用人脸'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      // 随后的单文件导入使用独立视频格子等待态。
+      fixture.targetGate = Completer<void>();
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        picker,
+        (_) async => [r'D:\素材\demo.mp4'],
+      );
+      await tester.tap(find.text('更换视频'));
+      await tester.pump();
+      expect(find.text('视频加载中'), findsOneWidget);
+      await capture(tester, 'workspace-video-loading');
+      fixture.targetGate!.complete();
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('视频加载中'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+  );
 
   testWidgets('三格在多尺寸和字体缩放下可见，底部预览保持原调用与按钮顺序', (tester) async {
     addTearDown(tester.view.resetPhysicalSize);

@@ -27,6 +27,7 @@ from facefusion.face_selector import sort_and_filter_faces  # noqa: E402
 from facefusion.filesystem import is_image  # noqa: E402
 from facefusion.program import create_program  # noqa: E402
 from facefusion.vision import read_static_image  # noqa: E402
+from updater.transaction import write_json as atomic_write_json  # noqa: E402
 
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"}
@@ -189,10 +190,25 @@ def _write_image(image_path: Path, vision_frame: Any) -> None:
     encoded.tofile(str(image_path))
 
 
+def _publish_progress(payload: dict[str, Any], processed: int, recognized: int,
+                      skipped: int, state: str = "running") -> None:
+    if not payload.get("progress_path"):
+        return
+    try:
+        atomic_write_json(Path(payload["progress_path"]), {
+            "request_id": payload.get("request_id"), "state": state,
+            "processed": processed, "recognized": recognized, "skipped": skipped,
+            "total": len(payload.get("source_paths") or []),
+        })
+    except OSError as error:
+        print(f"Progress update failed: {error}", file=sys.stderr)
+
+
 def _extract_faces(payload: dict[str, Any]) -> dict[str, Any]:
     source_paths = [str(path) for path in payload.get("source_paths") or []]
     output_dir = Path(payload["output_dir"])
     output_dir.mkdir(parents=True, exist_ok=True)
+    _publish_progress(payload, 0, 0, 0, "preparing")
     _initialize_state(payload)
 
     if not _models_pre_check():
@@ -201,22 +217,26 @@ def _extract_faces(payload: dict[str, Any]) -> dict[str, Any]:
     faces: list[dict[str, Any]] = []
     skipped: list[dict[str, str]] = []
     output_index = 1
+    _publish_progress(payload, 0, 0, 0)
 
     for source_index, source_path in enumerate(source_paths, start=1):
         source = Path(source_path)
         extension = source.suffix.lower()
         if extension not in IMAGE_EXTENSIONS or not is_image(str(source)):
             skipped.append({"source_path": source_path, "reason": "不是支持的图片格式。"})
+            _publish_progress(payload, source_index, len(faces), len(skipped))
             continue
 
         vision_frame = read_static_image(str(source))
         if vision_frame is None or not numpy.any(vision_frame):
             skipped.append({"source_path": source_path, "reason": "图片读取失败。"})
+            _publish_progress(payload, source_index, len(faces), len(skipped))
             continue
 
         detected_faces = sort_and_filter_faces([], get_many_faces([vision_frame]))
         if not detected_faces:
             skipped.append({"source_path": source_path, "reason": "未检测到人脸。"})
+            _publish_progress(payload, source_index, len(faces), len(skipped))
             continue
 
         frame_height, frame_width = vision_frame.shape[:2]
@@ -238,6 +258,7 @@ def _extract_faces(payload: dict[str, Any]) -> dict[str, Any]:
             }
         )
         output_index += 1
+        _publish_progress(payload, source_index, len(faces), len(skipped))
 
     result = {
         "ok": bool(faces),
@@ -250,6 +271,7 @@ def _extract_faces(payload: dict[str, Any]) -> dict[str, Any]:
         json.dumps(result, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
+    _publish_progress(payload, len(source_paths), len(faces), len(skipped), "completed")
     return result
 
 
