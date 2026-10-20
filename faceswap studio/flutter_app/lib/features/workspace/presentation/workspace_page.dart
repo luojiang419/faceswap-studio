@@ -2638,34 +2638,6 @@ class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
                         ),
                       ),
                     ],
-                    if (previewResult != null) ...[
-                      SizedBox(height: widget.compact ? 10 : 12),
-                      Wrap(
-                        spacing: widget.compact ? 8 : 10,
-                        runSpacing: widget.compact ? 8 : 10,
-                        children: [
-                          _PreviewMetaChip(
-                            label:
-                                '${previewResult.width}x${previewResult.height}',
-                          ),
-                          _PreviewMetaChip(
-                            label: previewResult.previewModeLabel,
-                          ),
-                          _PreviewMetaChip(
-                            label: previewResult.previewResolution,
-                          ),
-                          if (previewResult.targetMediaType == 'video')
-                            _PreviewMetaChip(
-                              label: previewResult.videoFrameTotal == null
-                                  ? '帧 ${previewResult.frameNumber}'
-                                  : '帧 ${previewResult.frameNumber} / ${previewResult.videoFrameTotal! - 1}',
-                            ),
-                          _PreviewMetaChip(
-                            label: previewResult.orientationLabel,
-                          ),
-                        ],
-                      ),
-                    ],
                   ],
                 ),
               ),
@@ -2719,25 +2691,6 @@ class _AdaptivePreviewBody extends StatelessWidget {
           ],
         );
       },
-    );
-  }
-}
-
-class _PreviewMetaChip extends StatelessWidget {
-  const _PreviewMetaChip({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.7),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(label, style: theme.textTheme.bodySmall),
     );
   }
 }
