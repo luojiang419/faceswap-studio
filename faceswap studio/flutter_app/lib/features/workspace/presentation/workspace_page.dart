@@ -3011,20 +3011,23 @@ class _WorkspaceSubmitPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final buttonHeight = compact ? 52.0 : 56.0;
+    final buttonHeight = compact ? 26.0 : 28.0;
+    final gap = buttonGap * 0.5;
     final buttonStyle = FilledButton.styleFrom(
       minimumSize: Size(0, buttonHeight),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       visualDensity: VisualDensity.standard,
       textStyle: theme.textTheme.labelLarge?.copyWith(
-        fontSize: compact ? 15 : 16,
+        fontSize: 13,
         fontWeight: FontWeight.w700,
       ),
     );
 
     return Container(
       key: const ValueKey('workspace-actions-panel'),
-      padding: EdgeInsets.all(compact ? 10 : 12),
+      padding: const EdgeInsets.all(6),
       decoration: BoxDecoration(
         color: theme.cardTheme.color ?? theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(22),
@@ -3034,16 +3037,21 @@ class _WorkspaceSubmitPanel extends StatelessWidget {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final minButtonWidth =
-              168 * MediaQuery.textScalerOf(context).scale(15) / 15;
+              136 * MediaQuery.textScalerOf(context).scale(13) / 13;
           final columns =
-              constraints.maxWidth >= minButtonWidth * 4 + buttonGap * 3
+              constraints.maxWidth >= minButtonWidth * 4 + gap * 3
               ? 4
               : 2;
-          final buttonWidth =
-              (constraints.maxWidth - buttonGap * (columns - 1)) / columns;
+          final availableButtonWidth =
+              (constraints.maxWidth - gap * (columns - 1)) / columns;
+          final buttonWidth = math.min(
+            availableButtonWidth,
+            math.max(minButtonWidth, availableButtonWidth * 0.5),
+          );
           return Wrap(
-            spacing: buttonGap,
-            runSpacing: buttonGap,
+            alignment: WrapAlignment.center,
+            spacing: gap,
+            runSpacing: gap,
             children: [
               SizedBox(
                 width: buttonWidth,
@@ -3051,7 +3059,7 @@ class _WorkspaceSubmitPanel extends StatelessWidget {
                   onPressed: bridgeOnline && draft.canSubmit && !busy
                       ? onQueueWorkspace
                       : null,
-                  icon: Icon(Icons.playlist_add_rounded, size: 22),
+                  icon: Icon(Icons.playlist_add_rounded, size: 16),
                   label: const Text('添加到队列'),
                   style: buttonStyle,
                 ),
@@ -3065,11 +3073,11 @@ class _WorkspaceSubmitPanel extends StatelessWidget {
                       : null,
                   icon: previewBusy
                       ? const SizedBox(
-                          width: 16,
-                          height: 16,
+                          width: 12,
+                          height: 12,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Icon(Icons.preview_outlined, size: 22),
+                      : const Icon(Icons.preview_outlined, size: 16),
                   label: Text(
                     previewBusy
                         ? '正在预览'
@@ -3088,7 +3096,7 @@ class _WorkspaceSubmitPanel extends StatelessWidget {
                   onPressed: bridgeOnline && webUiReady && !busy
                       ? onOpenBrowser
                       : null,
-                  icon: Icon(Icons.open_in_browser_rounded, size: 22),
+                  icon: Icon(Icons.open_in_browser_rounded, size: 16),
                   label: const Text('浏览器高级参数'),
                   style: buttonStyle,
                 ),
@@ -3099,7 +3107,7 @@ class _WorkspaceSubmitPanel extends StatelessWidget {
                   onPressed: bridgeOnline && draft.canSubmit && !busy
                       ? onRunWorkspace
                       : null,
-                  icon: Icon(Icons.rocket_launch_rounded, size: 22),
+                  icon: Icon(Icons.rocket_launch_rounded, size: 16),
                   label: const Text('立即生成'),
                   style: buttonStyle,
                 ),

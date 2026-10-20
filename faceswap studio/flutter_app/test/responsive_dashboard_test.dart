@@ -1134,7 +1134,20 @@ void main() {
         expect(previewRect.bottom, lessThan(runRect.top));
       }
       expect(previewRect.bottom, lessThanOrEqualTo(size.height));
-      expect(previewRect.height, greaterThanOrEqualTo(52));
+      expect(previewRect.height, inInclusiveRange(26, 30));
+      for (final label in ['添加到队列', '浏览器高级参数', '立即生成']) {
+        final button = find.ancestor(
+          of: find.text(label),
+          matching: find.byWidgetPredicate(
+            (widget) => widget is ButtonStyleButton,
+          ),
+        );
+        expect(
+          tester.getSize(button).height,
+          previewRect.height,
+          reason: '$size 四个按钮保持同高',
+        );
+      }
       final actionsRect = tester.getRect(
         find.byKey(const ValueKey('workspace-actions-panel')),
       );
