@@ -127,7 +127,7 @@ def test_preflight_rejection_reopens_unmodified_version(tmp_path, monkeypatch):
 
 def test_preflight_imports_actual_candidate_and_does_not_write_data(tmp_path):
     from facefusion import metadata
-    for folder in ('facefusion', 'faceswap studio/bridge'):
+    for folder in ('facefusion', 'faceswap studio/bridge', 'updater'):
         shutil.copytree(ROOT / folder, tmp_path / folder, ignore=shutil.ignore_patterns('__pycache__'))
     assert run_preflight(tmp_path)['coreVersion'] == metadata.get('version')
     assert not (tmp_path / 'faceswap studio/data').exists()
