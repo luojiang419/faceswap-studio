@@ -82,6 +82,19 @@ class _Fixture extends HttpOverrides {
           options.addAll(jsonDecode(utf8.decode(body)) as Map<String, dynamic>);
         }
         return {'options': options};
+      case '/workspace/options/schema':
+        return {
+          'fields': {
+            'face_selector_mode': {
+              'type': 'select',
+              'panel': 'advanced',
+              'section': 'face_selector',
+              'section_label': '人脸选择',
+              'label': '选择模式',
+              'choices': ['many', 'one', 'reference'],
+            },
+          },
+        };
       case '/workspace/preview':
         previews++;
         previewPayload = jsonDecode(utf8.decode(body)) as Map<String, dynamic>;
@@ -837,6 +850,117 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('参考脸固定横条、2倍悬浮与中文快捷模式和进阶面板同步', (tester) async {
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    fixture.video = true;
+    fixture.faceCount = 12;
+    await show(tester, const WorkspacePage(), const Size(1384, 661));
+    final strip = find.byKey(const ValueKey('workspace-reference-faces'));
+    final mode = find.byKey(const ValueKey('workspace-face-mode'));
+    expect(find.text('选择模式'), findsNothing, reason: '进阶面板默认收起');
+    final initialStripHeight = tester.getSize(strip).height;
+    expect(initialStripHeight, 52);
+    expect(
+      tester.getRect(mode).right,
+      lessThan(tester.getRect(find.text('原生预览')).left),
+    );
+    await tester.tap(find.text('生成预览'));
+    await tester.pump();
+    await finishPreview(tester);
+    expect(tester.getSize(strip).height, initialStripHeight);
+    final firstFace = find.byKey(const ValueKey('reference-face-0'));
+    final thumbnail = find.byKey(const ValueKey('reference-face-image-0'));
+    final hoverImage = find.byKey(const ValueKey('reference-face-hover-0'));
+    final media = find.byKey(const ValueKey('workspace-preview-media'));
+    final mediaBeforeHover = tester.getRect(media);
+    final mouse = await tester.createGesture(kind: ui.PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    await mouse.moveTo(tester.getCenter(firstFace));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(hoverImage, findsOneWidget);
+    expect(
+      tester.getSize(hoverImage).width,
+      closeTo(tester.getSize(thumbnail).width * 2, .1),
+    );
+    expect(
+      tester.getSize(hoverImage).height,
+      closeTo(tester.getSize(thumbnail).height * 2, .1),
+    );
+    expect(tester.getRect(media), mediaBeforeHover, reason: '浮层不占据主布局');
+    await capture(tester, 'preview-face-strip-hover');
+    await mouse.moveTo(Offset.zero);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(hoverImage, findsNothing);
+    await mouse.removePointer();
+    final list = find.descendant(of: strip, matching: find.byType(ListView));
+    await tester.drag(list, const Offset(-700, 0));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('reference-face-11')).hitTestable(),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('reference-face-11')));
+    await tester.pumpAndSettle();
+    expect(fixture.options['face_selector_mode'], 'reference');
+    expect(fixture.options['reference_face_position'], 11);
+    expect(
+      find.descendant(of: mode, matching: find.text('参考人脸')),
+      findsOneWidget,
+    );
+    expect(find.text('已生成'), findsOneWidget, reason: '快捷设置保留当前预览供对照');
+    for (final entry in {
+      '多人': 'many',
+      '单人': 'one',
+      '参考人脸': 'reference',
+    }.entries) {
+      await tester.tap(mode);
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PopupMenuItem<String>, entry.key));
+      await tester.pumpAndSettle();
+      expect(fixture.options['face_selector_mode'], entry.value);
+      expect(
+        find.descendant(of: mode, matching: find.text(entry.key)),
+        findsOneWidget,
+      );
+      expect(tester.getSize(strip).height, initialStripHeight);
+    }
+    await tester.tap(find.text('参数面板'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('进阶控制'));
+    await tester.pumpAndSettle();
+    expect(find.text('选择模式'), findsOneWidget);
+    final select = find.byType(DropdownButtonFormField<String>);
+    await tester.tap(select);
+    await tester.pumpAndSettle();
+    for (final label in ['多人', '单人', '参考人脸']) {
+      expect(find.text(label), findsWidgets);
+    }
+    expect(find.text('many'), findsNothing);
+    await tester.tap(find.text('单人').last);
+    await tester.pumpAndSettle();
+    expect(fixture.options['face_selector_mode'], 'one');
+    expect(
+      find.descendant(of: mode, matching: find.text('单人')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byTooltip('折叠参数面板'));
+    await tester.pumpAndSettle();
+    expect(find.text('选择模式'), findsNothing);
+    await capture(tester, 'preview-face-strip-mode');
+    fixture.previewGate = Completer<void>();
+    await tester.tap(find.text('生成预览'));
+    await tester.pump();
+    expect(tester.widget<PopupMenuButton<String>>(mode).enabled, isFalse);
+    fixture.previewGate!.complete();
+    await finishPreview(tester);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('视频预览完整适配且无需纵向滚动，缩放后选帧和参考脸仍可操作', (tester) async {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -901,6 +1025,8 @@ void main() {
           'video-${dark ? 'dark' : 'light'}-${size.width.toInt()}-empty',
         );
         checkFits('$dark $size 未生成');
+        final strip = find.byKey(const ValueKey('workspace-reference-faces'));
+        final stripHeight = tester.getSize(strip).height;
         expect(find.text('预览帧'), findsOneWidget);
         fixture.previewGate = Completer<void>();
         await tester.tap(find.text('生成预览'));
@@ -921,12 +1047,13 @@ void main() {
           'video-${dark ? 'dark' : 'light'}-${size.width.toInt()}-faces',
         );
         checkFits('$dark $size 有参考脸');
+        expect(tester.getSize(strip).height, closeTo(stripHeight, .1));
         final previousPreviews = fixture.previews;
         await tester.drag(find.byType(Slider).first, const Offset(30, 0));
         await tester.pump(const Duration(milliseconds: 300));
         await finishPreview(tester);
         expect(fixture.previews, greaterThan(previousPreviews));
-        await tester.tap(find.byTooltip('人脸 #1'));
+        await tester.tap(find.byKey(const ValueKey('reference-face-1')));
         await tester.pump(const Duration(milliseconds: 300));
         await finishPreview(tester);
         expect(fixture.options['face_selector_mode'], 'reference');
@@ -937,6 +1064,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 300));
         await finishPreview(tester);
         checkFits('$dark $size 无人脸');
+        expect(tester.getSize(strip).height, closeTo(stripHeight, .1));
         expect(find.text('当前帧未检测到人脸'), findsOneWidget);
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pump();

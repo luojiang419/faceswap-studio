@@ -1,6 +1,12 @@
 import 'package:faceswap_studio/app/theme/studio_depth.dart';
 import 'package:flutter/material.dart';
 
+const workspaceFaceSelectorLabels = <String, String>{
+  'many': '多人',
+  'one': '单人',
+  'reference': '参考人脸',
+};
+
 typedef WorkspaceOptionsUpdater =
     Future<void> Function(Map<String, dynamic> payload, {bool clearPreview});
 
@@ -78,16 +84,21 @@ class _WorkspaceFloatingOptionsOverlayState
         ),
         clipBehavior: Clip.antiAlias,
         child: _expanded
-            ? _WorkspaceOptionsPanelFrame(
-                onResizeStart: _handleResizeStart,
-                onResizeUpdate: _handleResizeUpdate,
-                onResizeEnd: _handleResizeEnd,
-                onClose: () {
-                  setState(() {
-                    _expanded = false;
-                  });
-                },
-                child: widget.child,
+            ? OverflowBox(
+                alignment: Alignment.centerRight,
+                minWidth: widget.panelWidth,
+                maxWidth: widget.panelWidth,
+                child: _WorkspaceOptionsPanelFrame(
+                  onResizeStart: _handleResizeStart,
+                  onResizeUpdate: _handleResizeUpdate,
+                  onResizeEnd: _handleResizeEnd,
+                  onClose: () {
+                    setState(() {
+                      _expanded = false;
+                    });
+                  },
+                  child: widget.child,
+                ),
               )
             : Material(
                 color: Colors.transparent,
@@ -348,6 +359,9 @@ class _WorkspaceOptionsPanelState extends State<WorkspaceOptionsPanel> {
       _selectedOutputVideoEncoder == 'prores_ks';
 
   String _displayChoiceLabel(WorkspaceOptionField field, String choice) {
+    if (field.key == 'face_selector_mode') {
+      return workspaceFaceSelectorLabels[choice] ?? choice;
+    }
     if (field.choiceLabels.containsKey(choice)) {
       return field.choiceLabels[choice]!;
     }

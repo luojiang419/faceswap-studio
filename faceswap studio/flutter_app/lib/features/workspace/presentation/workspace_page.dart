@@ -1319,6 +1319,7 @@ class _NativeWorkbenchPane extends StatelessWidget {
         );
 
         final previewPanel = _WorkspacePreviewPanel(
+          busy: busy,
           compact: compact,
           previewBusy: previewBusy,
           bridgeOnline: bridgeOnline,
@@ -2096,6 +2097,7 @@ class _WorkspaceDraft {
 class _WorkspacePreviewPanel extends StatefulWidget {
   const _WorkspacePreviewPanel({
     this.compact = false,
+    required this.busy,
     required this.previewBusy,
     required this.bridgeOnline,
     required this.previewResult,
@@ -2112,6 +2114,7 @@ class _WorkspacePreviewPanel extends StatefulWidget {
   });
 
   final bool compact;
+  final bool busy;
   final bool previewBusy;
   final bool bridgeOnline;
   final _WorkspacePreviewResult? previewResult;
@@ -2278,16 +2281,77 @@ class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
     }, clearPreview: false);
   }
 
+  bool get _faceControlsEnabled => widget.bridgeOnline && !widget.busy;
+
+  Widget _buildFaceModeShortcut(ThemeData theme) {
+    final mode = _faceSelectorMode;
+    return PopupMenuButton<String>(
+      key: const ValueKey('workspace-face-mode'),
+      tooltip: '换脸选择模式',
+      enabled: _faceControlsEnabled,
+      initialValue: mode,
+      onSelected: (value) {
+        if (value != mode) {
+          widget.onUpdateOptions({
+            'face_selector_mode': value,
+          }, clearPreview: false);
+        }
+      },
+      itemBuilder: (_) => [
+        for (final entry in workspaceFaceSelectorLabels.entries)
+          PopupMenuItem(
+            value: entry.key,
+            child: Row(
+              children: [
+                Icon(
+                  mode == entry.key ? Icons.check_rounded : Icons.face_outlined,
+                  size: 18,
+                ),
+                const SizedBox(width: 10),
+                Text(entry.value),
+              ],
+            ),
+          ),
+      ],
+      child: Semantics(
+        button: true,
+        label: '换脸选择模式：${workspaceFaceSelectorLabels[mode]}',
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.primaryContainer.withValues(alpha: .3),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: theme.colorScheme.primary.withValues(alpha: .35),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                workspaceFaceSelectorLabels[mode]!,
+                style: theme.textTheme.labelMedium,
+              ),
+              const SizedBox(width: 2),
+              const Icon(Icons.expand_more_rounded, size: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildFaceSelectorControls(ThemeData theme) {
     final selectedMode = _faceSelectorMode;
     final selectedPosition = _referenceFacePosition;
     final previewResult = widget.previewResult;
     final faceChoices =
         previewResult?.faceChoices ?? const <_PreviewFaceChoice>[];
-    final controlsEnabled = widget.bridgeOnline && !widget.previewBusy;
-
+    final emptyMessage = previewResult == null ? '生成预览后显示' : '当前帧未检测到人脸';
     return Container(
-      padding: EdgeInsets.all(widget.compact ? 8 : 12),
+      key: const ValueKey('workspace-reference-faces'),
+      height: 52,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest.withValues(
           alpha: theme.brightness == Brightness.dark ? 0.22 : 0.46,
@@ -2295,55 +2359,48 @@ class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: StudioDepth.borderColor(context)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              Text(
-                '参考脸缩略图',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w800,
-                ),
+          Tooltip(
+            message: '参考脸缩略图：点击指定换脸对象，悬停放大查看；多张可横向浏览',
+            child: Text(
+              '参考脸',
+              maxLines: 1,
+              style: theme.textTheme.labelMedium?.copyWith(
+                fontWeight: FontWeight.w800,
               ),
-              _PreviewMetaChip(
-                label: selectedMode == 'reference'
-                    ? 'reference #$selectedPosition'
-                    : '当前模式 $selectedMode',
-              ),
-            ],
+            ),
           ),
-          if (previewResult != null) ...[
-            SizedBox(height: widget.compact ? 10 : 12),
-            if (faceChoices.isEmpty)
-              const _FaceSelectorEmptyState(message: '当前帧未检测到人脸')
-            else
-              SizedBox(
-                height:
-                    (widget.compact ? 82 : 90) +
-                    MediaQuery.textScalerOf(context).scale(20),
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: faceChoices.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: 10),
-                  itemBuilder: (context, index) {
-                    final face = faceChoices[index];
-                    return _FaceChoiceTile(
-                      face: face,
-                      compact: widget.compact,
-                      selected:
-                          (selectedMode == 'reference' &&
-                              face.index == selectedPosition) ||
-                          face.selected,
-                      enabled: controlsEnabled,
-                      onSelected: () => _selectReferenceFace(face),
-                    );
-                  },
-                ),
-              ),
-          ],
+          const SizedBox(width: 10),
+          Expanded(
+            child: faceChoices.isEmpty
+                ? Tooltip(
+                    message: emptyMessage,
+                    child: Text(
+                      emptyMessage,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  )
+                : ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: faceChoices.length,
+                    separatorBuilder: (_, _) => const SizedBox(width: 8),
+                    itemBuilder: (context, index) {
+                      final face = faceChoices[index];
+                      return _FaceChoiceTile(
+                        key: ValueKey('reference-face-${face.index}'),
+                        face: face,
+                        selected:
+                            selectedMode == 'reference' &&
+                            face.index == selectedPosition,
+                        enabled: _faceControlsEnabled,
+                        onSelected: () => _selectReferenceFace(face),
+                      );
+                    },
+                  ),
+          ),
         ],
       ),
     );
@@ -2377,6 +2434,7 @@ class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
               runSpacing: widget.compact ? 8 : 10,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
+                _buildFaceModeShortcut(theme),
                 Text(
                   '原生预览',
                   style: theme.textTheme.titleSmall?.copyWith(
@@ -2680,100 +2738,90 @@ class _PreviewActionBadge extends StatelessWidget {
   }
 }
 
-class _FaceSelectorEmptyState extends StatelessWidget {
-  const _FaceSelectorEmptyState({required this.message});
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface.withValues(alpha: 0.38),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
-        ),
-      ),
-      child: Text(
-        message,
-        style: theme.textTheme.bodySmall?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
-      ),
-    );
-  }
-}
-
 class _FaceChoiceTile extends StatelessWidget {
   const _FaceChoiceTile({
+    super.key,
     required this.face,
-    required this.compact,
     required this.selected,
     required this.enabled,
     required this.onSelected,
   });
 
   final _PreviewFaceChoice face;
-  final bool compact;
   final bool selected;
   final bool enabled;
   final VoidCallback onSelected;
 
+  Widget _image(double size, {Key? key}) => SizedBox.square(
+    key: key,
+    dimension: size,
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: face.imageBytes.isEmpty
+          ? const Icon(Icons.face_retouching_natural_rounded)
+          : Image.memory(
+              face.imageBytes,
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+              errorBuilder: (_, _, _) =>
+                  const Icon(Icons.face_retouching_natural_rounded),
+            ),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final size = compact ? 58.0 : 66.0;
-    final borderColor = selected
-        ? theme.colorScheme.primary
-        : StudioDepth.borderColor(context);
-    final backgroundColor = selected
-        ? theme.colorScheme.primaryContainer.withValues(alpha: 0.26)
-        : theme.colorScheme.surface.withValues(alpha: 0.42);
-
     return Tooltip(
-      message: '人脸 #${face.index}',
-      child: InkWell(
-        onTap: enabled ? onSelected : null,
-        borderRadius: BorderRadius.circular(14),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          width: compact ? 76 : 86,
-          padding: const EdgeInsets.all(7),
-          decoration: BoxDecoration(
-            color: backgroundColor,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: borderColor, width: selected ? 2 : 1),
+      richMessage: TextSpan(
+        children: [
+          WidgetSpan(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _image(72, key: ValueKey('reference-face-hover-${face.index}')),
+                const SizedBox(height: 4),
+                Text('人脸 #${face.index}', style: theme.textTheme.labelSmall),
+              ],
+            ),
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Stack(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: SizedBox(
-                      width: size,
-                      height: size,
-                      child: face.imageBytes.isEmpty
-                          ? Icon(
-                              Icons.face_retouching_natural_rounded,
-                              color: theme.colorScheme.onSurfaceVariant,
-                            )
-                          : Image.memory(
-                              face.imageBytes,
-                              fit: BoxFit.cover,
-                              gaplessPlayback: true,
-                            ),
+        ],
+      ),
+      excludeFromSemantics: true,
+      waitDuration: const Duration(milliseconds: 250),
+      preferBelow: false,
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: StudioDepth.borderColor(context)),
+        boxShadow: StudioDepth.shadows(context, floating: true),
+      ),
+      child: Semantics(
+        label: '人脸 #${face.index}',
+        selected: selected,
+        button: true,
+        enabled: enabled,
+        child: InkWell(
+          onTap: enabled ? onSelected : null,
+          borderRadius: BorderRadius.circular(8),
+          child: SizedBox.square(
+            dimension: 36,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                _image(36, key: ValueKey('reference-face-image-${face.index}')),
+                if (selected)
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: theme.colorScheme.primary,
+                        width: 2,
+                      ),
                     ),
-                  ),
-                  if (selected)
-                    Positioned(
-                      right: 3,
-                      top: 3,
+                    child: Align(
+                      alignment: Alignment.topRight,
                       child: DecoratedBox(
                         decoration: BoxDecoration(
                           color: theme.colorScheme.primary,
@@ -2781,23 +2829,14 @@ class _FaceChoiceTile extends StatelessWidget {
                         ),
                         child: Icon(
                           Icons.check_rounded,
-                          size: 14,
+                          size: 12,
                           color: theme.colorScheme.onPrimary,
                         ),
                       ),
                     ),
-                ],
-              ),
-              const SizedBox(height: 5),
-              Text(
-                '#${face.index}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.labelMedium?.copyWith(
-                  fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-                ),
-              ),
-            ],
+                  ),
+              ],
+            ),
           ),
         ),
       ),
