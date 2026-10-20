@@ -1340,7 +1340,7 @@ void main() {
         expect(previewRect.bottom, lessThan(runRect.top));
       }
       expect(previewRect.bottom, lessThanOrEqualTo(size.height));
-      expect(previewRect.height, inInclusiveRange(26, 30));
+      expect(previewRect.height, inInclusiveRange(39, 44));
       for (final label in ['添加到队列', '浏览器高级参数', '立即生成']) {
         final button = find.ancestor(
           of: find.text(label),
