@@ -1141,7 +1141,7 @@ class _NativeWorkbenchPane extends StatelessWidget {
           filePath: currentDraft.targetPath,
           thumbnailPath: currentDraft.targetThumbnail,
           mediaType: currentDraft.targetMediaType,
-          actionLabel: '选择待换脸视频',
+          actionLabel: currentDraft.targetPath == null ? '选择待换脸视频' : '更换视频',
           onOpenPreview:
               currentDraft.targetPath != null &&
                   currentDraft.targetMediaType != null
