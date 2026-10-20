@@ -944,5 +944,15 @@ def main() -> int:
         runtime.close()
 
 
+def process_exit_code(code: int) -> int:
+    # Windows 的 sys.exit() 接受有符号 C long。直接传入高位为 1 的
+    # DWORD 会溢出为 -1，掩盖访问冲突或系统终止的原始退出码。
+    if os.name == "nt":
+        code &= 0xFFFFFFFF
+        if code >= 0x80000000:
+            return code - 0x100000000
+    return code
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(process_exit_code(main()))
