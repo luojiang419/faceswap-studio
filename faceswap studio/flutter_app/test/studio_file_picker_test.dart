@@ -97,6 +97,62 @@ void main() {
     expect(calls, 2);
   });
 
+  windowsTest('人脸窗口回调尚未完成时点击视频，保留请求且不同时打开窗口', (tester) async {
+    await mount(tester);
+    final source = Completer<List<String>>();
+    final calls = <bool>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) {
+      final multiple = (call.arguments as Map)['multiple'] as bool;
+      calls.add(multiple);
+      return multiple ? source.future : Future.value([r'D:\素材\video.mp4']);
+    });
+    final faces = pickStudioFiles(context, acceptedTypeGroups: filters);
+    var videoFinished = false;
+    final video =
+        pickStudioFiles(
+          context,
+          acceptedTypeGroups: const [
+            XTypeGroup(label: '视频', extensions: ['mp4']),
+          ],
+          multiple: false,
+        ).then((value) {
+          videoFinished = true;
+          return value;
+        });
+    await tester.pump();
+    expect(calls, [true]);
+    expect(videoFinished, isFalse, reason: '不同素材入口不能静默当作取消');
+    source.complete([r'D:\素材\face.jpg']);
+    expect((await faces).single.path, r'D:\素材\face.jpg');
+    expect((await video).single.path, r'D:\素材\video.mp4');
+    expect(calls, [true, false]);
+  });
+
+  windowsTest('排队选择期间页面销毁，不再打开视频窗口', (tester) async {
+    await mount(tester);
+    final source = Completer<List<String>>();
+    var calls = 0;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      _,
+    ) {
+      calls++;
+      return source.future;
+    });
+    final faces = pickStudioFiles(context, acceptedTypeGroups: filters);
+    final video = pickStudioFiles(
+      context,
+      acceptedTypeGroups: filters,
+      multiple: false,
+    );
+    await tester.pumpWidget(const SizedBox());
+    source.complete([]);
+    expect(await faces, isEmpty);
+    expect(await video, isEmpty);
+    expect(calls, 1);
+  });
+
   windowsTest('原生错误显示提示并释放弹窗锁', (tester) async {
     await mount(tester);
     var calls = 0;

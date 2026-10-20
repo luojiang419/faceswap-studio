@@ -705,6 +705,67 @@ void main() {
     variant: TargetPlatformVariant.only(TargetPlatform.windows),
   );
 
+  for (final emptyTarget in [true, false]) {
+    testWidgets(
+      '人脸窗口回调延迟期间点击${emptyTarget ? '添加' : '更换'}视频，识别期间继续完成视频选择',
+      (tester) async {
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        const picker = MethodChannel('faceswap_studio/file_dialog');
+        fixture.video = emptyTarget;
+        fixture.sourceGate = Completer<void>();
+        final sourceDialog = Completer<List<String>>();
+        final calls = <bool>[];
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(picker, (
+          call,
+        ) {
+          final multiple = (call.arguments as Map)['multiple'] as bool;
+          calls.add(multiple);
+          return multiple
+              ? sourceDialog.future
+              : Future.value([r'D:\素材\video.mp4']);
+        });
+        addTearDown(
+          () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            picker,
+            null,
+          ),
+        );
+        await show(tester, const WorkspacePage(), const Size(1384, 661));
+        await tester.tap(find.text('上传人脸图片'));
+        await tester.pump();
+        await tester.pump();
+        await tester.tap(find.text(emptyTarget ? '选择待换脸视频' : '更换视频'));
+        await tester.pump();
+        await tester.pump();
+        expect(calls, [true], reason: '原生文件窗口不能重叠');
+        sourceDialog.complete([r'D:\素材\face.jpg']);
+        await finishPreview(tester);
+        expect(calls, [true, false], reason: '交接期间的视频点击不能丢失');
+        expect(fixture.sourceRequests, 1);
+        expect(fixture.targetRequests, 1, reason: '人脸裁切尚未返回也能完成视频导入');
+        expect(
+          find.byKey(const ValueKey('source-import-loading')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('target-import-loading')),
+          findsNothing,
+        );
+        fixture.sourceGate!.complete();
+        await finishPreview(tester);
+        expect(
+          find.byKey(const ValueKey('source-import-loading')),
+          findsNothing,
+        );
+        await tester.pumpWidget(const SizedBox());
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.windows),
+    );
+  }
+
   for (final scenario in ['视频先完成', '人脸先完成', '人脸失败', '视频失败']) {
     final targetFirst = scenario != '人脸先完成';
     testWidgets(

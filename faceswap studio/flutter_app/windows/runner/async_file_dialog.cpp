@@ -114,6 +114,15 @@ AsyncFileDialog::AsyncFileDialog(flutter::BinaryMessenger* messenger, HWND owner
                                                       COINIT_DISABLE_OLE1DDE);
           const bool initialized = SUCCEEDED(status);
           EncodableList paths;
+          const auto complete = [&]() {
+            // Show 已结束、路径已复制，即可解除 Dart 侧的文件窗口占用。
+            // Shell 扩展释放和 CoUninitialize 可能很慢，不让它们吞掉下一次选择。
+            Log("result-ready", status);
+            std::lock_guard<std::mutex> lock(state->mutex);
+            state->status = status;
+            state->paths = std::move(paths);
+            if (state->owner) PostMessageW(state->owner, kDialogComplete, 0, 0);
+          };
           if (initialized) {
             ComPtr<IFileOpenDialog> dialog;
             status = CoCreateInstance(CLSID_FileOpenDialog, nullptr,
@@ -155,13 +164,12 @@ AsyncFileDialog::AsyncFileDialog(flutter::BinaryMessenger* messenger, HWND owner
                 }
               }
             }
-          } // 在 CoUninitialize 之前释放所有 COM 对象。
+            complete();
+          } else {
+            complete();
+          } // 在 CoUninitialize 之前释放所有 COM 对象；不再修改已回传结果。
           if (initialized) CoUninitialize();
           Log("complete", status);
-          std::lock_guard<std::mutex> lock(state->mutex);
-          state->status = status;
-          state->paths = std::move(paths);
-          if (state->owner) PostMessageW(state->owner, kDialogComplete, 0, 0);
         }).detach();
       });
 }

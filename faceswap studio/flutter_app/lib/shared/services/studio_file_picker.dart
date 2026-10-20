@@ -1,20 +1,30 @@
+import 'dart:async';
+
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 const _channel = MethodChannel('faceswap_studio/file_dialog');
-bool _dialogOpen = false;
+Future<void>? _dialogClosed;
+bool? _dialogMultiple;
 
 /// Windows Shell 运行在独立 STA 线程，避免阻塞 Flutter 主窗口。
-/// 同时仅允许一个文件窗口；取消、页面已销毁时不更新素材。
+/// 同时仅允许一个文件窗口；另一素材入口等待交接，不丢弃点击。
 Future<List<XFile>> pickStudioFiles(
   BuildContext context, {
   required List<XTypeGroup> acceptedTypeGroups,
   bool multiple = true,
 }) async {
-  if (_dialogOpen) return [];
-  _dialogOpen = true;
+  while (_dialogClosed != null) {
+    // 同类入口防重入；人脸多选与视频单选分别保留一次选择机会。
+    if (_dialogMultiple == multiple) return [];
+    await _dialogClosed;
+    if (!context.mounted) return [];
+  }
+  final closed = Completer<void>();
+  _dialogClosed = closed.future;
+  _dialogMultiple = multiple;
   try {
     List<XFile> files;
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
@@ -41,6 +51,8 @@ Future<List<XFile>> pickStudioFiles(
     }
     return [];
   } finally {
-    _dialogOpen = false;
+    _dialogClosed = null;
+    _dialogMultiple = null;
+    closed.complete();
   }
 }
