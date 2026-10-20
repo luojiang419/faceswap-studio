@@ -2,6 +2,8 @@ import importlib.util
 import json
 from pathlib import Path
 import threading
+import base64
+import os
 import pytest
 
 
@@ -80,6 +82,76 @@ def create_runtime(tmp_path : Path) -> FaceFusionRuntime:
 	runtime._resolve_thumbnail = lambda file_path : str(Path(file_path)) if file_path and Path(file_path).suffix.lower() in APP_SERVER_MODULE.IMAGE_EXTENSIONS else None
 
 	return runtime
+
+
+@pytest.mark.parametrize('dimensions', [(640, 360), (360, 640)])
+def test_frame_thumbnail_reads_exact_frame_without_preview_lock_and_invalidates_cache(tmp_path, dimensions):
+
+	import cv2
+	import numpy
+	runtime = create_runtime(tmp_path)
+	video = runtime._studio_root / 'frames.avi'
+	writer = cv2.VideoWriter(str(video), cv2.VideoWriter_fourcc(*'MJPG'), 10, dimensions)
+	assert writer.isOpened()
+	colors = [(0, 0, 240), (0, 240, 0), (240, 0, 0)]
+	for color in colors:
+		writer.write(numpy.full((dimensions[1], dimensions[0], 3), color, dtype=numpy.uint8))
+	writer.release()
+	runtime._workspace_state['target_path'] = str(video)
+	runtime._workspace_options = {'preview_frame_number': 2}
+	runtime._video_frame_thumbnail.cache_clear()
+	# 生成模型可以占用预览锁，缩略图读取仍须立即完成。
+	with runtime._preview_lock:
+		for frame, color in enumerate(colors):
+			result = runtime.workspace_frame_thumbnail({'target_path': str(video), 'frame_number': frame})
+			image = cv2.imdecode(numpy.frombuffer(base64.b64decode(result['image_base64']), dtype=numpy.uint8), cv2.IMREAD_COLOR)
+			assert result['frame_number'] == frame
+			assert image.shape[1] <= 320 and image.shape[0] <= 180
+			assert numpy.max(numpy.abs(image.mean(axis=(0, 1)) - color)) < 8
+	assert runtime._workspace_options == {'preview_frame_number': 2}
+	assert not runtime._workspace_state_path.exists()
+	payload = {'target_path': str(video), 'frame_number': 1}
+	runtime.workspace_frame_thumbnail(payload)
+	assert runtime._video_frame_thumbnail.cache_info().hits == 1
+	stat = video.stat()
+	os.utime(video, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1000000000))
+	runtime.workspace_frame_thumbnail(payload)
+	assert runtime._video_frame_thumbnail.cache_info().misses == 4
+	assert runtime._video_frame_thumbnail.cache_info().maxsize == 96
+	with pytest.raises(APP_SERVER_MODULE.HTTPException) as error:
+		runtime.workspace_frame_thumbnail({**payload, 'frame_number': 3})
+	assert error.value.status_code == 400
+	video.unlink()  # 独立解码器已释放，Windows 上也应可立即删除。
+	with pytest.raises(APP_SERVER_MODULE.HTTPException) as error:
+		runtime.workspace_frame_thumbnail(payload)
+	assert error.value.status_code == 404
+
+
+@pytest.mark.parametrize('frame', [None, True, -1, 1.5, '1'])
+def test_frame_thumbnail_rejects_invalid_frame_numbers(tmp_path, frame):
+
+	runtime = create_runtime(tmp_path)
+	with pytest.raises(APP_SERVER_MODULE.HTTPException) as error:
+		runtime.workspace_frame_thumbnail({'frame_number': frame})
+	assert error.value.status_code == 400
+
+
+def test_frame_thumbnail_rejects_changed_nonvideo_or_unreadable_target(tmp_path):
+
+	runtime = create_runtime(tmp_path)
+	video = runtime._studio_root / 'broken.mp4'
+	video.write_bytes(b'not a video')
+	runtime._workspace_state['target_path'] = str(video)
+	with pytest.raises(APP_SERVER_MODULE.HTTPException) as error:
+		runtime.workspace_frame_thumbnail({'target_path': 'previous.mp4', 'frame_number': 0})
+	assert error.value.status_code == 409
+	with pytest.raises(APP_SERVER_MODULE.HTTPException) as error:
+		runtime.workspace_frame_thumbnail({'target_path': str(video), 'frame_number': 0})
+	assert error.value.status_code == 422
+	runtime._workspace_state['target_path'] = str(video.with_suffix('.png'))
+	with pytest.raises(APP_SERVER_MODULE.HTTPException) as error:
+		runtime.workspace_frame_thumbnail({'target_path': str(video), 'frame_number': 0})
+	assert error.value.status_code == 400
 
 
 def test_close_behavior_defaults_to_first_prompt_and_persists_all_choices(tmp_path : Path) -> None:

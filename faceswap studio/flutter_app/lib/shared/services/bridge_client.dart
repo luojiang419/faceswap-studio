@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'bridge_environment.dart';
 
 import 'package:http/http.dart' as http;
@@ -115,6 +116,20 @@ class BridgeClient {
     payload,
     timeout: _previewTimeout,
   );
+
+  Future<Uint8List> getWorkspaceFrameThumbnail(
+    String targetPath,
+    int frame,
+  ) async {
+    final result = await _postJsonWithPayload('/workspace/frame-thumbnail', {
+      'target_path': targetPath,
+      'frame_number': frame,
+    }, timeout: const Duration(seconds: 8));
+    if (result['frame_number'] != frame) {
+      throw StateError('视频帧不匹配');
+    }
+    return base64Decode(result['image_base64'] as String);
+  }
 
   Future<Map<String, dynamic>> setWorkspaceSourcePaths(
     List<String> paths,

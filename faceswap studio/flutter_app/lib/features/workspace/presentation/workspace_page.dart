@@ -11,6 +11,7 @@ import 'package:faceswap_studio/shared/widgets/studio_media_viewer.dart';
 import 'package:faceswap_studio/shared/widgets/studio_media_loading.dart';
 import 'package:faceswap_studio/shared/widgets/studio_hover_focus.dart';
 import 'package:faceswap_studio/shared/widgets/studio_file_drop_region.dart';
+import 'package:faceswap_studio/shared/widgets/studio_frame_scrubber.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_all/webview_all.dart';
@@ -1364,6 +1365,7 @@ class _NativeWorkbenchPane extends StatelessWidget {
           workspaceOptionsSchema: workspaceOptionsSchema,
           workspaceOptionsState: currentOptionsState,
           targetMediaType: currentDraft.targetMediaType,
+          targetPath: currentDraft.targetPath,
           previewFrameNumber:
               (currentOptionsState.options['preview_frame_number'] as num?)
                   ?.toInt() ??
@@ -2183,6 +2185,7 @@ class _WorkspacePreviewPanel extends StatefulWidget {
     required this.workspaceOptionsSchema,
     required this.workspaceOptionsState,
     required this.targetMediaType,
+    required this.targetPath,
     required this.previewFrameNumber,
     required this.targetVideoFrameTotal,
     required this.lastVideoFrameTotal,
@@ -2200,6 +2203,7 @@ class _WorkspacePreviewPanel extends StatefulWidget {
   final WorkspaceOptionsSchema? workspaceOptionsSchema;
   final WorkspaceOptionsState workspaceOptionsState;
   final String? targetMediaType;
+  final String? targetPath;
   final int previewFrameNumber;
   final int? targetVideoFrameTotal;
   final int? lastVideoFrameTotal;
@@ -2213,6 +2217,7 @@ class _WorkspacePreviewPanel extends StatefulWidget {
 }
 
 class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
+  final BridgeClient _thumbnailClient = BridgeClient();
   double? _sliderFrameValue;
   int? _inspectedFaceIndex;
   final Object _inspectionOwner = Object();
@@ -2663,12 +2668,17 @@ class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
                           ),
                         ],
                       ),
-                      Slider(
+                      StudioFrameScrubber(
+                        videoKey: widget.targetPath,
+                        loadFrame: widget.targetPath == null
+                            ? null
+                            : (frame) =>
+                                  _thumbnailClient.getWorkspaceFrameThumbnail(
+                                    widget.targetPath!,
+                                    frame,
+                                  ),
                         value: sliderValue,
-                        min: 0,
-                        max: sliderMaxFrame.toDouble(),
-                        divisions: _showVideoSlider ? sliderMaxFrame : 1,
-                        label: '$currentFrame',
+                        max: sliderMaxFrame,
                         onChanged:
                             !_canScrubVideo ||
                                 widget.onPreviewFrameSelected == null

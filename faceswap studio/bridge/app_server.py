@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime
+from functools import lru_cache
+import base64
 import hashlib
 import json
 import math
@@ -4394,6 +4396,54 @@ class FaceFusionRuntime:
             "can_submit": bool(source_paths and target_path),
         }
 
+    @staticmethod
+    @lru_cache(maxsize=96)
+    def _video_frame_thumbnail(path: str, modified: int, size: int, frame_number: int) -> dict[str, Any]:
+        import cv2
+
+        # 独立读取器，不共享换脸 worker 的视频游标或预览锁。
+        reader = cv2.VideoCapture(path)
+        try:
+            if not reader.isOpened():
+                raise HTTPException(status_code=422, detail="视频无法读取。")
+            total = int(reader.get(cv2.CAP_PROP_FRAME_COUNT))
+            if total <= 0 or frame_number >= total:
+                raise HTTPException(status_code=400, detail="预览帧超出视频范围。")
+            if frame_number and not reader.set(cv2.CAP_PROP_POS_FRAMES, frame_number):
+                raise HTTPException(status_code=422, detail="视频无法定位到所选帧。")
+            ok, frame = reader.read()
+            if not ok or frame is None:
+                raise HTTPException(status_code=422, detail="视频帧无法读取。")
+            height, width = frame.shape[:2]
+            scale = min(320 / width, 180 / height, 1)
+            frame = cv2.resize(frame, (max(1, round(width * scale)), max(1, round(height * scale))), interpolation=cv2.INTER_AREA)
+            ok, encoded = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            if not ok:
+                raise HTTPException(status_code=422, detail="视频帧无法编码。")
+            return {"frame_number": frame_number, "image_base64": base64.b64encode(encoded).decode('ascii')}
+        except cv2.error as error:
+            raise HTTPException(status_code=422, detail="视频帧无法读取。") from error
+        finally:
+            reader.release()
+
+    def workspace_frame_thumbnail(self, payload: dict[str, Any]) -> dict[str, Any]:
+        frame = payload.get("frame_number")
+        if type(frame) is not int or frame < 0:
+            raise HTTPException(status_code=400, detail="预览帧必须为非负整数。")
+        with self._lock:
+            target = self._workspace_state.get("target_path")
+        if not target or Path(target).suffix.lower() not in VIDEO_EXTENSIONS:
+            raise HTTPException(status_code=400, detail="请先选择视频。")
+        # 请求携带视频身份；换片后未完成的请求不能读取新片并标成旧帧。
+        if payload.get("target_path") != target:
+            raise HTTPException(status_code=409, detail="目标视频已更换。")
+        path = Path(target)
+        try:
+            stat = path.stat()
+        except OSError as error:
+            raise HTTPException(status_code=404, detail="目标视频不存在。") from error
+        return self._video_frame_thumbnail(str(path.resolve()), stat.st_mtime_ns, stat.st_size, frame)
+
     def set_workspace_source_paths(self, source_paths: list[str], *, append: bool = False) -> dict[str, Any]:
         normalized = self._normalize_source_paths(source_paths)
         with self._lock:
@@ -6385,6 +6435,11 @@ def workspace_options_delete() -> dict[str, Any]:
 @app.post("/workspace/preview")
 def workspace_preview(payload: dict[str, Any]) -> dict[str, Any]:
     return runtime.preview_workspace(payload)
+
+
+@app.post("/workspace/frame-thumbnail")
+def workspace_frame_thumbnail(payload: dict[str, Any]) -> dict[str, Any]:
+    return runtime.workspace_frame_thumbnail(payload)
 
 
 @app.put("/workspace/draft/source-paths")
