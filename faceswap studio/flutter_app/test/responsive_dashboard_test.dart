@@ -8,6 +8,7 @@ import 'package:faceswap_studio/app/widgets/studio_shell.dart';
 import 'package:faceswap_studio/features/home/presentation/home_page.dart';
 import 'package:faceswap_studio/features/workspace/presentation/workspace_page.dart';
 import 'package:faceswap_studio/shared/widgets/studio_hover_focus.dart';
+import 'package:faceswap_studio/shared/widgets/studio_media_viewer.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -20,6 +21,7 @@ class _Fixture extends HttpOverrides {
   Completer<void>? previewGate;
   bool previewFailed = false;
   bool invalidPreviewImage = false;
+  bool comparePreview = true;
   Map<String, dynamic>? previewPayload;
   bool video = false;
   Completer<void>? sourceGate;
@@ -133,8 +135,8 @@ class _Fixture extends HttpOverrides {
         return {
           'ok': true,
           'image_base64': invalidPreviewImage ? base64Encode([0, 1, 2]) : png,
-          'before_image_base64': png,
-          'after_image_base64': png,
+          if (comparePreview) 'before_image_base64': png,
+          if (comparePreview) 'after_image_base64': png,
           'width': 120,
           'height': 180,
           'target_media_type': video ? 'video' : 'image',
@@ -1248,6 +1250,66 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('全屏太阳按钮位于结果左侧，切换模式及单图均可打开且不移动划像', (tester) async {
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await show(tester, const WorkspacePage(), const Size(1100, 613));
+    await tester.tap(find.text('生成预览'));
+    await tester.pump();
+    await finishPreview(tester);
+    await finishPreview(tester);
+    for (final mode in ['划像', '双屏', '单图', '无对照']) {
+      if (mode == '双屏') {
+        await tester.tap(find.text('双屏'));
+      } else if (mode == '单图') {
+        await tester.tap(find.text('划像开'));
+      } else if (mode == '无对照') {
+        fixture.comparePreview = false;
+        await tester.tap(find.text('重新生成预览'));
+        await tester.pump();
+        await finishPreview(tester);
+      }
+      await tester.pumpAndSettle();
+      expect(find.text('点击全屏查看'), findsNothing);
+      final action = find.byKey(const ValueKey('preview-fullscreen-action'));
+      expect(action.hitTestable(), findsOneWidget, reason: mode);
+      expect(tester.widget<IconButton>(action).tooltip, '全屏查看');
+      expect(find.byIcon(Icons.wb_sunny_outlined), findsOneWidget);
+      final actionRect = tester.getRect(action);
+      final labelRect = tester.getRect(find.text('换脸结果'));
+      expect(
+        actionRect.right,
+        lessThan(labelRect.left),
+        reason: '$mode 按钮在结果左侧',
+      );
+      expect(actionRect.center.dy, closeTo(labelRect.center.dy, .1));
+      final frame = find.byType(StudioImageComparisonFrame);
+      final divider = tester.widget<StudioImageComparisonFrame>(frame).divider;
+      if (mode == '划像') await capture(tester, 'preview-fullscreen-sun-action');
+      await tester.tap(action);
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsOneWidget, reason: '$mode 只打开一个全屏窗口');
+      await tester.tap(
+        find
+            .descendant(
+              of: find.byType(Dialog),
+              matching: find.byIcon(Icons.close_rounded),
+            )
+            .first,
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsNothing);
+      expect(
+        tester.widget<StudioImageComparisonFrame>(frame).divider,
+        divider,
+        reason: '全屏按钮不触发划像拖动',
+      );
+      expect(tester.takeException(), isNull, reason: mode);
+    }
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
   });
 
   testWidgets('减少动态效果时整页即时聚焦，离开工作台不残留模糊', (tester) async {

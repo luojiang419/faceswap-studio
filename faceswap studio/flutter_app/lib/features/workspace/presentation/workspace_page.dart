@@ -2542,61 +2542,49 @@ class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
                                       detail: '正在融合人脸与生成画面，请稍候',
                                     )
                                   : previewResult != null
-                                  ? previewResult.canCompare
-                                        ? StudioImageComparisonFrame(
-                                            beforeImage: MemoryImage(
-                                              previewResult.beforeImageBytes,
-                                            ),
-                                            afterImage: MemoryImage(
-                                              previewResult.afterImageBytes,
-                                            ),
-                                            singleImage: MemoryImage(
-                                              previewResult.imageBytes,
-                                            ),
-                                            mode: _comparisonEnabled
-                                                ? _comparisonMode
-                                                : StudioComparisonMode.single,
-                                            divider: _comparisonDivider,
-                                            onDividerChanged: (value) {
-                                              setState(() {
-                                                _comparisonDivider = value;
-                                              });
-                                            },
-                                            followPointer:
-                                                _comparisonEnabled &&
-                                                _comparisonMode ==
-                                                    StudioComparisonMode.wipe,
-                                            beforeLabel:
-                                                previewResult.targetMediaType ==
-                                                    'video'
-                                                ? '原视频帧'
-                                                : '原图',
-                                            afterLabel: '换脸结果',
-                                          )
-                                        : Image.memory(
-                                            previewResult.imageBytes,
-                                            fit: BoxFit.contain,
-                                            gaplessPlayback: true,
-                                            errorBuilder: (_, _, _) =>
-                                                _MediaPlaceholder(
-                                                  compact: widget.compact,
-                                                  mediaType:
-                                                      widget.targetMediaType,
-                                                ),
-                                          )
+                                  ? StudioImageComparisonFrame(
+                                      beforeImage: MemoryImage(
+                                        previewResult.canCompare
+                                            ? previewResult.beforeImageBytes
+                                            : previewResult.imageBytes,
+                                      ),
+                                      afterImage: MemoryImage(
+                                        previewResult.canCompare
+                                            ? previewResult.afterImageBytes
+                                            : previewResult.imageBytes,
+                                      ),
+                                      singleImage: MemoryImage(
+                                        previewResult.imageBytes,
+                                      ),
+                                      mode:
+                                          _comparisonEnabled &&
+                                              previewResult.canCompare
+                                          ? _comparisonMode
+                                          : StudioComparisonMode.single,
+                                      divider: _comparisonDivider,
+                                      onDividerChanged: (value) {
+                                        setState(() {
+                                          _comparisonDivider = value;
+                                        });
+                                      },
+                                      followPointer:
+                                          _comparisonEnabled &&
+                                          _comparisonMode ==
+                                              StudioComparisonMode.wipe,
+                                      beforeLabel:
+                                          previewResult.targetMediaType ==
+                                              'video'
+                                          ? '原视频帧'
+                                          : '原图',
+                                      afterLabel: '换脸结果',
+                                      onOpenFullscreen:
+                                          widget.onOpenPreviewResult,
+                                    )
                                   : _MediaPlaceholder(
                                       compact: widget.compact,
                                       mediaType: widget.targetMediaType,
                                     ),
                             ),
-                            if (widget.onOpenPreviewResult != null)
-                              Positioned(
-                                right: widget.compact ? 8 : 10,
-                                bottom: widget.compact ? 8 : 10,
-                                child: const _PreviewActionBadge(
-                                  label: '点击全屏查看',
-                                ),
-                              ),
                           ],
                         ),
                       ),

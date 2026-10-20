@@ -480,6 +480,7 @@ class StudioImageComparisonFrame extends StatelessWidget {
     this.followPointer = false,
     this.beforeLabel = '原始',
     this.afterLabel = '结果',
+    this.onOpenFullscreen,
   });
 
   final ImageProvider beforeImage;
@@ -491,6 +492,7 @@ class StudioImageComparisonFrame extends StatelessWidget {
   final bool followPointer;
   final String beforeLabel;
   final String afterLabel;
+  final VoidCallback? onOpenFullscreen;
 
   @override
   Widget build(BuildContext context) {
@@ -500,11 +502,22 @@ class StudioImageComparisonFrame extends StatelessWidget {
         afterImage: afterImage,
         beforeLabel: beforeLabel,
         afterLabel: afterLabel,
+        onOpenFullscreen: onOpenFullscreen,
       ),
-      StudioComparisonMode.single => Image(
-        image: singleImage,
-        fit: BoxFit.contain,
-        gaplessPlayback: true,
+      StudioComparisonMode.single => Stack(
+        fit: StackFit.expand,
+        children: [
+          Image(image: singleImage, fit: BoxFit.contain, gaplessPlayback: true),
+          if (onOpenFullscreen != null)
+            Positioned(
+              right: 18,
+              bottom: 18,
+              child: _ComparisonResultLabel(
+                afterLabel,
+                onOpenFullscreen: onOpenFullscreen,
+              ),
+            ),
+        ],
       ),
       StudioComparisonMode.wipe => _StudioWipeComparisonFrame(
         beforeImage: beforeImage,
@@ -514,6 +527,7 @@ class StudioImageComparisonFrame extends StatelessWidget {
         divider: divider,
         onDividerChanged: onDividerChanged,
         followPointer: followPointer,
+        onOpenFullscreen: onOpenFullscreen,
       ),
     };
   }
@@ -1055,6 +1069,7 @@ class _StudioWipeComparisonFrame extends StatelessWidget {
     required this.divider,
     required this.onDividerChanged,
     required this.followPointer,
+    this.onOpenFullscreen,
   });
 
   final ImageProvider beforeImage;
@@ -1064,6 +1079,7 @@ class _StudioWipeComparisonFrame extends StatelessWidget {
   final double divider;
   final ValueChanged<double> onDividerChanged;
   final bool followPointer;
+  final VoidCallback? onOpenFullscreen;
 
   void _updateDivider(BoxConstraints constraints, Offset localPosition) {
     if (constraints.maxWidth <= 0) {
@@ -1075,49 +1091,54 @@ class _StudioWipeComparisonFrame extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final safeDivider = divider.clamp(0.0, 1.0);
-
     return LayoutBuilder(
-      builder: (context, constraints) {
-        return MouseRegion(
-          cursor: SystemMouseCursors.resizeLeftRight,
-          onHover: followPointer
-              ? (event) => _updateDivider(constraints, event.localPosition)
-              : null,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onPanDown: (details) =>
-                _updateDivider(constraints, details.localPosition),
-            onPanUpdate: (details) =>
-                _updateDivider(constraints, details.localPosition),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Image(image: afterImage, fit: BoxFit.contain),
-                ClipRect(
-                  clipper: _StudioComparisonClipper(safeDivider),
-                  child: Image(image: beforeImage, fit: BoxFit.contain),
-                ),
-                Positioned(
-                  left: 18,
-                  bottom: 18,
-                  child: _ComparisonLabel(beforeLabel),
-                ),
-                Positioned(
-                  right: 18,
-                  bottom: 18,
-                  child: _ComparisonLabel(afterLabel),
-                ),
-                Positioned(
-                  left: constraints.maxWidth * safeDivider - 22,
-                  top: 0,
-                  bottom: 0,
-                  child: const _ComparisonDividerHandle(),
-                ),
-              ],
+      builder: (context, constraints) => Stack(
+        fit: StackFit.expand,
+        children: [
+          MouseRegion(
+            cursor: SystemMouseCursors.resizeLeftRight,
+            onHover: followPointer
+                ? (event) => _updateDivider(constraints, event.localPosition)
+                : null,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onPanDown: (details) =>
+                  _updateDivider(constraints, details.localPosition),
+              onPanUpdate: (details) =>
+                  _updateDivider(constraints, details.localPosition),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Image(image: afterImage, fit: BoxFit.contain),
+                  ClipRect(
+                    clipper: _StudioComparisonClipper(safeDivider),
+                    child: Image(image: beforeImage, fit: BoxFit.contain),
+                  ),
+                  Positioned(
+                    left: 18,
+                    bottom: 18,
+                    child: _ComparisonLabel(beforeLabel),
+                  ),
+                  Positioned(
+                    left: constraints.maxWidth * safeDivider - 22,
+                    top: 0,
+                    bottom: 0,
+                    child: const _ComparisonDividerHandle(),
+                  ),
+                ],
+              ),
             ),
           ),
-        );
-      },
+          Positioned(
+            right: 18,
+            bottom: 18,
+            child: _ComparisonResultLabel(
+              afterLabel,
+              onOpenFullscreen: onOpenFullscreen,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1128,12 +1149,14 @@ class _StudioSplitComparisonFrame extends StatelessWidget {
     required this.afterImage,
     required this.beforeLabel,
     required this.afterLabel,
+    this.onOpenFullscreen,
   });
 
   final ImageProvider beforeImage;
   final ImageProvider afterImage;
   final String beforeLabel;
   final String afterLabel;
+  final VoidCallback? onOpenFullscreen;
 
   @override
   Widget build(BuildContext context) {
@@ -1161,7 +1184,10 @@ class _StudioSplitComparisonFrame extends StatelessWidget {
               Positioned(
                 right: 18,
                 bottom: 18,
-                child: _ComparisonLabel(afterLabel),
+                child: _ComparisonResultLabel(
+                  afterLabel,
+                  onOpenFullscreen: onOpenFullscreen,
+                ),
               ),
             ],
           ),
@@ -1241,6 +1267,40 @@ class _ComparisonDividerHandle extends StatelessWidget {
       ),
     );
   }
+}
+
+class _ComparisonResultLabel extends StatelessWidget {
+  const _ComparisonResultLabel(this.label, {this.onOpenFullscreen});
+
+  final String label;
+  final VoidCallback? onOpenFullscreen;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      if (onOpenFullscreen != null) ...[
+        IconButton(
+          key: const ValueKey('preview-fullscreen-action'),
+          tooltip: '全屏查看',
+          onPressed: onOpenFullscreen,
+          icon: const Icon(Icons.wb_sunny_outlined, size: 17),
+          style: IconButton.styleFrom(
+            foregroundColor: Colors.white,
+            backgroundColor: Colors.black.withValues(alpha: .68),
+            minimumSize: const Size(30, 30),
+            padding: const EdgeInsets.all(6),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            shape: CircleBorder(
+              side: BorderSide(color: Colors.white.withValues(alpha: .28)),
+            ),
+          ),
+        ),
+        const SizedBox(width: 6),
+      ],
+      _ComparisonLabel(label),
+    ],
+  );
 }
 
 class _ComparisonLabel extends StatelessWidget {
