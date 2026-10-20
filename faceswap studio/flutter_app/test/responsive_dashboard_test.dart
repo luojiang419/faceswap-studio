@@ -23,6 +23,7 @@ class _Fixture extends HttpOverrides {
   Completer<void>? targetGate;
   int sourceProcessed = 0;
   bool sourceFailed = false;
+  int sourceRequests = 0;
   int faceCount = 0;
   final Map<String, dynamic> options = {};
   late String imagePath;
@@ -175,6 +176,7 @@ class _Request extends Fake implements HttpClientRequest {
   Future<HttpClientResponse> close() async {
     if (url.path == '/workspace/preview') await fixture.previewGate?.future;
     if (url.path == '/workspace/draft/extract-source-faces') {
+      fixture.sourceRequests++;
       await fixture.sourceGate?.future;
     }
     if (url.path == '/workspace/draft/target-path') {
@@ -344,6 +346,122 @@ void main() {
   }
 
   testWidgets(
+    '文件窗口返回前已绘制粒子，识别完成后持续到图片首帧',
+    (tester) async {
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      const picker = MethodChannel('faceswap_studio/file_dialog');
+      final picked = Completer<List<String>>();
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        picker,
+        (_) => picked.future,
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          picker,
+          null,
+        ),
+      );
+      fixture.sourceGate = Completer<void>();
+      await show(tester, const WorkspacePage(), const Size(1384, 661));
+      await tester.tap(find.text('上传人脸图片'));
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('source-import-loading')),
+        findsOneWidget,
+      );
+      expect(fixture.sourceRequests, 0, reason: '选择窗口未返回，格子下方已显示粒子');
+      picked.complete([r'D:\素材\face.jpg']);
+      await tester.pump();
+      await tester.pump();
+      expect(fixture.sourceRequests, 1);
+      expect(find.text('正在识别人脸'), findsOneWidget);
+      final previousPath = fixture.imagePath;
+      final nextPath = '${temp.path}/new-face.png';
+      File(nextPath).writeAsBytesSync(File(previousPath).readAsBytesSync());
+      final decoded = await tester.runAsync(() async {
+        final codec = await ui.instantiateImageCodec(
+          File(nextPath).readAsBytesSync(),
+        );
+        final frame = await codec.getNextFrame();
+        codec.dispose();
+        return frame.image;
+      });
+      final firstFrame = Completer<ImageInfo>();
+      final imageProvider = FileImage(File(nextPath));
+      PaintingBinding.instance.imageCache.putIfAbsent(
+        imageProvider,
+        () => OneFrameImageStreamCompleter(firstFrame.future),
+      );
+      addTearDown(() {
+        if (!firstFrame.isCompleted) {
+          firstFrame.complete(ImageInfo(image: decoded!));
+        }
+        PaintingBinding.instance.imageCache.evict(imageProvider);
+      });
+      fixture.imagePath = nextPath;
+      fixture.sourceGate!.complete();
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump();
+      expect(find.text('正在处理新素材…'), findsNothing, reason: '提取请求已经结束');
+      expect(
+        find.byKey(const ValueKey('source-import-loading')),
+        findsOneWidget,
+        reason: '图片尚未解码出首帧，粒子必须继续显示',
+      );
+      await tester.pump(const Duration(seconds: 2));
+      expect(
+        find.byKey(const ValueKey('source-import-loading')),
+        findsOneWidget,
+      );
+      firstFrame.complete(ImageInfo(image: decoded!));
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(const ValueKey('source-import-loading')), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+  );
+
+  testWidgets(
+    '取消文件选择后立即恢复原图片和按钮',
+    (tester) async {
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      const picker = MethodChannel('faceswap_studio/file_dialog');
+      final picked = Completer<List<String>>();
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        picker,
+        (_) => picked.future,
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          picker,
+          null,
+        ),
+      );
+      await show(tester, const WorkspacePage(), const Size(1384, 661));
+      await tester.tap(find.text('上传人脸图片'));
+      await tester.pump();
+      expect(find.text('正在识别人脸'), findsOneWidget);
+      picked.complete([]);
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(const ValueKey('source-import-loading')), findsNothing);
+      expect(fixture.sourceRequests, 0);
+      final upload = find.ancestor(
+        of: find.text('上传人脸图片'),
+        matching: find.byType(FilledButton),
+      );
+      expect(tester.widget<FilledButton>(upload).onPressed, isNotNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+  );
+
+  testWidgets(
     '导入格子在请求期间展示真实进度，失败与完成后恢复',
     (tester) async {
       addTearDown(tester.view.resetPhysicalSize);
@@ -364,6 +482,9 @@ void main() {
       await tester.tap(find.text('上传人脸图片'));
       await tester.pump();
       expect(find.text('正在识别人脸'), findsOneWidget);
+      // 第一帧为原生窗口下方预绘制的等待态，随后更新选择数量。
+      await tester.pump();
+      await tester.pump();
       expect(find.text('已识别 0 张 / 共 3 张'), findsOneWidget);
       fixture.sourceProcessed = 2;
       await tester.pump(const Duration(milliseconds: 600));

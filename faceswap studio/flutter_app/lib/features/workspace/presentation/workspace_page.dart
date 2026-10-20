@@ -645,79 +645,89 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
 
   Future<void> _pickSourceFiles() async {
     if (_actionInFlight || _sourceImporting || _targetImporting) return;
-    final files = await pickStudioFiles(
-      context,
-      acceptedTypeGroups: const [
-        XTypeGroup(
-          label: '源媒体',
-          extensions: [
-            'jpg',
-            'jpeg',
-            'png',
-            'webp',
-            'bmp',
-            'tiff',
-            'mp3',
-            'wav',
-            'aac',
-            'flac',
-            'ogg',
-            'm4a',
-            'opus',
-          ],
-        ),
-      ],
-    );
-    if (!mounted || files.isEmpty || _actionInFlight) {
-      return;
-    }
-    final requestId =
-        '${DateTime.now().microsecondsSinceEpoch}-${math.Random().nextInt(1 << 32)}';
-    final imageCount = files
-        .where(
-          (file) => RegExp(
-            r'\.(jpg|jpeg|png|webp|bmp|tiff)$',
-            caseSensitive: false,
-          ).hasMatch(file.path),
-        )
-        .length;
+    // 先在文件窗口下方绘制等待态，窗口关闭后不必再等原生清理回调。
     setState(() {
       _sourceImporting = true;
-      _sourceRequestId = requestId;
-      _sourceProcessed = _sourceRecognized = _sourceSkipped = 0;
-      _sourceTotal = imageCount;
-    });
-    var readingProgress = false;
-    _sourceProgressTimer = Timer.periodic(const Duration(milliseconds: 500), (
-      _,
-    ) async {
-      if (readingProgress) return;
-      readingProgress = true;
-      try {
-        final progress = await _client.getSourceExtractionProgress(requestId);
-        if (!mounted ||
-            !_sourceImporting ||
-            _sourceRequestId != requestId ||
-            progress['request_id'] != requestId) {
-          return;
-        }
-        setState(() {
-          _sourceProcessed = math
-              .max(
-                _sourceProcessed,
-                (progress['processed'] as num?)?.toInt() ?? 0,
-              )
-              .clamp(0, _sourceTotal);
-          _sourceRecognized = (progress['recognized'] as num?)?.toInt() ?? 0;
-          _sourceSkipped = (progress['skipped'] as num?)?.toInt() ?? 0;
-        });
-      } catch (_) {
-        /* 短暂轮询失败不影响识别请求，最终请求负责展示错误。 */
-      } finally {
-        readingProgress = false;
-      }
+      _sourceProcessed = _sourceRecognized = _sourceSkipped = _sourceTotal = 0;
     });
     try {
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      final files = await pickStudioFiles(
+        context,
+        acceptedTypeGroups: const [
+          XTypeGroup(
+            label: '源媒体',
+            extensions: [
+              'jpg',
+              'jpeg',
+              'png',
+              'webp',
+              'bmp',
+              'tiff',
+              'mp3',
+              'wav',
+              'aac',
+              'flac',
+              'ogg',
+              'm4a',
+              'opus',
+            ],
+          ),
+        ],
+      );
+      if (!mounted || files.isEmpty || _actionInFlight) {
+        return;
+      }
+      final requestId =
+          '${DateTime.now().microsecondsSinceEpoch}-${math.Random().nextInt(1 << 32)}';
+      final imageCount = files
+          .where(
+            (file) => RegExp(
+              r'\.(jpg|jpeg|png|webp|bmp|tiff)$',
+              caseSensitive: false,
+            ).hasMatch(file.path),
+          )
+          .length;
+      setState(() {
+        _sourceImporting = true;
+        _sourceRequestId = requestId;
+        _sourceProcessed = _sourceRecognized = _sourceSkipped = 0;
+        _sourceTotal = imageCount;
+      });
+      // 让带批次数量的首帧先显示，再提交识别请求。
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      var readingProgress = false;
+      _sourceProgressTimer = Timer.periodic(const Duration(milliseconds: 500), (
+        _,
+      ) async {
+        if (readingProgress) return;
+        readingProgress = true;
+        try {
+          final progress = await _client.getSourceExtractionProgress(requestId);
+          if (!mounted ||
+              !_sourceImporting ||
+              _sourceRequestId != requestId ||
+              progress['request_id'] != requestId) {
+            return;
+          }
+          setState(() {
+            _sourceProcessed = math
+                .max(
+                  _sourceProcessed,
+                  (progress['processed'] as num?)?.toInt() ?? 0,
+                )
+                .clamp(0, _sourceTotal);
+            _sourceRecognized = (progress['recognized'] as num?)?.toInt() ?? 0;
+            _sourceSkipped = (progress['skipped'] as num?)?.toInt() ?? 0;
+          });
+        } catch (_) {
+          /* 短暂轮询失败不影响识别请求，最终请求负责展示错误。 */
+        } finally {
+          readingProgress = false;
+        }
+      });
       await _invokeWorkspaceAction(() async {
         _workspaceMessage = '正在自动提取源脸，请稍候。';
         final result = await _client.extractWorkspaceSourceFaces(
@@ -729,6 +739,7 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
           _workspaceDraft = _WorkspaceDraft.fromJson(workspace);
         }
         if (result['ok'] == true) {
+          _sourceProcessed = _sourceTotal;
           _workspaceMessage =
               '${result['message'] ?? '已自动提取源脸。'} 当前共 ${_workspaceDraft?.sourcePaths.length ?? 0} 个源文件。';
         } else {
@@ -953,7 +964,11 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
           return _NativeWorkbenchPane(
             bridgeOnline: _bridgeOnline,
             webUiReady: _isWebUiReady,
-            busy: _actionInFlight || _previewInFlight,
+            busy:
+                _actionInFlight ||
+                _previewInFlight ||
+                _sourceImporting ||
+                _targetImporting,
             previewBusy: _previewInFlight,
             sourceImporting: _sourceImporting,
             targetImporting: _targetImporting,
@@ -1198,20 +1213,19 @@ class _NativeWorkbenchPane extends StatelessWidget {
         final currentOptionsState =
             workspaceOptionsState ?? const WorkspaceOptionsState.empty();
 
+        final sourceLoading = StudioMediaLoading(
+          key: const ValueKey('source-import-loading'),
+          kind: StudioMediaLoadingKind.face,
+          processed: sourceProcessed,
+          total: sourceTotal,
+          recognized: sourceRecognized,
+          skipped: sourceSkipped,
+        );
         final sourceCard = _WorkspaceDraftCard(
           compact: compact,
           title: '人脸参考',
-          loading: sourceImporting
-              ? StudioMediaLoading(
-                  key: const ValueKey('source-import-loading'),
-                  kind: StudioMediaLoadingKind.face,
-                  processed: sourceProcessed,
-                  total: sourceTotal,
-                  recognized: sourceRecognized,
-                  skipped: sourceSkipped,
-                  message: sourceTotal == 0 ? '正在载入源素材' : null,
-                )
-              : null,
+          loading: sourceImporting ? sourceLoading : null,
+          imageLoading: sourceLoading,
           subtitle: sourceImporting
               ? '正在为你准备人脸参考。'
               : currentDraft.sourcePaths.isEmpty
@@ -1420,6 +1434,7 @@ class _WorkspaceDraftCard extends StatelessWidget {
   const _WorkspaceDraftCard({
     this.compact = false,
     this.loading,
+    this.imageLoading,
     required this.title,
     required this.subtitle,
     required this.filePath,
@@ -1435,6 +1450,7 @@ class _WorkspaceDraftCard extends StatelessWidget {
 
   final bool compact;
   final Widget? loading;
+  final Widget? imageLoading;
   final String title;
   final String subtitle;
   final String? filePath;
@@ -1515,6 +1531,18 @@ class _WorkspaceDraftCard extends StatelessWidget {
                                             child: Image.file(
                                               File(thumbnailPath!),
                                               fit: BoxFit.contain,
+                                              frameBuilder: imageLoading == null
+                                                  ? null
+                                                  : (
+                                                      _,
+                                                      child,
+                                                      frame,
+                                                      synchronous,
+                                                    ) =>
+                                                        frame != null ||
+                                                            synchronous
+                                                        ? child
+                                                        : imageLoading!,
                                               errorBuilder: (_, _, _) =>
                                                   _MediaPlaceholder(
                                                     compact: compact,
