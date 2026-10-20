@@ -2,6 +2,7 @@ import importlib.util
 import json
 from pathlib import Path
 import threading
+import pytest
 
 
 APP_SERVER_PATH = Path(__file__).resolve().parents[1] / 'faceswap studio' / 'bridge' / 'app_server.py'
@@ -238,6 +239,139 @@ def test_normalize_job_payload_paths_keeps_installed_studio_output_path(tmp_path
 
 	assert changed is False
 	assert payload['steps'][0]['args']['output_path'] == str(output_path)
+
+
+def test_immediate_generation_only_runs_new_job_and_locks_media_until_finished(tmp_path):
+
+	runtime = create_runtime(tmp_path)
+	source, target, output = create_media_fixture(runtime)
+	runtime._workspace_state = {'source_paths': [str(source)], 'target_path': str(target)}
+	def record(job_id):
+		write_job_record(runtime, job_id=job_id, status='queued', source_path=source, target_path=target, output_path=output)
+	record('old-pending')
+	created = []
+	def create():
+		created.append('immediate')
+		record('immediate')
+		return 'immediate', str(output)
+	runtime._create_workspace_job = create
+	started, release = threading.Event(), threading.Event()
+	executed = []
+	def execute(job_id):
+		executed.append(job_id)
+		started.set()
+		assert release.wait(5)
+		return 0
+	runtime._run_single_job = execute
+	try:
+		result = runtime.run_workspace()
+		assert result['ok'] and result['job_id'] == 'immediate'
+		assert started.wait(2)
+		assert {task['job_id'] for task in result['queue']['tasks']} == {'old-pending', 'immediate'}
+		assert result['queue']['runner']['active']
+		assert result['queue']['runner']['total_jobs'] == 1
+		assert runtime.workspace_state()['generation_active']
+		before = dict(runtime._workspace_state)
+		for mutate in [
+			lambda: runtime.set_workspace_source_paths([str(source)], append=True),
+			runtime.clear_workspace_source_paths,
+			lambda: runtime.set_workspace_target_path(str(target)),
+			runtime.clear_workspace_target_path,
+			lambda: runtime.extract_workspace_source_faces([str(source)]),
+			runtime.queue_workspace,
+		]:
+			with pytest.raises(APP_SERVER_MODULE.HTTPException) as error:
+				mutate()
+			assert error.value.status_code == 409
+		assert runtime._workspace_state == before
+		assert not runtime.run_workspace()['ok']
+		thread = runtime._queue_runner_thread
+		runtime.run_queue()
+		assert runtime._queue_runner_thread is thread
+		assert created == ['immediate']
+	finally:
+		release.set()
+		runtime._queue_runner_thread.join(5)
+	assert not runtime._queue_runner_active
+	assert executed == ['immediate']
+	assert (runtime._jobs_dir / 'queued/old-pending.json').exists()
+	assert (runtime._jobs_dir / 'completed/immediate.json').exists()
+	runtime.set_workspace_target_path(str(target))
+	runtime.run_queue()
+	runtime._queue_runner_thread.join(5)
+	assert executed == ['immediate', 'old-pending']
+	assert not (runtime._jobs_dir / 'queued/old-pending.json').exists()
+
+
+def test_adding_to_queue_waits_for_explicit_batch_and_batch_uses_start_snapshot(tmp_path):
+
+	runtime = create_runtime(tmp_path)
+	source, target, output = create_media_fixture(runtime)
+	runtime._workspace_state = {'source_paths': [str(source)], 'target_path': str(target)}
+	def record(job_id):
+		write_job_record(runtime, job_id=job_id, status='queued', source_path=source, target_path=target, output_path=output)
+	created = []
+	def create():
+		job_id = f'pending-{len(created)}'
+		created.append(job_id)
+		record(job_id)
+		return job_id, str(output)
+	runtime._create_workspace_job = create
+	assert runtime.queue_workspace()['ok']
+	assert runtime.queue_workspace()['ok']
+	assert runtime._queue_runner_thread is None
+	assert not runtime._queue_runner_active
+	executed = []
+	def execute(job_id):
+		executed.append(job_id)
+		if len(executed) == 1:
+			record('external-late-job')
+		return 0
+	runtime._run_single_job = execute
+	runtime.run_queue()
+	runtime._queue_runner_thread.join(5)
+	assert executed == created
+	assert (runtime._jobs_dir / 'queued/external-late-job.json').exists()
+	assert runtime._queue_total_jobs == runtime._queue_completed_jobs == 2
+
+
+@pytest.mark.parametrize('failure', ['exit', 'exception', 'cancel'])
+def test_generation_failure_or_cancel_restores_media_editing(tmp_path, failure):
+
+	runtime = create_runtime(tmp_path)
+	source, target, output = create_media_fixture(runtime)
+	write_job_record(runtime, job_id='failing', status='queued', source_path=source, target_path=target, output_path=output)
+	def execute(job_id):
+		if failure == 'exception':
+			raise OSError('test process unavailable')
+		return APP_SERVER_MODULE.QUEUE_CANCELLED_EXIT_CODE if failure == 'cancel' else 1
+	runtime._run_single_job = execute
+	runtime.run_queue()
+	runtime._queue_runner_thread.join(5)
+	assert not runtime._queue_runner_active
+	assert runtime._queue_current_job_id is None
+	assert (runtime._jobs_dir / 'failed/failing.json').exists()
+	assert runtime._queue_completed_jobs == 1
+	assert runtime.set_workspace_source_paths([str(source)])['source_paths'] == [str(source)]
+	assert runtime.set_workspace_target_path(str(target))['target_path'] == str(target)
+
+
+def test_thread_start_failure_does_not_leave_generation_locked(tmp_path, monkeypatch):
+
+	runtime = create_runtime(tmp_path)
+	source, target, output = create_media_fixture(runtime)
+	write_job_record(runtime, job_id='pending', status='queued', source_path=source, target_path=target, output_path=output)
+	class UnavailableThread:
+		def __init__(self, **kwargs):
+			pass
+		def start(self):
+			raise RuntimeError('test thread unavailable')
+	monkeypatch.setattr(APP_SERVER_MODULE.threading, 'Thread', UnavailableThread)
+	with pytest.raises(RuntimeError):
+		runtime.run_queue()
+	assert not runtime._queue_runner_active
+	assert runtime._queue_runner_thread is None
+	assert (runtime._jobs_dir / 'queued/pending.json').exists()
 
 
 def test_normalize_job_payload_paths_collapses_repeated_installed_studio_output_path(tmp_path : Path) -> None:

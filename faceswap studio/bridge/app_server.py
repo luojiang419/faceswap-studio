@@ -3618,6 +3618,8 @@ class FaceFusionRuntime:
         return extract_result
 
     def extract_workspace_source_faces(self, source_paths: list[str], request_id: str | None = None, *, append: bool = False) -> dict[str, Any]:
+        with self._queue_lock:
+            self._ensure_workspace_media_editable()
         if request_id:
             self._source_progress_path(request_id)
         normalized = self._normalize_source_paths(source_paths)
@@ -4222,6 +4224,8 @@ class FaceFusionRuntime:
         }
 
     async def upload_workspace_sources(self, uploads: list[UploadFile]) -> dict[str, Any]:
+        with self._queue_lock:
+            self._ensure_workspace_media_editable()
         files = []
         for upload in uploads:
             saved = await self._save_studio_upload(
@@ -4247,6 +4251,8 @@ class FaceFusionRuntime:
         }
 
     async def upload_workspace_target(self, upload: UploadFile) -> dict[str, Any]:
+        with self._queue_lock:
+            self._ensure_workspace_media_editable()
         saved = await self._save_studio_upload(
             upload,
             allowed_extensions=IMAGE_EXTENSIONS.union(VIDEO_EXTENSIONS),
@@ -4307,16 +4313,7 @@ class FaceFusionRuntime:
 
     def _run_facefusion_cli(self, args: list[str]) -> bool:
         self._last_cli_error = None
-        powershell_executable = self._resolve_powershell_executable()
-        command = [
-            powershell_executable,
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(self.repo_root / "scripts" / "facefusion.ps1"),
-            *args,
-        ]
+        command = self._facefusion_cli_command(args)
         self._append_log(f"[bridge] Running FaceFusion CLI: {' '.join(command)}")
         process = subprocess.run(
             command,
@@ -4372,6 +4369,10 @@ class FaceFusionRuntime:
             "runpy.run_path('facefusion.py', run_name='__main__')\n"
         )
 
+    def _facefusion_cli_command(self, args: list[str]) -> list[str]:
+        # 安装包不要求携带开发用 PowerShell 脚本，与核心启动共用 Python 引导。
+        return [self._resolve_facefusion_python_executable(), "-c", self._facefusion_bootstrap_code(), *args]
+
     def workspace_state(self) -> dict[str, Any]:
         with self._lock:
             source_paths = list(self._workspace_state.get("source_paths", []))
@@ -4394,6 +4395,7 @@ class FaceFusionRuntime:
             "output_root": str(self._output_dir),
             "output_directory": self._resolve_workspace_output_directory(target_path),
             "can_submit": bool(source_paths and target_path),
+            "generation_active": self._queue_runner_active,
         }
 
     @staticmethod
@@ -4446,7 +4448,8 @@ class FaceFusionRuntime:
 
     def set_workspace_source_paths(self, source_paths: list[str], *, append: bool = False) -> dict[str, Any]:
         normalized = self._normalize_source_paths(source_paths)
-        with self._lock:
+        with self._queue_lock, self._lock:
+            self._ensure_workspace_media_editable()
             if append:
                 normalized = list(dict.fromkeys([*self._workspace_state.get("source_paths", []), *normalized]))
             self._workspace_state["source_paths"] = normalized
@@ -4455,7 +4458,8 @@ class FaceFusionRuntime:
         return self.workspace_state()
 
     def clear_workspace_source_paths(self) -> dict[str, Any]:
-        with self._lock:
+        with self._queue_lock, self._lock:
+            self._ensure_workspace_media_editable()
             self._workspace_state["source_paths"] = []
             self._save_workspace_state()
         self._append_log("[bridge] Cleared workspace source paths.")
@@ -4463,7 +4467,8 @@ class FaceFusionRuntime:
 
     def set_workspace_target_path(self, target_path: str | None) -> dict[str, Any]:
         normalized = self._normalize_target_path(target_path)
-        with self._lock:
+        with self._queue_lock, self._lock:
+            self._ensure_workspace_media_editable()
             self._workspace_state["target_path"] = normalized
             self._workspace_video_frame_total_cache = {}
             self._save_workspace_state()
@@ -4471,12 +4476,17 @@ class FaceFusionRuntime:
         return self.workspace_state()
 
     def clear_workspace_target_path(self) -> dict[str, Any]:
-        with self._lock:
+        with self._queue_lock, self._lock:
+            self._ensure_workspace_media_editable()
             self._workspace_state["target_path"] = None
             self._workspace_video_frame_total_cache = {}
             self._save_workspace_state()
         self._append_log("[bridge] Cleared workspace target path.")
         return self.workspace_state()
+
+    def _ensure_workspace_media_editable(self) -> None:
+        if self._queue_runner_active:
+            raise HTTPException(status_code=409, detail="正在生成，请等待完成或取消任务后再修改人脸和视频。")
 
     def _delete_partial_workspace_job(self, job_id: str) -> None:
         for job_status in JOB_STATUSES:
@@ -4549,6 +4559,11 @@ class FaceFusionRuntime:
         return job_id, output_path
 
     def queue_workspace(self) -> dict[str, Any]:
+        with self._queue_lock:
+            self._ensure_workspace_media_editable()
+            return self._queue_workspace()
+
+    def _queue_workspace(self) -> dict[str, Any]:
         job = self._create_workspace_job()
         if job is None:
             return {
@@ -4602,12 +4617,11 @@ class FaceFusionRuntime:
                         "queue": self.list_queue_tasks(),
                     }
 
-            queued = self.queue_workspace()
-            if not queued.get("ok"):
+                queued = self._queue_workspace()
+                if not queued.get("ok"):
+                    return queued
+                queued["queue"] = self.run_queue(job_ids=[queued["job_id"]])
                 return queued
-            queue_state = self.run_queue()
-            queued["queue"] = queue_state
-            return queued
         finally:
             self._workspace_run_lock.release()
 
@@ -4629,21 +4643,6 @@ class FaceFusionRuntime:
             str(self._output_dir),
             *self._content_analyser_cli_args(),
         ]
-
-    def _resolve_powershell_executable(self) -> str:
-        candidates = [
-            r"C:\Program Files\PowerShell\7\pwsh.exe",
-            r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
-            "pwsh",
-            "powershell",
-        ]
-        for candidate in candidates:
-            if ":" in candidate:
-                if Path(candidate).exists():
-                    return candidate
-            else:
-                return candidate
-        return "pwsh"
 
     def _build_runtime_path_entries(self) -> list[str]:
         entries = [
@@ -5412,11 +5411,12 @@ class FaceFusionRuntime:
             },
         }
 
-    def run_queue(self) -> dict[str, Any]:
+    def run_queue(self, job_ids: list[str] | None = None) -> dict[str, Any]:
         with self._queue_lock:
             if self._queue_runner_active:
                 return self.list_queue_tasks()
-            queued_job_ids = [task["job_id"] for task in self.list_queue_tasks()["tasks"] if task["status"] == "queued"]
+            queued_job_ids = [task["job_id"] for task in self.list_queue_tasks()["tasks"]
+                              if task["status"] == "queued" and (job_ids is None or task["job_id"] in job_ids)]
             if not queued_job_ids:
                 return self.list_queue_tasks()
 
@@ -5433,8 +5433,13 @@ class FaceFusionRuntime:
                     "progress_phase": "queued",
                     "progress_detail": "等待执行。",
                 }
-            self._queue_runner_thread = threading.Thread(target=self._run_queue_worker, daemon=True)
-            self._queue_runner_thread.start()
+            self._queue_runner_thread = threading.Thread(target=self._run_queue_worker, args=(queued_job_ids,), daemon=True)
+            try:
+                self._queue_runner_thread.start()
+            except Exception:
+                self._queue_runner_active = False
+                self._queue_runner_thread = None
+                raise
             self._append_log(f"[bridge] Queue runner started with {len(queued_job_ids)} queued jobs.")
         return self.list_queue_tasks()
 
@@ -5520,20 +5525,14 @@ class FaceFusionRuntime:
         queue_state["removed_count"] = removed_count
         return queue_state
 
-    def _run_queue_worker(self) -> None:
-        attempted_job_ids: set[str] = set()
+    def _run_queue_worker(self, job_ids: list[str] | None = None) -> None:
         try:
-            while True:
-                queued_job_ids = [
-                    task["job_id"]
-                    for task in self.list_queue_tasks()["tasks"]
-                    if task["status"] == "queued" and task["job_id"] not in attempted_job_ids
-                ]
-                if not queued_job_ids:
-                    break
-                job_id = queued_job_ids[0]
-                attempted_job_ids.add(job_id)
+            if job_ids is None:
+                job_ids = [task["job_id"] for task in self.list_queue_tasks()["tasks"] if task["status"] == "queued"]
+            for job_id in job_ids:
                 with self._queue_lock:
+                    if not (self._jobs_dir / "queued" / f"{job_id}.json").exists():
+                        continue
                     self._queue_current_job_id = job_id
                 self._initialize_queue_progress(job_id)
 
@@ -5549,7 +5548,12 @@ class FaceFusionRuntime:
                     continue
 
                 self._append_log(f"[bridge] Running queued job: {job_id}")
-                result = self._run_single_job(job_id)
+                execution_error = None
+                try:
+                    result = self._run_single_job(job_id)
+                except Exception as error:
+                    result = -1
+                    execution_error = f"任务执行失败：{error}"
                 cancelled = (
                     result == QUEUE_CANCELLED_EXIT_CODE
                     or job_id in self._queue_cancel_requested_job_ids
@@ -5560,7 +5564,7 @@ class FaceFusionRuntime:
                     self._move_job_record_to_status(job_id, "failed", detail=detail)
                     self._append_log(f"[bridge] Queued job cancelled: {job_id}")
                 elif result != 0:
-                    detail = f"任务执行失败，退出码 {result}。"
+                    detail = execution_error or f"任务执行失败，退出码 {result}。"
                     self._finish_queue_progress(job_id, failed=True, detail=detail)
                     self._move_job_record_to_status(job_id, "failed", detail=detail)
                     self._queue_last_error = f"Job failed: {job_id} (exit code {result})"
@@ -5593,20 +5597,14 @@ class FaceFusionRuntime:
         with self._queue_lock:
             if job_id in self._queue_cancel_requested_job_ids:
                 return QUEUE_CANCELLED_EXIT_CODE
-        command = [
-            self._resolve_powershell_executable(),
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(self.repo_root / "scripts" / "facefusion.ps1"),
+        command = self._facefusion_cli_command([
             "job-run",
             job_id,
             "--jobs-path",
             str(self._jobs_dir),
             "--temp-path",
             str(self._temp_dir),
-        ]
+        ])
         process = subprocess.Popen(
             command,
             cwd=self.repo_root,

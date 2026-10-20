@@ -8,6 +8,7 @@ import 'package:faceswap_studio/app/widgets/studio_shell.dart';
 import 'package:faceswap_studio/features/home/presentation/home_page.dart';
 import 'package:faceswap_studio/features/workspace/presentation/workspace_page.dart';
 import 'package:faceswap_studio/shared/widgets/studio_hover_focus.dart';
+import 'package:faceswap_studio/shared/widgets/studio_file_drop_region.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:faceswap_studio/shared/widgets/studio_media_viewer.dart';
 import 'package:flutter/material.dart';
@@ -18,6 +19,35 @@ import 'package:flutter_test/flutter_test.dart';
 // 所有请求在内存中响应，避免布局测试连接用户的 Bridge 或修改真实素材。
 class _Fixture extends HttpOverrides {
   bool online = true;
+  bool generationActive = false;
+  bool generationFailed = false;
+  bool generationNetworkFailed = false;
+  String? activeJob;
+  int immediateRequests = 0;
+  int batchRequests = 0;
+  Completer<void>? generationGate;
+  final List<Map<String, dynamic>> jobs = [];
+
+  Map<String, dynamic> queueSnapshot() => {
+    'tasks': [
+      for (final job in jobs)
+        {...job, 'is_active': generationActive && job['job_id'] == activeJob},
+    ],
+    'runner': {
+      'active': generationActive,
+      'current_job_id': activeJob,
+      'total_jobs': jobs.length,
+    },
+  };
+
+  void addJob(String id) => jobs.add({
+    'created_at': '2026-10-20T12:00:${jobs.length.toString().padLeft(2, '0')}',
+    'job_id': id,
+    'status': 'queued',
+    'source_paths': [imagePath],
+    'target_path': imagePath,
+    'step_total': 1,
+  });
   int previews = 0;
   Completer<void>? previewGate;
   bool previewFailed = false;
@@ -48,6 +78,33 @@ class _Fixture extends HttpOverrides {
 
   Object response(Uri uri, List<int> body) {
     switch (uri.path) {
+      case '/queue/tasks':
+        return queueSnapshot();
+      case '/workspace/queue':
+        addJob('pending-${jobs.length}');
+        return {
+          'ok': true,
+          'job_id': jobs.last['job_id'],
+          'queue': queueSnapshot(),
+        };
+      case '/workspace/run':
+        if (generationNetworkFailed) throw const SocketException('测试提交连接中断');
+        if (!generationFailed) {
+          addJob('immediate-job');
+          activeJob = 'immediate-job';
+          generationActive = true;
+        }
+        return {
+          'ok': !generationFailed,
+          'job_id': activeJob,
+          'queue': queueSnapshot(),
+        };
+      case '/queue/run':
+        generationActive = true;
+        activeJob =
+            jobs.firstWhere((job) => job['status'] == 'queued')['job_id']
+                as String;
+        return queueSnapshot();
       case '/workspace/draft/source-progress':
         return {
           'request_id': uri.queryParameters['request_id'],
@@ -102,6 +159,7 @@ class _Fixture extends HttpOverrides {
             'target_thumbnail': committedTarget ?? imagePath,
             'target_media_type': 'image',
             'can_submit': true,
+            'generation_active': generationActive,
           };
         }
         return {
@@ -113,6 +171,7 @@ class _Fixture extends HttpOverrides {
           'target_media_type': video ? 'video' : 'image',
           if (video) 'target_video_frame_total': 860,
           'can_submit': true,
+          'generation_active': generationActive,
         };
       case '/workspace/options':
         if (body.isNotEmpty) {
@@ -228,6 +287,14 @@ class _Request extends Fake implements HttpClientRequest {
 
   @override
   Future<HttpClientResponse> close() async {
+    if (url.path == '/workspace/run') {
+      fixture.immediateRequests++;
+      await fixture.generationGate?.future;
+    }
+    if (url.path == '/queue/run') {
+      fixture.batchRequests++;
+      await fixture.generationGate?.future;
+    }
     if (url.path == '/workspace/draft' && fixture.draftGate != null) {
       final snapshot = jsonEncode(fixture.response(url, body));
       await fixture.draftGate!.future;
@@ -1080,6 +1147,145 @@ void main() {
     },
     variant: TargetPlatformVariant.only(TargetPlatform.windows),
   );
+
+  testWidgets(
+    '立即生成进入队列且锁定素材，旧轮询不解锁，只有执行生成才启动批量',
+    (tester) async {
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await show(tester, const WorkspacePage(), const Size(1384, 661));
+      FilledButton button(String label) => tester.widget<FilledButton>(
+        find
+            .ancestor(
+              of: find.text(label),
+              matching: find.byWidgetPredicate((w) => w is FilledButton),
+            )
+            .first,
+      );
+      void expectMediaEnabled(bool enabled) {
+        for (final label in ['上传人脸图片', '从形象库选择', '更换视频', '立即生成']) {
+          expect(button(label).onPressed != null, enabled, reason: label);
+        }
+        for (final key in ['source-file-drop', 'target-file-drop']) {
+          expect(
+            tester
+                    .widget<StudioFileDropRegion>(find.byKey(ValueKey(key)))
+                    .onFiles !=
+                null,
+            enabled,
+            reason: key,
+          );
+        }
+      }
+
+      for (var i = 0; i < 2; i++) {
+        await tester.tap(find.text('添加到队列'));
+        await tester.pump();
+        await tester.pump();
+      }
+      expect(fixture.jobs, hasLength(2));
+      expect(fixture.batchRequests, 0);
+      expect(fixture.generationActive, isFalse);
+      fixture.draftGate = Completer<void>();
+      await tester.pump(const Duration(milliseconds: 1300));
+      fixture.generationGate = Completer<void>();
+      await tester.tap(find.text('立即生成'));
+      await tester.pump();
+      expectMediaEnabled(false);
+      expect(fixture.immediateRequests, 1);
+      fixture.generationGate!.complete();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(milliseconds: 1200));
+      await tester.pump();
+      expect(
+        find.text('immediate-job'),
+        findsWidgets,
+        reason: '自动切到生成队列并展示当前任务',
+      );
+      expect(fixture.jobs, hasLength(3));
+      expect(
+        fixture.jobs.take(2).every((job) => job['status'] == 'queued'),
+        isTrue,
+      );
+      expect(fixture.batchRequests, 0);
+      await capture(tester, 'immediate-generation-queue');
+      await tester.tap(find.text('操作台'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      fixture.draftGate!.complete();
+      await tester.pump();
+      await tester.pump();
+      expectMediaEnabled(false);
+      await capture(tester, 'workbench-generating-locked');
+      fixture.draftGate = null;
+      fixture.generationActive = false;
+      fixture.activeJob = null;
+      fixture.jobs.last['status'] = 'completed';
+      await tester.pump(const Duration(milliseconds: 1300));
+      await tester.pump();
+      expectMediaEnabled(true);
+      await tester.tap(find.text('生成队列'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(milliseconds: 1200));
+      await tester.pump();
+      fixture.generationGate = Completer<void>();
+      await tester.tap(find.text('执行生成'));
+      await tester.pump();
+      expect(fixture.batchRequests, 1);
+      await tester.tap(find.text('操作台'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expectMediaEnabled(false);
+      fixture.generationGate!.complete();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1300));
+      await tester.pump();
+      expectMediaEnabled(false);
+      fixture.generationActive = false;
+      fixture.activeJob = null;
+      await tester.pump(const Duration(milliseconds: 1300));
+      await tester.pump();
+      expectMediaEnabled(true);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+  );
+
+  for (final scenario in ['提交拒绝', '连接失败', '提交中销毁']) {
+    testWidgets(
+      '立即生成$scenario 后恢复或清理共享状态',
+      (tester) async {
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        fixture.generationFailed = scenario == '提交拒绝';
+        fixture.generationNetworkFailed = scenario == '连接失败';
+        fixture.generationGate = Completer<void>();
+        await show(tester, const WorkspacePage(), const Size(1384, 661));
+        await tester.tap(find.text('立即生成'));
+        await tester.pump();
+        if (scenario == '提交中销毁') await tester.pumpWidget(const SizedBox());
+        fixture.generationGate!.complete();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 1300));
+        await tester.pump();
+        if (scenario != '提交中销毁') {
+          final upload = find.ancestor(
+            of: find.text('上传人脸图片'),
+            matching: find.byWidgetPredicate((w) => w is FilledButton),
+          );
+          expect(tester.widget<FilledButton>(upload).onPressed, isNotNull);
+        }
+        await tester.pumpWidget(const SizedBox());
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.windows),
+    );
+  }
 
   testWidgets('三格在多尺寸和字体缩放下可见，底部预览保持原调用与按钮顺序', (tester) async {
     addTearDown(tester.view.resetPhysicalSize);

@@ -18,24 +18,74 @@ import 'package:webview_all/webview_all.dart';
 
 import 'workspace_options_panel.dart';
 
-class WorkspacePage extends StatelessWidget {
+class WorkspacePage extends StatefulWidget {
   const WorkspacePage({super.key});
 
   @override
+  State<WorkspacePage> createState() => _WorkspacePageState();
+}
+
+// 两个标签页共用提交/运行状态；旧轮询不能覆盖一次更新后的状态。
+class _WorkspaceGenerationState extends ChangeNotifier {
+  bool _running = false;
+  bool submitting = false;
+  int revision = 0;
+  bool get active => _running || submitting;
+
+  bool begin() {
+    if (active) return false;
+    submitting = true;
+    revision++;
+    notifyListeners();
+    return true;
+  }
+
+  void finish(bool? running) {
+    submitting = false;
+    _running = running ?? true;
+    revision++;
+    notifyListeners();
+  }
+
+  void apply(bool running, int observedRevision) {
+    if (submitting || revision != observedRevision || _running == running) {
+      return;
+    }
+    _running = running;
+    revision++;
+    notifyListeners();
+  }
+}
+
+class _WorkspacePageState extends State<WorkspacePage> {
+  final _generation = _WorkspaceGenerationState();
+
+  @override
+  void dispose() {
+    _generation.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return const DefaultTabController(
+    return DefaultTabController(
       length: 2,
       child: Column(
         children: [
-          TabBar(
+          const TabBar(
             tabs: [
               Tab(height: 32, text: '操作台'),
               Tab(height: 32, text: '生成队列'),
             ],
           ),
-          SizedBox(height: 4),
+          const SizedBox(height: 4),
           Expanded(
-            child: TabBarView(children: [_OperationWorkbench(), _QueueBoard()]),
+            child: TabBarView(
+              children: [
+                _OperationWorkbench(generation: _generation),
+                _QueueBoard(generation: _generation),
+              ],
+            ),
           ),
         ],
       ),
@@ -123,7 +173,8 @@ Future<String?> _showPersonaNameDialog(BuildContext context) async {
 }
 
 class _OperationWorkbench extends StatefulWidget {
-  const _OperationWorkbench();
+  const _OperationWorkbench({required this.generation});
+  final _WorkspaceGenerationState generation;
 
   @override
   State<_OperationWorkbench> createState() => _OperationWorkbenchState();
@@ -173,10 +224,16 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
   bool get wantKeepAlive => true;
 
   bool get _useNativeWorkbenchMode => Platform.isWindows;
+  bool get _generationActive => widget.generation.active;
+
+  void _generationChanged() {
+    if (mounted) setState(() {});
+  }
 
   @override
   void initState() {
     super.initState();
+    widget.generation.addListener(_generationChanged);
     if (!_useNativeWorkbenchMode) {
       _initController();
     } else {
@@ -249,6 +306,7 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
 
   @override
   void dispose() {
+    widget.generation.removeListener(_generationChanged);
     _pollTimer?.cancel();
     _sourceProgressTimer?.cancel();
     super.dispose();
@@ -300,6 +358,7 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
     }
     _requestInFlight = true;
     final draftRevision = _workspaceDraftRevision;
+    final generationRevision = widget.generation.revision;
     try {
       final results = await Future.wait<dynamic>([
         _client.getStatus(),
@@ -327,6 +386,12 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
       }
 
       final wasReady = _serviceState == 'ready';
+      if (_useNativeWorkbenchMode) {
+        widget.generation.apply(
+          (results[1] as Map<String, dynamic>)['generation_active'] == true,
+          generationRevision,
+        );
+      }
 
       setState(() {
         _bridgeOnline = true;
@@ -361,7 +426,7 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
     Map<String, dynamic> payload, {
     bool clearPreview = true,
   }) async {
-    if (_actionInFlight) {
+    if (_actionInFlight || _generationActive) {
       return;
     }
     setState(() {
@@ -462,7 +527,12 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
 
   Future<void> _previewWorkspace() async {
     final currentDraft = _workspaceDraft;
-    if (_previewInFlight || currentDraft == null || !currentDraft.canSubmit) {
+    if (_generationActive ||
+        _sourceImporting ||
+        _targetImporting ||
+        _previewInFlight ||
+        currentDraft == null ||
+        !currentDraft.canSubmit) {
       return;
     }
     setState(() {
@@ -684,7 +754,12 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
   }
 
   Future<void> _pickSourceFiles([List<XFile>? droppedFiles]) async {
-    if (_actionInFlight || _previewInFlight || _sourceImporting) return;
+    if (_generationActive ||
+        _actionInFlight ||
+        _previewInFlight ||
+        _sourceImporting) {
+      return;
+    }
     // 先在文件窗口下方绘制等待态，窗口关闭后不必再等原生清理回调。
     setState(() {
       _sourceImporting = true;
@@ -718,7 +793,7 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
               ),
             ],
           );
-      if (!mounted || files.isEmpty || _actionInFlight) {
+      if (!mounted || files.isEmpty || _actionInFlight || _generationActive) {
         return;
       }
       final requestId =
@@ -806,11 +881,12 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
   }
 
   Future<void> _pickPersona() async {
+    if (_generationActive) return;
     final persona = await showDialog<_PersonaChoice>(
       context: context,
       builder: (context) => _PersonaPickerDialog(client: _client),
     );
-    if (!mounted || persona == null) {
+    if (!mounted || persona == null || _generationActive) {
       return;
     }
     await _invokeWorkspaceAction(() async {
@@ -845,7 +921,12 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
   }
 
   Future<void> _pickTargetFile([List<XFile>? droppedFiles]) async {
-    if (_actionInFlight || _previewInFlight || _targetImporting) return;
+    if (_generationActive ||
+        _actionInFlight ||
+        _previewInFlight ||
+        _targetImporting) {
+      return;
+    }
     setState(() => _targetImporting = true);
     try {
       await WidgetsBinding.instance.endOfFrame;
@@ -871,7 +952,7 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
               ),
             ],
           );
-      if (!mounted || files.isEmpty || _actionInFlight) {
+      if (!mounted || files.isEmpty || _actionInFlight || _generationActive) {
         return;
       }
       await WidgetsBinding.instance.endOfFrame;
@@ -938,6 +1019,7 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
   }
 
   Future<void> _queueWorkspace() async {
+    if (_generationActive || _sourceImporting || _targetImporting) return;
     await _invokeWorkspaceAction(() async {
       final result = await _client.queueWorkspace();
       if (result['ok'] == true) {
@@ -953,10 +1035,22 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
   }
 
   Future<void> _runWorkspace() async {
+    if (_actionInFlight ||
+        _previewInFlight ||
+        _sourceImporting ||
+        _targetImporting ||
+        !widget.generation.begin()) {
+      return;
+    }
     await _invokeWorkspaceAction(() async {
       final result = await _client.runWorkspace();
+      if (!mounted) return;
+      final queue = result['queue'] as Map<String, dynamic>?;
+      final runner = queue?['runner'] as Map<String, dynamic>?;
+      widget.generation.finish(runner?['active'] == true);
       if (result['ok'] == true) {
-        _workspaceMessage = '已提交并开始生成：${result['job_id']}';
+        _workspaceMessage = '已在生成队列中开始当前任务：${result['job_id']}';
+        if (mounted) DefaultTabController.of(context).animateTo(1);
       } else {
         _workspaceMessage = '${result['message'] ?? '提交生成失败。'}';
       }
@@ -965,6 +1059,7 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
         _workspaceDraft = _WorkspaceDraft.fromJson(workspace);
       }
     });
+    if (mounted && widget.generation.submitting) widget.generation.finish(null);
   }
 
   Future<void> _invokeWorkspaceAction(
@@ -1006,10 +1101,12 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
 
         if (_useNativeWorkbenchMode) {
           return _NativeWorkbenchPane(
-            actionBusy: _actionInFlight || _previewInFlight,
+            actionBusy:
+                _generationActive || _actionInFlight || _previewInFlight,
             bridgeOnline: _bridgeOnline,
             webUiReady: _isWebUiReady,
             busy:
+                _generationActive ||
                 _actionInFlight ||
                 _previewInFlight ||
                 _sourceImporting ||
@@ -3038,8 +3135,7 @@ class _WorkspaceSubmitPanel extends StatelessWidget {
         builder: (context, constraints) {
           final minButtonWidth =
               136 * MediaQuery.textScalerOf(context).scale(13) / 13;
-          final columns =
-              constraints.maxWidth >= minButtonWidth * 4 + gap * 3
+          final columns = constraints.maxWidth >= minButtonWidth * 4 + gap * 3
               ? 4
               : 2;
           final availableButtonWidth =
@@ -3236,7 +3332,8 @@ class _PreviewFaceChoice {
 }
 
 class _QueueBoard extends StatefulWidget {
-  const _QueueBoard();
+  const _QueueBoard({required this.generation});
+  final _WorkspaceGenerationState generation;
 
   @override
   State<_QueueBoard> createState() => _QueueBoardState();
@@ -3255,18 +3352,24 @@ class _QueueBoardState extends State<_QueueBoard>
   List<_QueueTask> _queueTasks = <_QueueTask>[];
   _QueueRunnerState _queueRunnerState = const _QueueRunnerState();
 
+  void _generationChanged() {
+    if (mounted) setState(() {});
+  }
+
   @override
   bool get wantKeepAlive => true;
 
   @override
   void initState() {
     super.initState();
+    widget.generation.addListener(_generationChanged);
     _refresh();
     _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) => _refresh());
   }
 
   @override
   void dispose() {
+    widget.generation.removeListener(_generationChanged);
     _pollTimer?.cancel();
     super.dispose();
   }
@@ -3286,6 +3389,7 @@ class _QueueBoardState extends State<_QueueBoard>
       return;
     }
     _requestInFlight = true;
+    final generationRevision = widget.generation.revision;
     try {
       final status = await _client.getStatus();
       final queue = await _client.getQueueTasks();
@@ -3293,6 +3397,11 @@ class _QueueBoardState extends State<_QueueBoard>
       if (!mounted) {
         return;
       }
+
+      widget.generation.apply(
+        (queue['runner'] as Map<String, dynamic>?)?['active'] == true,
+        generationRevision,
+      );
 
       setState(() {
         _bridgeOnline = '${status['state'] ?? ''}' != 'bridge_offline';
@@ -3328,7 +3437,9 @@ class _QueueBoardState extends State<_QueueBoard>
   }
 
   Future<void> _runQueue() async {
-    if (_queueRunInFlight || _queueRunnerState.active) {
+    if (_queueRunInFlight ||
+        _queueRunnerState.active ||
+        !widget.generation.begin()) {
       return;
     }
     setState(() {
@@ -3336,11 +3447,16 @@ class _QueueBoardState extends State<_QueueBoard>
     });
     try {
       final result = await _client.runQueue();
+      if (!mounted) return;
       final runner = result['runner'] as Map<String, dynamic>?;
+      widget.generation.finish(runner?['active'] == true);
       if (runner != null && runner['active'] == true) {
         _showMessage('队列已开始执行。');
       }
     } catch (error) {
+      if (mounted && widget.generation.submitting) {
+        widget.generation.finish(null);
+      }
       _showMessage('执行队列失败：$error');
     } finally {
       await Future<void>.delayed(const Duration(milliseconds: 350));
@@ -3557,7 +3673,7 @@ class _QueueBoardState extends State<_QueueBoard>
           children: [
             Expanded(
               child: Text(
-                '生成队列会接收操作台里“添加到队列”的任务，并按提交顺序逐条执行。',
+                '立即生成只执行当前任务；添加到队列后，点击“执行生成”才会批量执行待办。',
                 style: theme.textTheme.bodyLarge?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -3584,6 +3700,7 @@ class _QueueBoardState extends State<_QueueBoard>
                       _bridgeOnline &&
                           _queueTasks.any((task) => task.status == 'queued') &&
                           !runner.active &&
+                          !widget.generation.active &&
                           !_queueRunInFlight
                       ? _runQueue
                       : null,
