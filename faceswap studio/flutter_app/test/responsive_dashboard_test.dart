@@ -25,6 +25,13 @@ class _Fixture extends HttpOverrides {
   Completer<void>? targetGate;
   int sourceProcessed = 0;
   bool sourceFailed = false;
+  bool targetFailed = false;
+  bool parallelImports = false;
+  Completer<void>? draftGate;
+  String? committedSource;
+  String? committedTarget;
+  late String importedFacePath;
+  late String importedTargetPath;
   int sourceRequests = 0;
   int targetRequests = 0;
   int faceCount = 0;
@@ -43,21 +50,34 @@ class _Fixture extends HttpOverrides {
           'skipped': 0,
         };
       case '/workspace/draft/extract-source-faces':
+        if (parallelImports && !sourceFailed) {
+          committedSource = importedFacePath;
+        }
         return {
           'ok': !sourceFailed,
           'message': sourceFailed ? '未检测到可用人脸' : '已提取源脸',
           'workspace': {
-            'source_paths': [imagePath],
-            'source_thumbnail': imagePath,
+            'source_paths': [
+              parallelImports ? committedSource ?? imagePath : imagePath,
+            ],
+            'source_thumbnail': parallelImports
+                ? committedSource ?? imagePath
+                : imagePath,
+            // 故意返回另一侧的旧快照，验证前端只合并本次导入的区域。
+            if (parallelImports) 'target_path': imagePath,
+            if (parallelImports) 'target_thumbnail': imagePath,
+            if (parallelImports) 'target_media_type': 'image',
           },
         };
       case '/workspace/draft/target-path':
+        if (targetFailed) throw const SocketException('测试视频读取失败');
+        if (parallelImports) committedTarget = importedTargetPath;
         return {
           'source_paths': [imagePath],
-          'target_path': imagePath,
+          'target_path': parallelImports ? committedTarget : imagePath,
           'target_media_type': 'image',
           'source_thumbnail': imagePath,
-          'target_thumbnail': imagePath,
+          'target_thumbnail': parallelImports ? committedTarget : imagePath,
         };
       case '/facefusion/status':
         if (!online) throw const SocketException('测试离线状态');
@@ -67,6 +87,16 @@ class _Fixture extends HttpOverrides {
           'webui_url': 'http://127.0.0.1:7860',
         };
       case '/workspace/draft':
+        if (parallelImports) {
+          return {
+            'source_paths': [committedSource ?? imagePath],
+            'source_thumbnail': committedSource ?? imagePath,
+            'target_path': committedTarget ?? imagePath,
+            'target_thumbnail': committedTarget ?? imagePath,
+            'target_media_type': 'image',
+            'can_submit': true,
+          };
+        }
         return {
           'source_paths': [imagePath],
           // 视频控件布局独立于本机解码器；不创建真实的原生视频播放器。
@@ -191,6 +221,11 @@ class _Request extends Fake implements HttpClientRequest {
 
   @override
   Future<HttpClientResponse> close() async {
+    if (url.path == '/workspace/draft' && fixture.draftGate != null) {
+      final snapshot = jsonEncode(fixture.response(url, body));
+      await fixture.draftGate!.future;
+      return _Response(snapshot);
+    }
     if (url.path == '/workspace/preview') await fixture.previewGate?.future;
     if (url.path == '/workspace/draft/extract-source-faces') {
       fixture.sourceRequests++;
@@ -536,6 +571,154 @@ void main() {
     },
     variant: TargetPlatformVariant.only(TargetPlatform.windows),
   );
+
+  for (final scenario in ['视频先完成', '人脸先完成', '人脸失败', '视频失败']) {
+    final targetFirst = scenario != '人脸先完成';
+    testWidgets(
+      '人脸和视频同时导入，$scenario 且旧刷新不能覆盖',
+      (tester) async {
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        const picker = MethodChannel('faceswap_studio/file_dialog');
+        fixture.parallelImports = true;
+        fixture.sourceFailed = scenario == '人脸失败';
+        fixture.targetFailed = scenario == '视频失败';
+        fixture.importedFacePath = '${temp.path}/recognized-face.png';
+        fixture.importedTargetPath = '${temp.path}/new-target.png';
+        for (final path in [
+          fixture.importedFacePath,
+          fixture.importedTargetPath,
+        ]) {
+          File(fixture.imagePath).copySync(path);
+          final decoded = await tester.runAsync(() async {
+            final codec = await ui.instantiateImageCodec(
+              File(path).readAsBytesSync(),
+            );
+            final frame = await codec.getNextFrame();
+            codec.dispose();
+            return frame.image;
+          });
+          PaintingBinding.instance.imageCache.putIfAbsent(
+            FileImage(File(path)),
+            () => OneFrameImageStreamCompleter(
+              Future.value(ImageInfo(image: decoded!)),
+            ),
+          );
+        }
+        fixture.sourceGate = Completer<void>();
+        fixture.targetGate = Completer<void>();
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          picker,
+          (call) async => (call.arguments as Map)['multiple'] == true
+              ? [r'D:\素材\face.jpg']
+              : [r'D:\素材\video.mp4'],
+        );
+        addTearDown(
+          () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            picker,
+            null,
+          ),
+        );
+        await show(tester, const WorkspacePage(), const Size(1384, 661));
+        final sourceLoading = find.byKey(
+          const ValueKey('source-import-loading'),
+        );
+        final targetLoading = find.byKey(
+          const ValueKey('target-import-loading'),
+        );
+        FilledButton button(String label) => tester.widget<FilledButton>(
+          find
+              .ancestor(
+                of: find.text(label),
+                matching: find.byWidgetPredicate(
+                  (widget) => widget is FilledButton,
+                ),
+              )
+              .first,
+        );
+        Future<void> pick(String label) async {
+          await tester.tap(find.text(label));
+          await tester.pump();
+          await tester.pump();
+        }
+
+        if (targetFirst) {
+          await pick('上传人脸图片');
+          expect(button('更换视频').onPressed, isNotNull, reason: '人脸识别不阻塞视频入口');
+          if (scenario == '视频先完成') {
+            await capture(tester, 'parallel-face-loading-video-enabled');
+          }
+          await pick('更换视频');
+        } else {
+          await pick('更换视频');
+          expect(button('上传人脸图片').onPressed, isNotNull, reason: '视频读取也不阻塞人脸入口');
+          await pick('上传人脸图片');
+        }
+        expect(fixture.sourceRequests, 1);
+        expect(fixture.targetRequests, 1);
+        expect(sourceLoading, findsOneWidget);
+        expect(targetLoading, findsOneWidget);
+        expect(button('上传人脸图片').onPressed, isNull);
+        expect(button('更换视频').onPressed, isNull);
+        expect(button('生成预览').onPressed, isNull);
+        // 保留一份导入尚未完成时的定时刷新快照，故意延迟到两边完成后交付。
+        fixture.draftGate = Completer<void>();
+        await tester.pump(const Duration(seconds: 2));
+        if (targetFirst) {
+          fixture.targetGate!.complete();
+        } else {
+          fixture.sourceGate!.complete();
+        }
+        await finishPreview(tester);
+        expect(button(targetFirst ? '更换视频' : '上传人脸图片').onPressed, isNotNull);
+        expect(button(targetFirst ? '上传人脸图片' : '更换视频').onPressed, isNull);
+        expect(targetFirst ? sourceLoading : targetLoading, findsOneWidget);
+        expect(button('生成预览').onPressed, isNull, reason: '另一份素材仍未完成');
+        if (targetFirst) {
+          fixture.sourceGate!.complete();
+        } else {
+          fixture.targetGate!.complete();
+        }
+        await finishPreview(tester);
+        expect(button('生成预览').onPressed, isNotNull);
+        expect(
+          find.text(
+            fixture.sourceFailed ? 'portrait.png' : 'recognized-face.png',
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.text(fixture.targetFailed ? 'portrait.png' : 'new-target.png'),
+          findsOneWidget,
+        );
+        fixture.draftGate!.complete();
+        await tester.pump();
+        await tester.pump();
+        expect(
+          find.text(
+            fixture.sourceFailed ? 'portrait.png' : 'recognized-face.png',
+          ),
+          findsOneWidget,
+          reason: '旧刷新不能回退源脸',
+        );
+        expect(
+          find.text(fixture.targetFailed ? 'portrait.png' : 'new-target.png'),
+          findsOneWidget,
+          reason: '旧刷新不能回退目标',
+        );
+        expect(sourceLoading, findsNothing);
+        expect(targetLoading, findsNothing);
+        await capture(
+          tester,
+          'parallel-import-${targetFirst ? 'target' : 'source'}-first',
+        );
+        await tester.pumpWidget(const SizedBox());
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.windows),
+    );
+  }
 
   testWidgets(
     '取消文件选择后立即恢复原图片和按钮',

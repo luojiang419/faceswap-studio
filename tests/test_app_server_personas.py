@@ -2,6 +2,7 @@ import importlib.util
 import json
 from pathlib import Path
 import threading
+from concurrent.futures import ThreadPoolExecutor
 import pytest
 from types import SimpleNamespace
 
@@ -205,6 +206,48 @@ def test_extract_workspace_source_faces_updates_workspace_from_worker_result(tmp
 
 	assert result['ok'] is True
 	assert result['workspace']['source_paths'] == [ str(extracted_path) ]
+
+
+@pytest.mark.parametrize('extract_ok', [True, False])
+def test_target_import_completes_while_source_extraction_waits(tmp_path : Path, extract_ok : bool) -> None:
+	runtime = create_runtime(tmp_path)
+	previous_source = create_source_image(runtime, 'previous-face.png')
+	source_path = create_source_image(runtime, 'full-body.png')
+	extracted_path = create_source_image(runtime, 'extracted_faces/batch/001.png')
+	target_path = create_source_image(runtime, 'target.png')
+	runtime.set_workspace_source_paths([str(previous_source)])
+	started = threading.Event()
+	release = threading.Event()
+
+	def fake_extract(image_paths : list[str]) -> dict:
+		started.set()
+		assert release.wait(5), '测试识别等待未被释放'
+		return {
+			'ok': extract_ok,
+			'faces': [{'source_path': image_paths[0], 'face_path': str(extracted_path)}] if extract_ok else [],
+			'skipped': []
+		}
+
+	runtime._run_source_face_extractor = fake_extract
+	with ThreadPoolExecutor(max_workers = 2) as executor:
+		source_future = executor.submit(runtime.extract_workspace_source_faces, [str(source_path)])
+		try:
+			assert started.wait(3)
+			target_future = executor.submit(runtime.set_workspace_target_path, str(target_path))
+			target_result = target_future.result(timeout = 3)
+			assert target_result['target_path'] == str(target_path)
+			assert not source_future.done(), '视频应在人脸识别完成之前返回'
+		finally:
+			release.set()
+		source_result = source_future.result(timeout = 3)
+
+	assert source_result['ok'] is extract_ok
+	state = runtime.workspace_state()
+	assert state['target_path'] == str(target_path)
+	assert state['source_paths'] == [str(extracted_path if extract_ok else previous_source)]
+	saved = json.loads(runtime._workspace_state_path.read_text(encoding = 'utf-8'))
+	assert saved['source_paths'] == state['source_paths']
+	assert saved['target_path'] == state['target_path']
 
 
 def test_save_persona_from_images_does_not_change_workspace(tmp_path : Path) -> None:

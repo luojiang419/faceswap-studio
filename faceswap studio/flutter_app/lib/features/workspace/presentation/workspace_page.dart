@@ -142,6 +142,7 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
   bool _actionInFlight = false;
   bool _sourceImporting = false;
   bool _targetImporting = false;
+  int _workspaceDraftRevision = 0;
   int _sourceProcessed = 0;
   int _sourceTotal = 0;
   int _sourceRecognized = 0;
@@ -295,6 +296,7 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
       return;
     }
     _requestInFlight = true;
+    final draftRevision = _workspaceDraftRevision;
     try {
       final results = await Future.wait<dynamic>([
         _client.getStatus(),
@@ -327,7 +329,9 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
         _bridgeOnline = true;
         _serviceState = state;
         _webuiUrl = webuiUrl;
-        _workspaceDraft = workspaceDraft ?? _workspaceDraft;
+        if (draftRevision == _workspaceDraftRevision) {
+          _workspaceDraft = workspaceDraft ?? _workspaceDraft;
+        }
         _workspaceOptionsState =
             workspaceOptionsState ?? _workspaceOptionsState;
         _workspaceOptionsSchema =
@@ -666,8 +670,18 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
 
   bool get _isWebUiReady => _serviceState == 'ready';
 
+  void _applyImportedDraft(Map<String, dynamic> json, {required bool source}) {
+    final incoming = _WorkspaceDraft.fromJson(json);
+    final current = _workspaceDraft ?? const _WorkspaceDraft.empty();
+    _workspaceDraft = _WorkspaceDraft.withMedia(
+      source: source ? incoming : current,
+      target: source ? current : incoming,
+    );
+    _workspaceDraftRevision++;
+  }
+
   Future<void> _pickSourceFiles() async {
-    if (_actionInFlight || _sourceImporting || _targetImporting) return;
+    if (_actionInFlight || _previewInFlight || _sourceImporting) return;
     // 先在文件窗口下方绘制等待态，窗口关闭后不必再等原生清理回调。
     setState(() {
       _sourceImporting = true;
@@ -758,8 +772,8 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
           requestId: requestId,
         );
         final workspace = result['workspace'] as Map<String, dynamic>?;
-        if (workspace != null) {
-          _workspaceDraft = _WorkspaceDraft.fromJson(workspace);
+        if (result['ok'] == true && workspace != null) {
+          _applyImportedDraft(workspace, source: true);
         }
         if (result['ok'] == true) {
           _sourceProcessed = _sourceTotal;
@@ -777,7 +791,7 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
         _workspacePreviewResult = null;
         _lastVideoFrameTotal = null;
         _previewMessage = '源文件已更新，请重新生成预览。';
-      });
+      }, independentImport: true);
     } finally {
       _sourceProgressTimer?.cancel();
       _sourceRequestId = null;
@@ -825,7 +839,7 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
   }
 
   Future<void> _pickTargetFile() async {
-    if (_actionInFlight || _sourceImporting || _targetImporting) return;
+    if (_actionInFlight || _previewInFlight || _targetImporting) return;
     setState(() => _targetImporting = true);
     try {
       await WidgetsBinding.instance.endOfFrame;
@@ -862,12 +876,12 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
       if (!mounted) return;
       await _invokeWorkspaceAction(() async {
         final draft = await _client.setWorkspaceTargetPath(files.single.path);
-        _workspaceDraft = _WorkspaceDraft.fromJson(draft);
+        _applyImportedDraft(draft, source: false);
         _workspaceMessage = '已更新目标文件。';
         _workspacePreviewResult = null;
         _lastVideoFrameTotal = null;
         _previewMessage = '目标文件已更新，请重新生成预览。';
-      });
+      }, independentImport: true);
     } finally {
       if (mounted) setState(() => _targetImporting = false);
     }
@@ -951,13 +965,16 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
     });
   }
 
-  Future<void> _invokeWorkspaceAction(Future<void> Function() action) async {
-    if (_actionInFlight) {
+  Future<void> _invokeWorkspaceAction(
+    Future<void> Function() action, {
+    bool independentImport = false,
+  }) async {
+    if (!independentImport && _actionInFlight) {
       return;
     }
-    setState(() {
-      _actionInFlight = true;
-    });
+    if (!independentImport) {
+      setState(() => _actionInFlight = true);
+    }
     try {
       await action();
     } catch (error) {
@@ -968,11 +985,9 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
         ).showSnackBar(SnackBar(content: Text(_workspaceMessage)));
       }
     } finally {
-      await _refresh();
-      if (mounted) {
-        setState(() {
-          _actionInFlight = false;
-        });
+      if (!independentImport) {
+        await _refresh();
+        if (mounted) setState(() => _actionInFlight = false);
       }
     }
   }
@@ -989,6 +1004,7 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
 
         if (_useNativeWorkbenchMode) {
           return _NativeWorkbenchPane(
+            actionBusy: _actionInFlight || _previewInFlight,
             bridgeOnline: _bridgeOnline,
             webUiReady: _isWebUiReady,
             busy:
@@ -1134,6 +1150,7 @@ class _NativeWorkbenchPane extends StatelessWidget {
     required this.bridgeOnline,
     required this.webUiReady,
     required this.busy,
+    required this.actionBusy,
     required this.previewBusy,
     required this.sourceImporting,
     required this.targetImporting,
@@ -1172,6 +1189,7 @@ class _NativeWorkbenchPane extends StatelessWidget {
   final bool bridgeOnline;
   final bool webUiReady;
   final bool busy;
+  final bool actionBusy;
   final bool previewBusy;
   final bool sourceImporting;
   final bool targetImporting;
@@ -1283,7 +1301,9 @@ class _NativeWorkbenchPane extends StatelessWidget {
                   currentDraft.primarySourceMediaType == 'image'
               ? () => onOpenSourcePreview()
               : null,
-          onPick: bridgeOnline && !busy ? onPickSourceFiles : null,
+          onPick: bridgeOnline && !actionBusy && !sourceImporting
+              ? onPickSourceFiles
+              : null,
           onClear: currentDraft.sourcePaths.isNotEmpty && !busy
               ? onClearSourceFiles
               : null,
@@ -1312,7 +1332,9 @@ class _NativeWorkbenchPane extends StatelessWidget {
                   currentDraft.targetMediaType != null
               ? () => onOpenTargetPreview()
               : null,
-          onPick: bridgeOnline && !busy ? onPickTargetFile : null,
+          onPick: bridgeOnline && !actionBusy && !targetImporting
+              ? onPickTargetFile
+              : null,
           onClear: currentDraft.targetPath != null && !busy
               ? onClearTargetFile
               : null,
@@ -2031,6 +2053,21 @@ class _WorkspaceDraft {
       outputRoot = '',
       outputDirectory = null,
       canSubmit = false;
+
+  factory _WorkspaceDraft.withMedia({
+    required _WorkspaceDraft source,
+    required _WorkspaceDraft target,
+  }) => _WorkspaceDraft(
+    sourcePaths: source.sourcePaths,
+    sourceThumbnail: source.sourceThumbnail,
+    targetPath: target.targetPath,
+    targetThumbnail: target.targetThumbnail,
+    targetMediaType: target.targetMediaType,
+    targetVideoFrameTotal: target.targetVideoFrameTotal,
+    outputRoot: target.outputRoot,
+    outputDirectory: target.outputDirectory,
+    canSubmit: source.sourcePaths.isNotEmpty && target.targetPath != null,
+  );
 
   factory _WorkspaceDraft.fromJson(Map<String, dynamic> json) {
     return _WorkspaceDraft(
