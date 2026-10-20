@@ -9,6 +9,7 @@
 #include <memory>
 
 #include "win32_window.h"
+#include "async_file_dialog.h"
 
 // A window that does nothing but host a Flutter view.
 class FlutterWindow : public Win32Window {
@@ -28,6 +29,7 @@ class FlutterWindow : public Win32Window {
  private:
   // The project to run.
   flutter::DartProject project_;
+  std::unique_ptr<AsyncFileDialog> file_dialog_;
   bool ask_before_close_ = true;
 
   // The Flutter instance hosted by this window.

@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:faceswap_studio/shared/services/bridge_client.dart';
+import 'package:faceswap_studio/shared/services/studio_file_picker.dart';
 import 'package:faceswap_studio/shared/widgets/studio_media_viewer.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
@@ -633,7 +634,8 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
   bool get _isWebUiReady => _serviceState == 'ready';
 
   Future<void> _pickSourceFiles() async {
-    final files = await openFiles(
+    final files = await pickStudioFiles(
+      context,
       acceptedTypeGroups: const [
         XTypeGroup(
           label: '源媒体',
@@ -719,7 +721,9 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
   }
 
   Future<void> _pickTargetFile() async {
-    final file = await openFile(
+    final files = await pickStudioFiles(
+      context,
+      multiple: false,
       acceptedTypeGroups: const [
         XTypeGroup(
           label: '目标媒体',
@@ -742,11 +746,11 @@ class _OperationWorkbenchState extends State<_OperationWorkbench>
         ),
       ],
     );
-    if (file == null) {
+    if (files.isEmpty) {
       return;
     }
     await _invokeWorkspaceAction(() async {
-      final draft = await _client.setWorkspaceTargetPath(file.path);
+      final draft = await _client.setWorkspaceTargetPath(files.single.path);
       _workspaceDraft = _WorkspaceDraft.fromJson(draft);
       _workspaceMessage = '已更新目标文件。';
       _workspacePreviewResult = null;

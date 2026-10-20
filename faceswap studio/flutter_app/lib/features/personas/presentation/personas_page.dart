@@ -7,6 +7,7 @@ import 'package:faceswap_studio/app/theme/studio_depth.dart';
 import 'package:faceswap_studio/shared/services/bridge_client.dart';
 import 'package:faceswap_studio/shared/widgets/studio_media_viewer.dart';
 import 'package:file_selector/file_selector.dart';
+import 'package:faceswap_studio/shared/services/studio_file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
@@ -746,7 +747,8 @@ class _AddPersonaDialogState extends State<_AddPersonaDialog> {
   }
 
   Future<void> _pickImages() async {
-    final files = await openFiles(
+    final files = await pickStudioFiles(
+      context,
       acceptedTypeGroups: const [_personaImageTypeGroup],
     );
     if (files.isEmpty) {
