@@ -13,6 +13,7 @@ import 'package:faceswap_studio/shared/widgets/studio_media_loading.dart';
 import 'package:faceswap_studio/shared/widgets/studio_hover_focus.dart';
 import 'package:faceswap_studio/shared/widgets/studio_file_drop_region.dart';
 import 'package:faceswap_studio/shared/widgets/studio_frame_scrubber.dart';
+import 'package:faceswap_studio/shared/widgets/studio_frame_range.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_all/webview_all.dart';
@@ -1452,6 +1453,9 @@ class _NativeWorkbenchPane extends StatelessWidget {
               : '待换脸素材已就绪。',
           filePath: currentDraft.targetPath,
           thumbnailPath: currentDraft.targetThumbnail,
+          initialPosition: Duration(
+            microseconds: (currentDraft.targetPreviewSeconds * 1000000).round(),
+          ),
           mediaType: currentDraft.targetMediaType,
           actionLabel: currentDraft.targetPath == null ? '选择待换脸视频' : '更换视频',
           onOpenPreview:
@@ -1615,6 +1619,7 @@ class _WorkspaceDraftCard extends StatelessWidget {
     this.imageLoading,
     this.videoDrop = false,
     this.framePreview,
+    this.initialPosition = Duration.zero,
     this.onDropFiles,
     required this.title,
     required this.subtitle,
@@ -1634,6 +1639,7 @@ class _WorkspaceDraftCard extends StatelessWidget {
   final Widget? imageLoading;
   final bool videoDrop;
   final StudioVideoFramePreview? framePreview;
+  final Duration initialPosition;
   final Future<void> Function(List<XFile>)? onDropFiles;
   final String title;
   final String subtitle;
@@ -1721,6 +1727,7 @@ class _WorkspaceDraftCard extends StatelessWidget {
                           (mediaType == 'video' && filePath != null
                               ? StudioInlineVideoPlayer(
                                   filePath: filePath!,
+                                  initialPosition: initialPosition,
                                   framePreview: framePreview,
                                   thumbnailPath: thumbnailPath,
                                   fit: BoxFit.contain,
@@ -2199,6 +2206,7 @@ class _WorkspaceDraft {
     required this.outputRoot,
     required this.outputDirectory,
     required this.canSubmit,
+    this.targetPreviewSeconds = 0,
   });
 
   const _WorkspaceDraft.empty()
@@ -2210,6 +2218,7 @@ class _WorkspaceDraft {
       targetVideoFrameTotal = null,
       outputRoot = '',
       outputDirectory = null,
+      targetPreviewSeconds = 0,
       canSubmit = false;
 
   factory _WorkspaceDraft.withMedia({
@@ -2222,6 +2231,7 @@ class _WorkspaceDraft {
     targetThumbnail: target.targetThumbnail,
     targetMediaType: target.targetMediaType,
     targetVideoFrameTotal: target.targetVideoFrameTotal,
+    targetPreviewSeconds: target.targetPreviewSeconds,
     outputRoot: target.outputRoot,
     outputDirectory: target.outputDirectory,
     canSubmit: source.sourcePaths.isNotEmpty && target.targetPath != null,
@@ -2238,6 +2248,8 @@ class _WorkspaceDraft {
       targetMediaType: json['target_media_type'] as String?,
       targetVideoFrameTotal: (json['target_video_frame_total'] as num?)
           ?.toInt(),
+      targetPreviewSeconds:
+          (json['target_preview_seconds'] as num?)?.toDouble() ?? 0,
       outputRoot: '${json['output_root'] ?? ''}',
       outputDirectory: json['output_directory'] as String?,
       canSubmit: json['can_submit'] == true,
@@ -2250,6 +2262,7 @@ class _WorkspaceDraft {
   final String? targetThumbnail;
   final String? targetMediaType;
   final int? targetVideoFrameTotal;
+  final double targetPreviewSeconds;
   final String outputRoot;
   final String? outputDirectory;
   final bool canSubmit;
@@ -2821,6 +2834,34 @@ class _WorkspacePreviewPanelState extends State<_WorkspacePreviewPanel> {
                                 });
                               },
                       ),
+                      if (_showVideoSlider)
+                        StudioFrameRange(
+                          total: videoFrameTotal!,
+                          currentFrame: currentFrame,
+                          start:
+                              (widget
+                                          .workspaceOptionsState
+                                          .options['trim_frame_start']
+                                      as num?)
+                                  ?.toInt(),
+                          end:
+                              (widget
+                                          .workspaceOptionsState
+                                          .options['trim_frame_end']
+                                      as num?)
+                                  ?.toInt(),
+                          onChanged:
+                              widget.busy ||
+                                  widget.previewBusy ||
+                                  !widget.bridgeOnline
+                              ? null
+                              : (start, end) {
+                                  widget.onUpdateOptions({
+                                    'trim_frame_start': start,
+                                    'trim_frame_end': end,
+                                  });
+                                },
+                        ),
                       SizedBox(height: widget.compact ? 10 : 12),
                     ],
                     _buildFaceSelectorControls(theme),

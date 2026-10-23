@@ -8,6 +8,8 @@ import 'package:faceswap_studio/features/workspace/presentation/workspace_page.d
 import 'package:faceswap_studio/shared/widgets/studio_brand_mark.dart';
 import 'package:faceswap_studio/shared/widgets/studio_hover_focus.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../../shared/services/studio_fullscreen.dart';
 
 enum StudioSection { home, workspace, personas, works, settings, about }
 
@@ -189,6 +191,18 @@ class _StudioShellState extends State<StudioShell> {
                   ),
                   const SizedBox(height: 12),
                   const Divider(),
+                  ValueListenableBuilder<bool>(
+                    valueListenable: StudioFullscreen.active,
+                    builder: (_, active, _) => IconButton(
+                      onPressed: StudioFullscreen.toggle,
+                      tooltip: active ? '退出软件全屏（F11）' : '软件全屏（F11）',
+                      icon: Icon(
+                        active
+                            ? Icons.fullscreen_exit_rounded
+                            : Icons.fullscreen_rounded,
+                      ),
+                    ),
+                  ),
                   IconButton(
                     onPressed: widget.onToggleTheme,
                     tooltip: widget.themeMode == ThemeMode.dark
@@ -228,6 +242,11 @@ class _StudioShellState extends State<StudioShell> {
         ),
       ),
     );
-    return StudioHoverFocus(child: page);
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.f11): StudioFullscreen.toggle,
+      },
+      child: Focus(autofocus: true, child: StudioHoverFocus(child: page)),
+    );
   }
 }

@@ -3134,10 +3134,21 @@ class FaceFusionRuntime:
 
     def update_workspace_options(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
-            self._workspace_options = self._normalize_workspace_options(
+            normalized = self._normalize_workspace_options(
                 payload,
                 dict(self._workspace_options),
             )
+            if 'trim_frame_start' in payload or 'trim_frame_end' in payload:
+                self._ensure_workspace_media_editable()
+                total = self._workspace_target_video_frame_total(self._workspace_state.get('target_path'))
+                if total:
+                    start = normalized.get('trim_frame_start')
+                    end = normalized.get('trim_frame_end')
+                    if start is not None: normalized['trim_frame_start'] = min(start, total - 1)
+                    if end is not None: normalized['trim_frame_end'] = min(end, total)
+                    if (normalized.get('trim_frame_start') or 0) >= (normalized.get('trim_frame_end') if normalized.get('trim_frame_end') is not None else total):
+                        raise HTTPException(status_code=400, detail='片段至少需要包含一帧，请调整 I/O 点。')
+            self._workspace_options = normalized
             self._save_workspace_options()
         self._append_log("[bridge] Updated workspace options draft.")
         return self.workspace_options_state()
@@ -3778,10 +3789,12 @@ class FaceFusionRuntime:
         manifest_payload["face_paths"] = [str(Path(path)) for path in payload.get("face_paths") or []]
         manifest_payload["source_paths"] = [str(Path(path)) for path in payload.get("source_paths") or []]
         manifest_payload["preview_path"] = str(Path(payload["preview_path"]))
-        (persona_dir / "manifest.json").write_text(
+        temporary = persona_dir / "manifest.json.tmp"
+        temporary.write_text(
             json.dumps(manifest_payload, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
+        temporary.replace(persona_dir / "manifest.json")
 
     def _read_extracted_face_score(self, face_path: str) -> float:
         path = Path(face_path)
@@ -3972,6 +3985,20 @@ class FaceFusionRuntime:
             "persona": persona,
             "workspace": workspace,
         }
+
+    def rename_persona(self, persona_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        name = self._sanitize_persona_name(payload.get("name"))
+        if not name:
+            raise HTTPException(status_code=400, detail="请输入人物形象名称。")
+        with self._lock:
+            directory = self._resolve_persona_dir(persona_id)
+            persona = self._read_persona_manifest(directory) if directory and directory.exists() else None
+            if not persona:
+                raise HTTPException(status_code=404, detail="人物形象不存在。")
+            persona["name"] = name
+            persona["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            self._write_persona_manifest(directory, persona)
+        return {"ok": True, "message": f"已重命名为：{name}", "persona": persona, **self.list_personas()}
 
     def delete_persona(self, persona_id: str) -> dict[str, Any]:
         persona_dir = self._resolve_persona_dir(persona_id)
@@ -4380,6 +4407,16 @@ class FaceFusionRuntime:
         target_media_type = self._media_type_for_path(target_path)
         source_thumbnail = self._find_workspace_source_thumbnail()
         target_thumbnail = self._resolve_thumbnail(target_path)
+        representative = self._workspace_representative(target_path) if target_media_type == "video" else {}
+        if representative.get("has_face"):
+            candidate = self._thumbnail_dir / (hashlib.sha1(
+                f"{target_path}|{Path(target_path).stat().st_mtime_ns}|face-preview".encode("utf-8")
+            ).hexdigest() + '.jpg')
+            if not candidate.exists():
+                frame = self._video_frame_thumbnail(str(Path(target_path).resolve()), Path(target_path).stat().st_mtime_ns,
+                                                    Path(target_path).stat().st_size, representative["frame"])
+                candidate.write_bytes(base64.b64decode(frame["image_base64"]))
+            target_thumbnail = str(candidate)
 
         return {
             "source_paths": source_paths,
@@ -4392,11 +4429,25 @@ class FaceFusionRuntime:
             "target_thumbnail_url": self._media_url_for_path(target_thumbnail),
             "target_media_type": target_media_type,
             "target_video_frame_total": self._workspace_target_video_frame_total(target_path),
+            "target_preview_frame": representative.get("frame", 0),
+            "target_preview_seconds": representative.get("seconds", 0.0),
+            "target_video_fps": representative.get("fps", 0.0),
             "output_root": str(self._output_dir),
             "output_directory": self._resolve_workspace_output_directory(target_path),
             "can_submit": bool(source_paths and target_path),
             "generation_active": self._queue_runner_active,
         }
+
+    @staticmethod
+    def _workspace_representative(target_path: str | None) -> dict[str, Any]:
+        if not target_path or not Path(target_path).is_file():
+            return {}
+        try:
+            from video_representative import representative_frame
+            stat = Path(target_path).stat()
+            return representative_frame(str(Path(target_path).resolve()), stat.st_mtime_ns, stat.st_size)
+        except (ImportError, OSError):
+            return {}
 
     @staticmethod
     @lru_cache(maxsize=96)
@@ -4469,9 +4520,15 @@ class FaceFusionRuntime:
         normalized = self._normalize_target_path(target_path)
         with self._queue_lock, self._lock:
             self._ensure_workspace_media_editable()
+            changed = normalized != self._workspace_state.get("target_path")
             self._workspace_state["target_path"] = normalized
             self._workspace_video_frame_total_cache = {}
             self._save_workspace_state()
+            if changed:
+                representative = self._workspace_representative(normalized) if normalized and Path(normalized).suffix.lower() in VIDEO_EXTENSIONS else {}
+                self._workspace_options.update(trim_frame_start=None, trim_frame_end=None,
+                                               preview_frame_number=representative.get("frame", 0))
+                self._save_workspace_options()
         self._append_log(f"[bridge] Updated workspace target path: {normalized or 'None'}.")
         return self.workspace_state()
 
@@ -6493,6 +6550,11 @@ def personas_use(persona_id: str) -> dict[str, Any]:
 @app.delete("/personas/{persona_id}")
 def personas_delete(persona_id: str) -> dict[str, Any]:
     return runtime.delete_persona(persona_id)
+
+
+@app.put("/personas/{persona_id}")
+def personas_rename(persona_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return runtime.rename_persona(persona_id, payload)
 
 
 @app.post("/personas/{persona_id}/open-directory")

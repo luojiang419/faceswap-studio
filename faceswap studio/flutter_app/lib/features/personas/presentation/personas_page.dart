@@ -240,6 +240,51 @@ class _PersonasPageState extends State<PersonasPage> {
     }
   }
 
+  Future<void> _renamePersona(_PersonaItem item) async {
+    final controller = TextEditingController(text: item.name);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('重命名人物形象'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 80,
+          decoration: const InputDecoration(labelText: '人物名称'),
+          onSubmitted: (value) {
+            if (value.trim().isNotEmpty) Navigator.pop(context, value.trim());
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (controller.text.trim().isNotEmpty) {
+                Navigator.pop(context, controller.text.trim());
+              }
+            },
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    // 等弹窗退场后再释放控制器，避免退出动画仍读取编辑状态。
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    controller.dispose();
+    if (!mounted || name == null || name == item.name) return;
+    try {
+      final result = await _client.renamePersona(item.id, name);
+      if (result['ok'] == false) throw StateError('${result['message']}');
+      await _refresh();
+      _showMessage('${result['message'] ?? '已更新人物名称。'}');
+    } catch (error) {
+      _showMessage('重命名失败：$error');
+    }
+  }
+
   Future<void> _deletePersona(_PersonaItem item) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -286,6 +331,12 @@ class _PersonasPageState extends State<PersonasPage> {
         return;
       case 'open':
         await _openDirectory(item);
+        return;
+      case 'rename':
+        await _renamePersona(item);
+        return;
+      case 'view':
+        await _openPersonaGallery(item);
         return;
       case 'delete':
         await _deletePersona(item);
@@ -569,6 +620,20 @@ class _PersonaCard extends StatelessWidget {
                                 color: theme.colorScheme.onSurface,
                               ),
                               itemBuilder: (_) => const [
+                                PopupMenuItem<String>(
+                                  value: 'rename',
+                                  child: _PersonaMenuLabel(
+                                    icon: Icons.edit_outlined,
+                                    label: '编辑名称 / 重命名',
+                                  ),
+                                ),
+                                PopupMenuItem<String>(
+                                  value: 'view',
+                                  child: _PersonaMenuLabel(
+                                    icon: Icons.photo_library_outlined,
+                                    label: '查看图片',
+                                  ),
+                                ),
                                 PopupMenuItem<String>(
                                   value: 'use',
                                   child: _PersonaMenuLabel(

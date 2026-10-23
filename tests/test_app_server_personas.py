@@ -98,6 +98,28 @@ def create_source_image(runtime : FaceFusionRuntime, name : str) -> Path:
 	return source_path
 
 
+def test_rename_persona_preserves_identity_images_and_workspace(tmp_path):
+	runtime = create_runtime(tmp_path)
+	source = create_source_image(runtime, 'face.png')
+	runtime.set_workspace_source_paths([str(source)])
+	persona = runtime.save_workspace_persona({'name': '原名称'})['persona']
+	before = dict(persona)
+	result = runtime.rename_persona(persona['id'], {'name': '  新名称  '})
+	assert result['ok']
+	assert result['persona']['name'] == '新名称'
+	assert result['persona']['id'] == before['id']
+	assert result['persona']['face_paths'] == before['face_paths']
+	assert runtime.list_personas()['items'][0]['name'] == '新名称'
+	assert runtime.workspace_state()['source_paths'] == [str(source)]
+	assert Path(persona['face_paths'][0]).read_bytes() == b'test-image'
+	with pytest.raises(APP_SERVER_MODULE.HTTPException) as error:
+		runtime.rename_persona(persona['id'], {'name': '  '})
+	assert error.value.status_code == 400
+	with pytest.raises(APP_SERVER_MODULE.HTTPException) as error:
+		runtime.rename_persona('../outside', {'name': 'bad'})
+	assert error.value.status_code == 404
+
+
 def test_source_progress_is_batch_scoped_and_does_not_hold_extraction_lock(tmp_path):
 	runtime = create_runtime(tmp_path)
 	path = runtime._source_progress_path('batch-a')

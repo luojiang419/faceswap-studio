@@ -203,6 +203,9 @@ class BridgeClient {
   Future<Map<String, dynamic>> deletePersona(String personaId) async =>
       _deleteJson('/personas/$personaId');
 
+  Future<Map<String, dynamic>> renamePersona(String personaId, String name) =>
+      _putJson('/personas/$personaId', {'name': name});
+
   Future<Map<String, dynamic>> openPersonaDirectory(String personaId) async =>
       _postJson('/personas/$personaId/open-directory');
 

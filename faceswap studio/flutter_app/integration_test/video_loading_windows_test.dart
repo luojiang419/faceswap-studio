@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:faceswap_studio/shared/services/studio_fullscreen.dart';
 
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -24,6 +25,7 @@ void main() {
                 child: StudioInlineVideoPlayer(
                   key: const ValueKey('test-video'),
                   filePath: path,
+                  initialPosition: const Duration(milliseconds: 1440),
                 ),
               ),
             ),
@@ -53,10 +55,18 @@ void main() {
         isFalse,
         reason: '加载首帧不应自动播放',
       );
+      expect(
+        video.controller.player.state.position.inMilliseconds,
+        greaterThanOrEqualTo(1300),
+      );
       expect(tester.takeException(), isNull);
     }
 
     await mount(first);
+    await tester.runAsync(StudioFullscreen.toggle);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(StudioFullscreen.active.value, isTrue);
+    expect(tester.view.physicalSize, const Size(1920, 1080));
     expect(find.byKey(const ValueKey('inline-video-loading')), findsOneWidget);
     await firstFrame();
     await mount(second);
@@ -64,6 +74,7 @@ void main() {
     await firstFrame();
     await mount(first);
     await tester.pumpWidget(const SizedBox());
+    await tester.runAsync(StudioFullscreen.toggle);
     await tester.pump(const Duration(milliseconds: 300));
     expect(tester.takeException(), isNull);
     binding.reportData = {

@@ -16,6 +16,40 @@ APP_SERVER_SPEC.loader.exec_module(APP_SERVER_MODULE)
 FaceFusionRuntime = APP_SERVER_MODULE.FaceFusionRuntime
 
 
+def test_clip_range_reaches_cli_and_validates_bounds(tmp_path):
+	runtime = create_runtime(tmp_path)
+	runtime._workspace_target_video_frame_total = lambda path: 551
+	runtime.update_workspace_options({'trim_frame_start': 106, 'trim_frame_end': 201})
+	args = runtime._workspace_step_option_cli_args(runtime._workspace_options)
+	assert args[args.index('--trim-frame-start') + 1] == '106'
+	assert args[args.index('--trim-frame-end') + 1] == '201'
+	runtime.update_workspace_options({'trim_frame_start': 550, 'trim_frame_end': 999})
+	assert runtime._workspace_options['trim_frame_end'] == 551
+	with pytest.raises(APP_SERVER_MODULE.HTTPException):
+		runtime.update_workspace_options({'trim_frame_start': 20, 'trim_frame_end': 20})
+	runtime.update_workspace_options({'trim_frame_start': None, 'trim_frame_end': None})
+	assert runtime._workspace_options['trim_frame_start'] is None
+	assert runtime._workspace_options['trim_frame_end'] is None
+	runtime._queue_runner_active = True
+	with pytest.raises(APP_SERVER_MODULE.HTTPException) as error:
+		runtime.update_workspace_options({'trim_frame_start': 0, 'trim_frame_end': 10})
+	assert error.value.status_code == 409
+
+
+def test_new_target_resets_clip_and_uses_face_frame(tmp_path):
+	runtime = create_runtime(tmp_path)
+	path = runtime._studio_root / 'new.mp4'
+	path.write_bytes(b'test')
+	runtime._workspace_target_video_frame_total = lambda target: 551
+	runtime._workspace_representative = lambda target: {'frame': 25, 'seconds': 1.0, 'fps': 25, 'has_face': False}
+	runtime._workspace_options.update(trim_frame_start=100, trim_frame_end=200)
+	result = runtime.set_workspace_target_path(str(path))
+	assert runtime._workspace_options['trim_frame_start'] is None
+	assert runtime._workspace_options['trim_frame_end'] is None
+	assert runtime._workspace_options['preview_frame_number'] == 25
+	assert result['target_preview_seconds'] == 1.0
+
+
 def create_runtime(tmp_path : Path) -> FaceFusionRuntime:
 	runtime = object.__new__(FaceFusionRuntime)
 	studio_root = tmp_path / 'studio-root'

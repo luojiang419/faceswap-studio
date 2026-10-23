@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import '../services/studio_fullscreen.dart';
 
 enum StudioComparisonMode { wipe, split, single }
 
@@ -608,7 +609,8 @@ Future<void> _showStudioVideoFullscreen(
   VideoController? controller,
   StudioVideoFramePreview? framePreview,
 }) async {
-  await defaultEnterNativeFullscreen();
+  final appFullscreen = StudioFullscreen.active.value;
+  if (!appFullscreen) await defaultEnterNativeFullscreen();
   try {
     if (!context.mounted) return;
     await showDialog<void>(
@@ -623,7 +625,7 @@ Future<void> _showStudioVideoFullscreen(
       ),
     );
   } finally {
-    await defaultExitNativeFullscreen();
+    if (!appFullscreen) await defaultExitNativeFullscreen();
   }
 }
 
@@ -633,7 +635,8 @@ Future<void> showStudioVideoComparisonViewer(
   required String afterFilePath,
   String? title,
 }) async {
-  await defaultEnterNativeFullscreen();
+  final appFullscreen = StudioFullscreen.active.value;
+  if (!appFullscreen) await defaultEnterNativeFullscreen();
   try {
     if (!context.mounted) return;
     await showDialog<void>(
@@ -646,7 +649,7 @@ Future<void> showStudioVideoComparisonViewer(
       ),
     );
   } finally {
-    await defaultExitNativeFullscreen();
+    if (!appFullscreen) await defaultExitNativeFullscreen();
   }
 }
 
@@ -705,6 +708,7 @@ class StudioInlineVideoPlayer extends StatefulWidget {
     this.onOpenFullscreen,
     this.showFullscreenButton = true,
     this.thumbnailControls = false,
+    this.initialPosition = Duration.zero,
   });
 
   final String filePath;
@@ -714,6 +718,7 @@ class StudioInlineVideoPlayer extends StatefulWidget {
   final VoidCallback? onOpenFullscreen;
   final bool showFullscreenButton;
   final bool thumbnailControls;
+  final Duration initialPosition;
 
   @override
   State<StudioInlineVideoPlayer> createState() =>
@@ -799,7 +804,10 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
       _ensureMediaKitReady();
       player = Player();
       controller = VideoController(player);
-      await player.open(Media(widget.filePath), play: false);
+      await player.open(
+        Media(widget.filePath, start: widget.initialPosition),
+        play: false,
+      );
     } catch (_) {
       await player?.dispose();
       if (!mounted || generation != _openGeneration) {
