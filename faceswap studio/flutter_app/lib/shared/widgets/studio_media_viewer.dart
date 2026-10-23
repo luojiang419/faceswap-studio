@@ -704,6 +704,7 @@ class StudioInlineVideoPlayer extends StatefulWidget {
     this.fit = BoxFit.cover,
     this.onOpenFullscreen,
     this.showFullscreenButton = true,
+    this.thumbnailControls = false,
   });
 
   final String filePath;
@@ -712,6 +713,7 @@ class StudioInlineVideoPlayer extends StatefulWidget {
   final BoxFit fit;
   final VoidCallback? onOpenFullscreen;
   final bool showFullscreenButton;
+  final bool thumbnailControls;
 
   @override
   State<StudioInlineVideoPlayer> createState() =>
@@ -733,7 +735,7 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
+      if (mounted && !widget.thumbnailControls) {
         _preparePlayer(playAfterOpen: false);
       }
     });
@@ -750,7 +752,7 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
       _failed = false;
       _playWhenReady = false;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
+        if (mounted && !widget.thumbnailControls) {
           _preparePlayer(playAfterOpen: false);
         }
       });
@@ -892,12 +894,16 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
   Future<void> _openFullscreen() async {
     if (_fullscreenOpen || _opening) return;
     _focusNode.requestFocus();
-    final player = _player ?? await _preparePlayer(playAfterOpen: false);
+    final player =
+        _player ??
+        await _preparePlayer(playAfterOpen: widget.thumbnailControls);
     if (!mounted) return;
     if (player == null || _controller == null) {
       widget.onOpenFullscreen?.call();
       return;
     }
+    if (widget.thumbnailControls && !player.state.playing) await player.play();
+    if (!mounted) return;
     setState(() => _fullscreenOpen = true);
     try {
       await _showStudioVideoFullscreen(
@@ -920,57 +926,60 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
     final theme = Theme.of(context);
     final player = _player;
     final controller = _controller;
-    return StudioVideoHotkeys(
-      focusNode: _focusNode,
-      onTogglePlayback: _togglePlayback,
-      onSeekRelative: (delta) =>
-          _seek((_player?.state.position ?? Duration.zero) + delta),
-      onFullscreen: _openFullscreen,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          GestureDetector(
-            key: const ValueKey('studio-video-surface'),
-            behavior: HitTestBehavior.opaque,
-            onTap: () {
-              _focusNode.requestFocus();
-              _togglePlayback();
-            },
-            onDoubleTap: _openFullscreen,
-            child: ColoredBox(
-              color: Colors.black,
-              child: player != null && controller != null && !_fullscreenOpen
-                  ? Video(
-                      controller: controller,
-                      fit: widget.fit,
-                      controls: NoVideoControls,
-                    )
-                  : widget.thumbnailPath != null
-                  ? Image.file(
-                      File(widget.thumbnailPath!),
-                      fit: widget.fit,
-                      errorBuilder: (_, _, _) => _InlineVideoPlaceholder(
-                        icon: Icons.movie_creation_outlined,
-                        color: theme.colorScheme.primary,
-                      ),
-                    )
-                  : _InlineVideoPlaceholder(
-                      icon: Icons.movie_creation_outlined,
-                      color: theme.colorScheme.primary,
-                    ),
-            ),
-          ),
-          if (_failed)
-            Center(
-              child: _InlineVideoBadge(
-                icon: Icons.error_outline_rounded,
-                label: '播放失败',
-                color: theme.colorScheme.error,
+    final video = ColoredBox(
+      color: Colors.black,
+      child: player != null && controller != null && !_fullscreenOpen
+          ? Video(
+              controller: controller,
+              fit: widget.fit,
+              controls: NoVideoControls,
+            )
+          : widget.thumbnailPath != null
+          ? Image.file(
+              File(widget.thumbnailPath!),
+              fit: widget.fit,
+              errorBuilder: (_, _, _) => _InlineVideoPlaceholder(
+                icon: Icons.movie_creation_outlined,
+                color: theme.colorScheme.primary,
               ),
             )
-          else if (_opening || _waitingForFirstFrame)
-            Positioned.fill(
-              key: const ValueKey('inline-video-loading'),
+          : _InlineVideoPlaceholder(
+              icon: Icons.movie_creation_outlined,
+              color: theme.colorScheme.primary,
+            ),
+    );
+    void toggle() {
+      _focusNode.requestFocus();
+      _togglePlayback();
+    }
+
+    final media = Stack(
+      fit: StackFit.expand,
+      children: [
+        video,
+        if (_failed)
+          Align(
+            alignment: widget.thumbnailControls
+                ? Alignment.bottomCenter
+                : Alignment.center,
+            child: Padding(
+              padding: const EdgeInsets.all(4),
+              child: FittedBox(
+                child: _InlineVideoBadge(
+                  icon: Icons.error_outline_rounded,
+                  label: '播放失败',
+                  color: theme.colorScheme.error,
+                ),
+              ),
+            ),
+          ),
+        if (!_failed &&
+            (_opening ||
+                (_waitingForFirstFrame &&
+                    (!widget.thumbnailControls || player != null))))
+          Positioned.fill(
+            key: const ValueKey('inline-video-loading'),
+            child: IgnorePointer(
               child: ColoredBox(
                 color: theme.brightness == Brightness.dark
                     ? const Color(0xFF20201E)
@@ -980,24 +989,56 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
                 ),
               ),
             ),
-          Positioned(
-            left: 6,
-            right: 6,
-            bottom: 6,
-            child: _StudioPlayerTransport(
-              player: player,
-              framePreview: _fullscreenOpen ? null : widget.framePreview,
-              enabled: !_opening && !_waitingForFirstFrame && !_failed,
-              onTogglePlayback: () {
-                _focusNode.requestFocus();
-                _togglePlayback();
-              },
-              onSeek: _seek,
-              onFullscreen: widget.showFullscreenButton
-                  ? _openFullscreen
-                  : null,
-            ),
           ),
+      ],
+    );
+    return StudioVideoHotkeys(
+      focusNode: _focusNode,
+      onTogglePlayback: _togglePlayback,
+      onSeekRelative: (delta) =>
+          _seek((_player?.state.position ?? Duration.zero) + delta),
+      onFullscreen: _openFullscreen,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (widget.thumbnailControls)
+            StreamBuilder<bool>(
+              stream: player?.stream.playing,
+              initialData: player?.state.playing ?? false,
+              builder: (context, playing) => StudioVideoThumbnailSurface(
+                playing: playing.data == true,
+                onTogglePlayback: toggle,
+                onFullscreen: _openFullscreen,
+                child: media,
+              ),
+            )
+          else
+            GestureDetector(
+              key: const ValueKey('studio-video-surface'),
+              behavior: HitTestBehavior.opaque,
+              onTap: toggle,
+              onDoubleTap: _openFullscreen,
+              child: media,
+            ),
+          if (!widget.thumbnailControls)
+            Positioned(
+              left: 6,
+              right: 6,
+              bottom: 6,
+              child: _StudioPlayerTransport(
+                player: player,
+                framePreview: _fullscreenOpen ? null : widget.framePreview,
+                enabled: !_opening && !_waitingForFirstFrame && !_failed,
+                onTogglePlayback: () {
+                  _focusNode.requestFocus();
+                  _togglePlayback();
+                },
+                onSeek: _seek,
+                onFullscreen: widget.showFullscreenButton
+                    ? _openFullscreen
+                    : null,
+              ),
+            ),
         ],
       ),
     );

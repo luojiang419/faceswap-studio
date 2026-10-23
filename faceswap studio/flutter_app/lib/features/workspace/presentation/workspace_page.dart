@@ -4104,6 +4104,7 @@ class _QueueMediaPreview extends StatelessWidget {
                       thumbnailPath: thumbnailPath,
                       fit: BoxFit.cover,
                       showFullscreenButton: showVideoOverlays,
+                      thumbnailControls: !showVideoOverlays,
                     )
                   : thumbnailPath == null
                   ? Icon(

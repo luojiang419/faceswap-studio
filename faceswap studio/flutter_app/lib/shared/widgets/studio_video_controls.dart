@@ -17,6 +17,81 @@ Duration clampStudioVideoPosition(Duration value, Duration duration) =>
       ),
     );
 
+/// 队列小格只保留居中的悬浮按钮；单击与双击由同一手势层区分。
+class StudioVideoThumbnailSurface extends StatefulWidget {
+  const StudioVideoThumbnailSurface({
+    super.key,
+    required this.child,
+    required this.playing,
+    required this.onTogglePlayback,
+    required this.onFullscreen,
+  });
+
+  final Widget child;
+  final bool playing;
+  final VoidCallback onTogglePlayback;
+  final VoidCallback onFullscreen;
+
+  @override
+  State<StudioVideoThumbnailSurface> createState() =>
+      _StudioVideoThumbnailSurfaceState();
+}
+
+class _StudioVideoThumbnailSurfaceState
+    extends State<StudioVideoThumbnailSurface> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+    cursor: SystemMouseCursors.click,
+    onEnter: (_) => setState(() => _hovered = true),
+    onExit: (_) => setState(() => _hovered = false),
+    child: Semantics(
+      button: true,
+      label: widget.playing ? '暂停视频' : '播放视频',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTogglePlayback,
+        onDoubleTap: widget.onFullscreen,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            widget.child,
+            IgnorePointer(
+              child: Center(
+                child: AnimatedOpacity(
+                  key: const ValueKey('thumbnail-play-button'),
+                  opacity: _hovered ? 1 : 0,
+                  duration: MediaQuery.disableAnimationsOf(context)
+                      ? Duration.zero
+                      : const Duration(milliseconds: 150),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.62),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white30),
+                    ),
+                    child: SizedBox.square(
+                      dimension: 40,
+                      child: Icon(
+                        widget.playing
+                            ? Icons.pause_rounded
+                            : Icons.play_arrow_rounded,
+                        color: Colors.white,
+                        size: 28,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
 /// 仅在播放器获得焦点时处理快捷键，避免影响其他页面输入。
 class StudioVideoHotkeys extends StatelessWidget {
   const StudioVideoHotkeys({
