@@ -114,6 +114,27 @@ public static class BootstrapTests {
                 string evil = Path.Combine(root, "evil.zip"); using (var zip = ZipFile.Open(evil, ZipArchiveMode.Create)) using (var stream = zip.CreateEntry("bundle/../../escape.bin").Open()) stream.Write(content, 0, content.Length);
                 Reject(() => Core.Extract(evil, Path.Combine(root, "stage2"), manifest, CancellationToken.None), "ZIP 越界通过");
             });
+            Run("离线全量包只用相邻可信资源，拒绝缺失损坏且不缓存大包", () => {
+                string name="offline-test-"+Guid.NewGuid().ToString("N")+".zip";
+                string archive=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,name);
+                string file=Path.Combine(root,"offline-input.bin"); File.WriteAllBytes(file,content);
+                var payload=MakeAsset(content,"https://example.invalid"); payload.name="易容 Studio.exe";
+                using(var zip=ZipFile.Open(archive,ZipArchiveMode.Create)) zip.CreateEntryFromFile(file,"FaceSwapStudio/"+payload.name);
+                var package=new Asset{name=name,size=new FileInfo(archive).Length,sha256=Core.Hash(archive),urls=new string[0]};
+                var manifest=new Manifest{protocol=1,offline=true,releaseId="20261024000000",entry=payload.name,files=new[]{payload},package=package};
+                string target=Path.Combine(root,"offline-install");
+                try {
+                    Core.Prepare(target,manifest,CancellationToken.None,quiet);
+                    Check(Core.Verified(Path.Combine(target,payload.name),payload),"离线资源未展开");
+                    Check(!Directory.Exists(Path.Combine(target,"data/cache/bootstrap")),"不应在安装目录缓存完整资源包");
+                    File.WriteAllText(archive,"bad");
+                    Reject(()=>Core.PackagePath(package,root,true,CancellationToken.None,quiet),"损坏离线包未拒绝");
+                    File.Delete(archive);
+                    Reject(()=>Core.PackagePath(package,root,true,CancellationToken.None,quiet),"缺失离线包未拒绝");
+                    package.urls=new[]{"https://example.invalid"};
+                    Reject(()=>Core.Validate(manifest),"离线清单不应允许网络后备");
+                } finally {if(File.Exists(archive)) File.Delete(archive);}
+            });
             Run("应用升级后保留新版并继续校验桌面核心", () => {
                 string directory = Path.Combine(root, "updated"); Directory.CreateDirectory(Path.Combine(directory, "faceswap studio/bridge"));
                 Directory.CreateDirectory(Path.Combine(directory, "updater")); Directory.CreateDirectory(Path.Combine(directory, "faceswap studio/runtime/windows_app/current"));

@@ -21,7 +21,7 @@ using System.Windows.Forms;
 namespace FaceSwapBootstrap {
     public sealed class Asset { public string name; public long size; public string sha256; public string[] urls; }
     public sealed class ComponentChoice { public string id, label; public long size; public int minMemoryMB; public Asset[] files; }
-    public sealed class Manifest { public int protocol; public int componentProtocol; public ComponentChoice[] components; public long musicRuntimeSize, musicArchiveSize; public string musicRuntimeVersion; public string releaseId; public string appVersion; public string appReleaseId; public string publicKey; public string entry; public Asset package, application; public Asset[] files, baseFiles; public string[] applicationFiles; public string applicationEntry; }
+    public sealed class Manifest { public int protocol; public bool offline; public int componentProtocol; public ComponentChoice[] components; public long musicRuntimeSize, musicArchiveSize; public string musicRuntimeVersion; public string releaseId; public string appVersion; public string appReleaseId; public string publicKey; public string entry; public Asset package, application; public Asset[] files, baseFiles; public string[] applicationFiles; public string applicationEntry; }
     public sealed class Status { public string text; public long done; public long total; }
 
     public static class Core {
@@ -59,7 +59,12 @@ namespace FaceSwapBootstrap {
                 if (!names.Add(file.name) || new[] { "data/", "models/", "runtime/" }.Any(p => file.name.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
                     throw new IOException("桌面资源清单包含重复项或用户数据路径");
             }
-            if (!names.Contains(manifest.entry) || manifest.package.urls == null || manifest.package.urls.Length == 0 ||
+            if (!names.Contains(manifest.entry)) throw new IOException("启动器入口无效");
+            if (manifest.offline) {
+                if (manifest.application != null || manifest.package.urls == null || manifest.package.urls.Length != 0 ||
+                    Path.GetFileName(manifest.package.name) != manifest.package.name || !manifest.package.name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                    throw new IOException("离线全量包清单无效");
+            } else if (manifest.package.urls == null || manifest.package.urls.Length == 0 ||
                 manifest.package.urls.Any(u => new Uri(u).Scheme != "https")) throw new IOException("启动器下载地址无效");
             if(manifest.application!=null) {
                 if(manifest.applicationFiles==null || manifest.applicationFiles.Length==0 ||
@@ -151,6 +156,18 @@ namespace FaceSwapBootstrap {
             }
             throw new IOException("魔搭资源下载未完成，已保留下载分片。" + (last == null ? "" : last.Message), last);
         }
+        public static string PackagePath(Asset asset, string cache, bool offline, CancellationToken token, IProgress<Status> progress) {
+            token.ThrowIfCancellationRequested();
+            if (offline) {
+                string local = SafePath(AppDomain.CurrentDomain.BaseDirectory, asset.name);
+                progress.Report(new Status { text = "正在校验离线全量包" });
+                if (!Verified(local, asset)) throw new IOException("离线资源缺失或校验失败，请将安装器与完整的 " + asset.name + " 放在同一目录后重试。");
+                token.ThrowIfCancellationRequested();
+                return local;
+            }
+            Download(asset, cache, token, progress);
+            return SafePath(cache, asset.name);
+        }
         public static void ReplaceFile(string source, string target) {
             if (File.Exists(target)) File.Replace(source, target, null); else File.Move(source, target);
         }
@@ -225,13 +242,13 @@ namespace FaceSwapBootstrap {
                     finally { process.Dispose(); }
                 }
                 string cache = Path.Combine(root, "data", "cache", "bootstrap");
-                Download(manifest.package, cache, token, progress);
+                string package = PackagePath(manifest.package, cache, manifest.offline, token, progress);
                 if(manifest.application!=null) Download(manifest.application,cache,token,progress);
                 string staging = Path.Combine(root, ".desktop-staging-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(staging);
                 try {
                     progress.Report(new Status { text = "正在校验并展开桌面环境" });
-                    Extract(SafePath(cache, manifest.package.name), staging, manifest.application==null?manifest:new Manifest{files=manifest.files.Where(f=>!manifest.applicationFiles.Contains(f.name,StringComparer.OrdinalIgnoreCase)).ToArray()}, token,manifest.application!=null);
+                    Extract(package, staging, manifest.application==null?manifest:new Manifest{files=manifest.files.Where(f=>!manifest.applicationFiles.Contains(f.name,StringComparer.OrdinalIgnoreCase)).ToArray()}, token,manifest.application!=null);
                     if(manifest.application!=null) ExtractApplication(SafePath(cache,manifest.application.name),staging,manifest,token);
                     foreach (Asset file in manifest.files) {
                         token.ThrowIfCancellationRequested();
@@ -677,7 +694,7 @@ namespace FaceSwapBootstrap {
             float filled = (float)(594 * fraction);
             if (filled > 2) using (var shape = Round(new RectangleF(textLayout.Bar.X,textLayout.Bar.Y,filled,5), 2.5f)) using (var brush = new SolidBrush(Accent)) g.FillPath(brush, shape);
             if (total == 0 && view == "working") using (var brush = new SolidBrush(Accent)) g.FillRectangle(brush,textLayout.Bar.X+(float)(pulse*464),textLayout.Bar.Y,130,5);
-            DrawStatusText(g,maintenanceMode ? "程序、环境与模型按可信清单核验" : total > 0 ? String.Format("{0:F1} MB / {1:F1} MB", downloaded / 1048576.0, total / 1048576.0) : "首次联网准备 · 已有资源自动复用",10,Muted,textLayout.Footnote,false);
+            DrawStatusText(g,maintenanceMode ? "程序、环境与模型按可信清单核验" : total > 0 ? String.Format("{0:F1} MB / {1:F1} MB", downloaded / 1048576.0, total / 1048576.0) : manifest.offline ? "全量离线安装 · 环境与现有模型已内置" : "首次联网准备 · 已有资源自动复用",10,Muted,textLayout.Footnote,false);
             }
             string[] steps = maintenanceMode ? new[] { "检查安装", "按需修复", "完成复检" } : new[] { "安装应用", "准备环境", "完成安装" };
             for (int i = 0; i < 3; i++) {

@@ -233,7 +233,7 @@ namespace FaceSwapBootstrap {
                 if(processes.Any(p=>!p.HasExited)) throw new IOException("本目录进程尚未正常退出，未开始替换文件；请退出工作台后重试。");
             } finally { foreach(var process in processes) process.Dispose(); }
         }
-        static string GetPackage(string root, Asset asset, string local, CancellationToken token,IProgress<Status> progress) {
+        static string GetPackage(string root, Asset asset, string local, CancellationToken token,IProgress<Status> progress, bool offline = false) {
             if(!String.IsNullOrEmpty(local)) {
                 if(!Core.Verified(local,asset)) throw new IOException("本地运行包校验失败");
                 return Path.GetFullPath(local);
@@ -241,8 +241,7 @@ namespace FaceSwapBootstrap {
             string adjacent=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,asset.name);
             if(Core.Verified(adjacent,asset)) return adjacent;
             string cache=Safe(root,"data/cache/bootstrap/"+asset.name);
-            Core.Download(asset,Path.GetDirectoryName(cache),token,progress);
-            return cache;
+            return Core.PackagePath(asset,Path.GetDirectoryName(cache),offline,token,progress);
         }
         static Asset[] IntegrationFiles(Asset icon) {
             string self=Assembly.GetExecutingAssembly().Location;
@@ -341,7 +340,7 @@ namespace FaceSwapBootstrap {
                 Func<Asset,bool> fromApplication=f=>manifest.application!=null && appNames.Contains(f.name=="faceswap.ico" || f.name=="faceswap-installer.ico"?"facefusion.ico":f.name);
                 var baseSelected=selected.Where(f=>f.name!="uninstall.exe" && !fromApplication(f)).ToList();
                 var appSelected=selected.Where(f=>fromApplication(f)).ToList();
-                string package=baseSelected.Count==0?null:GetPackage(root,manifest.package,localPackage,token,progress);
+                string package=baseSelected.Count==0?null:GetPackage(root,manifest.package,localPackage,token,progress,manifest.offline);
                 string applicationPackage=appSelected.Count==0?null:GetPackage(root,manifest.application,null,token,progress);
                 if(new DriveInfo(Path.GetPathRoot(work)).AvailableFreeSpace < selected.Sum(f=>f.size)*2+32L*1024*1024)
                     throw new IOException("修复会话所在磁盘空间不足，未开始替换文件。");

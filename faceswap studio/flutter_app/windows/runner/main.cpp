@@ -75,8 +75,23 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // plugins.
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
+  std::wstring mutex_name = kSingleInstanceMutexName;
+  wchar_t isolated[8] = {};
+  if (::GetEnvironmentVariableW(L"FACESWAP_STUDIO_ISOLATED", isolated, 8) > 0 &&
+      std::wstring(isolated) == L"1") {
+    // 与 Python 启动器的隔离验收模式一致，按安装位置区分测试窗口。
+    wchar_t executable_path[32768] = {};
+    if (::GetModuleFileNameW(nullptr, executable_path, 32768) > 0) {
+      unsigned long long identity = 14695981039346656037ULL;
+      for (const wchar_t* p = executable_path; *p; ++p) {
+        identity ^= static_cast<unsigned long long>(*p);
+        identity *= 1099511628211ULL;
+      }
+      mutex_name += L"." + std::to_wstring(identity);
+    }
+  }
   HANDLE single_instance_mutex =
-      CreateMutexW(nullptr, TRUE, kSingleInstanceMutexName);
+      CreateMutexW(nullptr, TRUE, mutex_name.c_str());
   if (single_instance_mutex && GetLastError() == ERROR_ALREADY_EXISTS) {
     Win32Window::NotifyRunningInstance();
     CloseHandle(single_instance_mutex);
