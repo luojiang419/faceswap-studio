@@ -17,6 +17,11 @@ class StudioFrameScrubber extends StatefulWidget {
     required this.onChanged,
     required this.onChangeEnd,
     required this.loadFrame,
+    this.height = 48,
+    this.horizontalPadding = 24,
+    this.sliderKey,
+    this.formatLabel,
+    this.discrete = true,
   });
 
   final String? videoKey;
@@ -25,6 +30,11 @@ class StudioFrameScrubber extends StatefulWidget {
   final ValueChanged<double>? onChanged;
   final ValueChanged<double>? onChangeEnd;
   final Future<Uint8List> Function(int)? loadFrame;
+  final double height;
+  final double horizontalPadding;
+  final Key? sliderKey;
+  final String Function(int)? formatLabel;
+  final bool discrete;
 
   @override
   State<StudioFrameScrubber> createState() => _StudioFrameScrubberState();
@@ -62,7 +72,9 @@ class _StudioFrameScrubberState extends State<StudioFrameScrubber> {
   @override
   void didUpdateWidget(covariant StudioFrameScrubber oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.videoKey != oldWidget.videoKey || !_canInspect) {
+    if (widget.videoKey != oldWidget.videoKey ||
+        widget.max != oldWidget.max ||
+        !_canInspect) {
       _hide(deferFocus: true);
       _cache.clear();
       _dragging = false;
@@ -166,8 +178,10 @@ class _StudioFrameScrubberState extends State<StudioFrameScrubber> {
   void _hover(Offset position) {
     if (_dragging || !_canInspect) return;
     final box = _trackKey.currentContext?.findRenderObject() as RenderBox?;
-    if (box == null || box.size.width <= 48) return;
-    var fraction = ((position.dx - 24) / (box.size.width - 48)).clamp(0.0, 1.0);
+    final padding = widget.horizontalPadding;
+    if (box == null || box.size.width <= padding * 2) return;
+    var fraction = ((position.dx - padding) / (box.size.width - padding * 2))
+        .clamp(0.0, 1.0);
     if (Directionality.of(context) == TextDirection.rtl) {
       fraction = 1 - fraction;
     }
@@ -189,7 +203,9 @@ class _StudioFrameScrubberState extends State<StudioFrameScrubber> {
     if (Directionality.of(context) == TextDirection.rtl) {
       fraction = 1 - fraction;
     }
-    final center = origin.dx + 24 + fraction * (track.size.width - 48);
+    final padding = widget.horizontalPadding;
+    final center =
+        origin.dx + padding + fraction * (track.size.width - padding * 2);
     final left = (center - width / 2).clamp(
       8.0,
       math.max(8.0, overlay.size.width - width - 8),
@@ -265,7 +281,8 @@ class _StudioFrameScrubberState extends State<StudioFrameScrubber> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
-                            '帧 ${_imageFrame ?? _frame} / ${widget.max}',
+                            widget.formatLabel?.call(_imageFrame ?? _frame!) ??
+                                '帧 ${_imageFrame ?? _frame} / ${widget.max}',
                             style: theme.textTheme.labelSmall,
                           ),
                           if (_image != null && _imageFrame != _frame) ...[
@@ -306,18 +323,20 @@ class _StudioFrameScrubberState extends State<StudioFrameScrubber> {
       },
       child: SizedBox(
         key: _trackKey,
-        height: 48,
+        height: widget.height,
         child: SliderTheme(
           data: SliderTheme.of(
             context,
           ).copyWith(showValueIndicator: ShowValueIndicator.never),
           child: Slider(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
+            key: widget.sliderKey,
+            padding: EdgeInsets.symmetric(horizontal: widget.horizontalPadding),
             value: widget.value.clamp(0, widget.max.toDouble()),
             min: 0,
             max: widget.max.toDouble(),
-            divisions: math.max(1, widget.max),
-            semanticFormatterCallback: (value) => '帧 ${value.round()}',
+            divisions: widget.discrete ? math.max(1, widget.max) : null,
+            semanticFormatterCallback: (value) =>
+                widget.formatLabel?.call(value.round()) ?? '帧 ${value.round()}',
             onChangeStart: !_enabled
                 ? null
                 : (value) {

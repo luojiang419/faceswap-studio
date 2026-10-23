@@ -1,3 +1,4 @@
+import 'studio_frame_scrubber.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -74,6 +75,27 @@ class StudioVideoHotkeys extends StatelessWidget {
   );
 }
 
+/// 工作台已导入的视频信息；取帧沿用 Bridge 的只读缩略图接口。
+class StudioVideoFramePreview {
+  const StudioVideoFramePreview({
+    required this.videoKey,
+    required this.frameTotal,
+    required this.loadFrame,
+  });
+
+  final String videoKey;
+  final int frameTotal;
+  final Future<Uint8List> Function(int) loadFrame;
+
+  int frameAt(int milliseconds, Duration duration) =>
+      duration.inMilliseconds <= 0 || frameTotal <= 1
+      ? 0
+      : (milliseconds * frameTotal ~/ duration.inMilliseconds).clamp(
+          0,
+          frameTotal - 1,
+        );
+}
+
 /// 内嵌、独立全屏与视频对比共用的响应式播放控制条。
 class StudioVideoControls extends StatefulWidget {
   const StudioVideoControls({
@@ -85,6 +107,7 @@ class StudioVideoControls extends StatefulWidget {
     this.onFullscreen,
     this.fullscreen = false,
     this.enabled = true,
+    this.framePreview,
     super.key,
   });
 
@@ -96,6 +119,7 @@ class StudioVideoControls extends StatefulWidget {
   final VoidCallback? onFullscreen;
   final bool fullscreen;
   final bool enabled;
+  final StudioVideoFramePreview? framePreview;
 
   @override
   State<StudioVideoControls> createState() => _StudioVideoControlsState();
@@ -103,6 +127,15 @@ class StudioVideoControls extends StatefulWidget {
 
 class _StudioVideoControlsState extends State<StudioVideoControls> {
   Duration? _dragPosition;
+
+  @override
+  void didUpdateWidget(covariant StudioVideoControls oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.framePreview?.videoKey != widget.framePreview?.videoKey ||
+        !widget.enabled) {
+      _dragPosition = null;
+    }
+  }
 
   Future<void> _seek(Duration value) async {
     final target = clampStudioVideoPosition(value, widget.duration);
@@ -122,6 +155,8 @@ class _StudioVideoControlsState extends State<StudioVideoControls> {
     );
     final hasDuration = widget.duration > Duration.zero;
     final canSeek = widget.enabled && hasDuration;
+    final preview = widget.framePreview;
+    final canInspect = preview != null && preview.frameTotal > 0;
     return LayoutBuilder(
       builder: (context, constraints) {
         final wide = constraints.maxWidth >= 360;
@@ -217,31 +252,64 @@ class _StudioVideoControlsState extends State<StudioVideoControls> {
                           overlayRadius: 10,
                         ),
                       ),
-                      child: Slider(
-                        key: const ValueKey('studio-video-progress'),
-                        value: hasDuration
-                            ? position.inMilliseconds.toDouble()
-                            : 0,
-                        max: hasDuration
-                            ? widget.duration.inMilliseconds.toDouble()
-                            : 1,
-                        label: formatStudioVideoTime(position),
-                        semanticFormatterCallback: (value) =>
-                            formatStudioVideoTime(
-                              Duration(milliseconds: value.round()),
+                      child: canInspect
+                          ? StudioFrameScrubber(
+                              videoKey: preview.videoKey,
+                              value: position.inMilliseconds.toDouble(),
+                              max: hasDuration
+                                  ? widget.duration.inMilliseconds
+                                  : 1,
+                              height: 20,
+                              horizontalPadding: 10,
+                              discrete: false,
+                              sliderKey: const ValueKey(
+                                'studio-video-progress',
+                              ),
+                              formatLabel: (value) => formatStudioVideoTime(
+                                Duration(milliseconds: value),
+                              ),
+                              loadFrame: (value) => preview.loadFrame(
+                                preview.frameAt(value, widget.duration),
+                              ),
+                              onChanged: canSeek
+                                  ? (value) => setState(
+                                      () => _dragPosition = Duration(
+                                        milliseconds: value.round(),
+                                      ),
+                                    )
+                                  : null,
+                              onChangeEnd: canSeek
+                                  ? (value) => _seek(
+                                      Duration(milliseconds: value.round()),
+                                    )
+                                  : null,
+                            )
+                          : Slider(
+                              key: const ValueKey('studio-video-progress'),
+                              value: hasDuration
+                                  ? position.inMilliseconds.toDouble()
+                                  : 0,
+                              max: hasDuration
+                                  ? widget.duration.inMilliseconds.toDouble()
+                                  : 1,
+                              label: formatStudioVideoTime(position),
+                              semanticFormatterCallback: (value) =>
+                                  formatStudioVideoTime(
+                                    Duration(milliseconds: value.round()),
+                                  ),
+                              onChanged: canSeek
+                                  ? (value) => setState(
+                                      () => _dragPosition = Duration(
+                                        milliseconds: value.round(),
+                                      ),
+                                    )
+                                  : null,
+                              onChangeEnd: canSeek
+                                  ? (value) => _seek(
+                                      Duration(milliseconds: value.round()),
+                                    )
+                                  : null,
                             ),
-                        onChanged: canSeek
-                            ? (value) => setState(
-                                () => _dragPosition = Duration(
-                                  milliseconds: value.round(),
-                                ),
-                              )
-                            : null,
-                        onChangeEnd: canSeek
-                            ? (value) =>
-                                  _seek(Duration(milliseconds: value.round()))
-                            : null,
-                      ),
                     ),
                   ),
                 ],

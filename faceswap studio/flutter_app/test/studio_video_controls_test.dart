@@ -1,10 +1,186 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:ui' as ui;
+
+import 'package:faceswap_studio/shared/widgets/studio_hover_focus.dart';
 import 'package:faceswap_studio/app/theme/studio_theme.dart';
 import 'package:faceswap_studio/shared/widgets/studio_video_controls.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  late Uint8List thumbnail;
+  setUpAll(() async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    await (FontLoader('Microsoft YaHei UI')..addFont(
+          Future.value(
+            ByteData.sublistView(
+              File('C:/Windows/Fonts/msyh.ttc').readAsBytesSync(),
+            ),
+          ),
+        ))
+        .load();
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    canvas.drawRect(
+      const Rect.fromLTWH(0, 0, 320, 180),
+      Paint()..color = const Color(0xFF7199B0),
+    );
+    canvas.drawCircle(
+      const Offset(250, 45),
+      22,
+      Paint()..color = const Color(0xFFFFCA8F),
+    );
+    canvas.drawPath(
+      Path()
+        ..moveTo(0, 180)
+        ..lineTo(100, 55)
+        ..lineTo(210, 180)
+        ..close(),
+      Paint()..color = const Color(0xFF3B635F),
+    );
+    final picture = recorder.endRecording();
+    final rendered = await picture.toImage(320, 180);
+    thumbnail = (await rendered.toByteData(
+      format: ui.ImageByteFormat.png,
+    ))!.buffer.asUint8List();
+    rendered.dispose();
+    picture.dispose();
+  });
+  test('播放时间映射到原视频帧且首尾不越界', () {
+    final preview = StudioVideoFramePreview(
+      videoKey: 'target.mp4',
+      frameTotal: 600,
+      loadFrame: (_) async => Uint8List(0),
+    );
+    expect(preview.frameAt(0, const Duration(seconds: 20)), 0);
+    expect(preview.frameAt(10000, const Duration(seconds: 20)), 300);
+    expect(preview.frameAt(20000, const Duration(seconds: 20)), 599);
+    expect(preview.frameAt(-100, const Duration(seconds: 20)), 0);
+    expect(preview.frameAt(30000, const Duration(seconds: 20)), 599);
+    expect(preview.frameAt(10000, Duration.zero), 0);
+  });
+
+  testWidgets('待换脸播放条悬停取帧、松开仅跳转一次、换片清除旧浮层', (tester) async {
+    final image = thumbnail;
+    final requests = <int>[];
+    final seeks = <Duration>[];
+    Completer<Uint8List>? gate;
+    var video = 'target.mp4';
+    var enabled = true;
+    late StateSetter update;
+    final captureKey = GlobalKey();
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: captureKey,
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: StudioTheme.dark(),
+          home: StudioHoverFocus(
+            child: Scaffold(
+              body: StatefulBuilder(
+                builder: (context, setState) {
+                  update = setState;
+                  return Center(
+                    child: SizedBox(
+                      width: 300,
+                      child: StudioVideoControls(
+                        position: const Duration(seconds: 4),
+                        duration: const Duration(seconds: 20),
+                        playing: false,
+                        enabled: enabled,
+                        onTogglePlayback: () {},
+                        onSeek: (value) async => seeks.add(value),
+                        framePreview: StudioVideoFramePreview(
+                          videoKey: video,
+                          frameTotal: 600,
+                          loadFrame: (frame) {
+                            requests.add(frame);
+                            return gate?.future ?? Future.value(image);
+                          },
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    final slider = find.byKey(const ValueKey('studio-video-progress'));
+    final popup = find.byKey(const ValueKey('frame-scrub-thumbnail'));
+    expect(tester.getSize(slider).height, 20);
+    final rect = tester.getRect(slider);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    await mouse.moveTo(rect.center);
+    await tester.pump(const Duration(milliseconds: 80));
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(requests.last, 300);
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pump();
+    await tester.runAsync(() async {
+      final boundary =
+          captureKey.currentContext!.findRenderObject()
+              as RenderRepaintBoundary;
+      final rendered = await boundary.toImage();
+      final bytes = await rendered.toByteData(format: ui.ImageByteFormat.png);
+      final output = File('build/target-video-scrub-preview.png');
+      output.parent.createSync(recursive: true);
+      output.writeAsBytesSync(bytes!.buffer.asUint8List());
+      rendered.dispose();
+    });
+    expect(
+      find.descendant(of: popup, matching: find.text('00:10')),
+      findsOneWidget,
+    );
+    expect(seeks, isEmpty);
+    await mouse.moveTo(Offset(rect.right - 1, rect.center.dy));
+    await tester.pump(const Duration(milliseconds: 80));
+    await tester.pump();
+    expect(requests.last, 599);
+    await mouse.moveTo(Offset.zero);
+    await tester.pump();
+    final drag = await tester.startGesture(rect.center);
+    await drag.moveTo(Offset(rect.right - 15, rect.center.dy));
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(seeks, isEmpty);
+    await drag.up();
+    await tester.pump();
+    expect(seeks, hasLength(1));
+    expect(seeks.single.inMilliseconds, greaterThan(18000));
+    expect(popup, findsNothing);
+    gate = Completer<Uint8List>();
+    await mouse.moveTo(Offset(rect.left + 30, rect.center.dy));
+    await tester.pump(const Duration(milliseconds: 80));
+    update(() => video = 'replacement.mp4');
+    await tester.pump();
+    gate.complete(image);
+    await tester.pump();
+    expect(popup, findsNothing);
+    gate = null;
+    await mouse.moveTo(rect.center);
+    await tester.pump(const Duration(milliseconds: 80));
+    await tester.pump();
+    expect(popup, findsOneWidget);
+    update(() => enabled = false);
+    await tester.pump();
+    await tester.pump();
+    expect(popup, findsNothing);
+    expect(tester.widget<Slider>(slider).onChanged, isNull);
+    await mouse.removePointer();
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
+
   test('进度边界与小时格式', () {
     expect(formatStudioVideoTime(const Duration(seconds: 3661)), '1:01:01');
     expect(formatStudioVideoTime(const Duration(seconds: -1)), '00:00');

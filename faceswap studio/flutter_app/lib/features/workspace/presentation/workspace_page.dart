@@ -1,3 +1,4 @@
+import 'package:faceswap_studio/shared/widgets/studio_video_controls.dart';
 import 'package:faceswap_studio/app/theme/studio_depth.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -1424,6 +1425,20 @@ class _NativeWorkbenchPane extends StatelessWidget {
         final targetCard = _WorkspaceDraftCard(
           compact: compact,
           title: '待换脸视频',
+          framePreview:
+              bridgeOnline &&
+                  currentDraft.targetPath != null &&
+                  (currentDraft.targetVideoFrameTotal ?? 0) > 0
+              ? StudioVideoFramePreview(
+                  videoKey: currentDraft.targetPath!,
+                  frameTotal: currentDraft.targetVideoFrameTotal!,
+                  loadFrame: (frame) =>
+                      BridgeClient().getWorkspaceFrameThumbnail(
+                        currentDraft.targetPath!,
+                        frame,
+                      ),
+                )
+              : null,
           videoDrop: true,
           onDropFiles: bridgeOnline && !actionBusy && !targetImporting
               ? onDropTargetFiles
@@ -1599,6 +1614,7 @@ class _WorkspaceDraftCard extends StatelessWidget {
     this.loading,
     this.imageLoading,
     this.videoDrop = false,
+    this.framePreview,
     this.onDropFiles,
     required this.title,
     required this.subtitle,
@@ -1617,6 +1633,7 @@ class _WorkspaceDraftCard extends StatelessWidget {
   final Widget? loading;
   final Widget? imageLoading;
   final bool videoDrop;
+  final StudioVideoFramePreview? framePreview;
   final Future<void> Function(List<XFile>)? onDropFiles;
   final String title;
   final String subtitle;
@@ -1704,6 +1721,7 @@ class _WorkspaceDraftCard extends StatelessWidget {
                           (mediaType == 'video' && filePath != null
                               ? StudioInlineVideoPlayer(
                                   filePath: filePath!,
+                                  framePreview: framePreview,
                                   thumbnailPath: thumbnailPath,
                                   fit: BoxFit.contain,
                                   onOpenFullscreen: onOpenPreview,

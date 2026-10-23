@@ -606,6 +606,7 @@ Future<void> _showStudioVideoFullscreen(
   String? title,
   Player? player,
   VideoController? controller,
+  StudioVideoFramePreview? framePreview,
 }) async {
   await defaultEnterNativeFullscreen();
   try {
@@ -618,6 +619,7 @@ Future<void> _showStudioVideoFullscreen(
         title: title,
         sharedPlayer: player,
         sharedController: controller,
+        framePreview: framePreview,
       ),
     );
   } finally {
@@ -650,6 +652,7 @@ Future<void> showStudioVideoComparisonViewer(
 
 class _StudioPlayerTransport extends StatelessWidget {
   const _StudioPlayerTransport({
+    this.framePreview,
     required this.player,
     required this.onTogglePlayback,
     required this.onSeek,
@@ -659,6 +662,7 @@ class _StudioPlayerTransport extends StatelessWidget {
   });
 
   final Player? player;
+  final StudioVideoFramePreview? framePreview;
   final VoidCallback onTogglePlayback;
   final Future<void> Function(Duration) onSeek;
   final VoidCallback? onFullscreen;
@@ -684,6 +688,7 @@ class _StudioPlayerTransport extends StatelessWidget {
           onSeek: onSeek,
           onFullscreen: onFullscreen,
           fullscreen: fullscreen,
+          framePreview: framePreview,
         ),
       ),
     ),
@@ -693,6 +698,7 @@ class _StudioPlayerTransport extends StatelessWidget {
 class StudioInlineVideoPlayer extends StatefulWidget {
   const StudioInlineVideoPlayer({
     super.key,
+    this.framePreview,
     required this.filePath,
     this.thumbnailPath,
     this.fit = BoxFit.cover,
@@ -701,6 +707,7 @@ class StudioInlineVideoPlayer extends StatefulWidget {
   });
 
   final String filePath;
+  final StudioVideoFramePreview? framePreview;
   final String? thumbnailPath;
   final BoxFit fit;
   final VoidCallback? onOpenFullscreen;
@@ -898,6 +905,7 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
         filePath: widget.filePath,
         player: player,
         controller: _controller,
+        framePreview: widget.framePreview,
       );
     } finally {
       if (mounted) {
@@ -978,6 +986,7 @@ class _StudioInlineVideoPlayerState extends State<StudioInlineVideoPlayer> {
             bottom: 6,
             child: _StudioPlayerTransport(
               player: player,
+              framePreview: _fullscreenOpen ? null : widget.framePreview,
               enabled: !_opening && !_waitingForFirstFrame && !_failed,
               onTogglePlayback: () {
                 _focusNode.requestFocus();
@@ -1692,6 +1701,7 @@ class _StudioImageComparisonViewerDialogState
 
 class _StudioVideoViewerDialog extends StatefulWidget {
   const _StudioVideoViewerDialog({
+    this.framePreview,
     required this.filePath,
     this.title,
     this.sharedPlayer,
@@ -1699,6 +1709,7 @@ class _StudioVideoViewerDialog extends StatefulWidget {
   });
 
   final String filePath;
+  final StudioVideoFramePreview? framePreview;
   final String? title;
   final Player? sharedPlayer;
   final VideoController? sharedController;
@@ -1779,6 +1790,7 @@ class _StudioVideoViewerDialogState extends State<_StudioVideoViewerDialog> {
                 constraints: const BoxConstraints(maxWidth: 760),
                 child: _StudioPlayerTransport(
                   player: _player,
+                  framePreview: widget.framePreview,
                   enabled: !_failed,
                   onTogglePlayback: () => _player.playOrPause(),
                   onSeek: _seek,
